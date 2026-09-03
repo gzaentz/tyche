@@ -31,6 +31,7 @@ ROUTE_OUTCOME_RECEIPT_STATUSES = {
     "route_not_connected": {"config_error"},
     "timeout_unknown": {"timeout"},
 }
+CONTACT_FIELD_NAMES = {"email", "phone"}
 
 
 def _company_key(row: Any) -> Optional[str]:
@@ -71,6 +72,125 @@ def _normalized_role(value: Any) -> Optional[str]:
     if not isinstance(value, str) or not value.strip():
         return None
     return " ".join(value.casefold().split())
+
+
+def _effective_contact_fields(
+    request: dict[str, Any], errors: list[str]
+) -> set[str]:
+    """Return normalized fields, applying the default email requirement."""
+
+    if "contact_fields" not in request:
+        return {"email"}
+    fields = request.get("contact_fields")
+    if not isinstance(fields, list):
+        errors.append("request.contact_fields must be an array")
+        return set()
+    normalized: list[str] = []
+    for index, field in enumerate(fields):
+        if not isinstance(field, str) or field not in CONTACT_FIELD_NAMES:
+            errors.append(
+                f"request.contact_fields[{index}] must be email or phone"
+            )
+            continue
+        normalized.append(field)
+    if len(normalized) != len(set(normalized)):
+        errors.append("request.contact_fields must not contain duplicates")
+    return set(normalized)
+
+
+def _nonempty_text(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def _validate_email_receipt(
+    contact: dict[str, Any],
+    contact_path: str,
+    routes_by_id: dict[str, list[dict[str, Any]]],
+    errors: list[str],
+) -> None:
+    """Require a determinate Deepline ZeroBounce receipt for one stored email."""
+
+    email = _nonempty_text(contact.get("email"))
+    receipt = contact.get("email_validation")
+    if email is None:
+        if receipt is not None:
+            errors.append(f"{contact_path}.email_validation requires a stored email")
+        return
+    if not isinstance(receipt, dict):
+        errors.append(
+            f"{contact_path}.email requires a Deepline ZeroBounce email_validation receipt"
+        )
+        return
+
+    receipt_email = _nonempty_text(receipt.get("email"))
+    if receipt_email is None:
+        errors.append(f"{contact_path}.email_validation.email is required")
+    elif receipt_email.casefold() != email.casefold():
+        errors.append(
+            f"{contact_path}.email_validation.email must match the contact email"
+        )
+
+    status = _nonempty_text(receipt.get("status"))
+    if status is None:
+        errors.append(
+            f"{contact_path}.email_validation.status is unresolved or missing"
+        )
+    elif status.casefold() == "invalid":
+        errors.append(f"{contact_path}.email_validation.status is invalid")
+
+    source = receipt.get("source")
+    if not isinstance(source, dict):
+        errors.append(f"{contact_path}.email_validation.source is required")
+        return
+    if str(source.get("provider", "")).strip().casefold() != "deepline":
+        errors.append(
+            f"{contact_path}.email_validation.source.provider must be deepline"
+        )
+    if str(source.get("validator", "")).strip().casefold() != "zerobounce":
+        errors.append(
+            f"{contact_path}.email_validation.source.validator must be zerobounce"
+        )
+    operation = _nonempty_text(source.get("operation"))
+    if operation != "execute":
+        errors.append(
+            f"{contact_path}.email_validation.source.operation must be execute"
+        )
+    tool = _nonempty_text(source.get("tool"))
+    if tool is None:
+        errors.append(f"{contact_path}.email_validation.source.tool is required")
+    route_id = _nonempty_text(source.get("route_id"))
+    if route_id is None:
+        errors.append(f"{contact_path}.email_validation.source.route_id is required")
+        return
+
+    matching_routes = routes_by_id.get(route_id, [])
+    if len(matching_routes) != 1:
+        errors.append(
+            f"{contact_path}.email_validation.source.route_id must identify one route receipt"
+        )
+        return
+    route = matching_routes[0]
+    if route.get("provider") != "deepline":
+        errors.append(f"email validation route {route_id} must use deepline")
+    if route.get("phase") != "email_validation":
+        errors.append(f"email validation route {route_id} has the wrong phase")
+    if route.get("operation") != "execute":
+        errors.append(f"email validation route {route_id} must use execute")
+    if tool is not None and route.get("tool") != tool:
+        errors.append(
+            f"{contact_path}.email_validation.source.tool must match route {route_id}"
+        )
+    if route.get("provider_status") not in {"ok", "partial"}:
+        errors.append(
+            f"email validation route {route_id} is unresolved or unsuccessful"
+        )
+    paid_calls = route.get("paid_calls")
+    if not isinstance(paid_calls, int) or isinstance(paid_calls, bool) or paid_calls < 1:
+        errors.append(
+            f"email validation route {route_id} must record its paid Deepline call"
+        )
 
 
 def _number(value: Any) -> bool:
@@ -260,9 +380,16 @@ def validate_run(document: Any) -> list[str]:
                     )
 
     accepted_domains: list[str] = []
-    requested_fields = request.get("contact_fields", [])
-    if not isinstance(requested_fields, list):
-        requested_fields = []
+    requested_fields = _effective_contact_fields(request, errors)
+    route_rows = document.get("routes", [])
+    routes_by_id: dict[str, list[dict[str, Any]]] = {}
+    if isinstance(route_rows, list):
+        for route in route_rows:
+            if not isinstance(route, dict):
+                continue
+            route_id = route.get("route_id")
+            if isinstance(route_id, str) and route_id.strip():
+                routes_by_id.setdefault(route_id.strip(), []).append(route)
     requested_roles = request.get("requested_roles")
     normalized_requested_roles = {
         role
@@ -313,15 +440,18 @@ def validate_run(document: Any) -> list[str]:
                     f"{contact_path}.requested_role is not in request.requested_roles"
                 )
             role_group = contact.get("role_group")
-            if role_group is None:
-                continue
-            if role_group not in {"primary", "secondary"}:
-                errors.append(f"{contact_path}.role_group is invalid")
-            elif grouped_roles is not None and requested_role not in normalized_groups.get(
-                role_group, set()
-            ):
-                errors.append(
-                    f"{contact_path} requested_role does not match role_group"
+            if role_group is not None:
+                if role_group not in {"primary", "secondary"}:
+                    errors.append(f"{contact_path}.role_group is invalid")
+                elif grouped_roles is not None and requested_role not in normalized_groups.get(
+                    role_group, set()
+                ):
+                    errors.append(
+                        f"{contact_path} requested_role does not match role_group"
+                    )
+            if "email" in contact or "email_validation" in contact:
+                _validate_email_receipt(
+                    contact, contact_path, routes_by_id, errors
                 )
         for field in requested_fields:
             value = primary.get(field)

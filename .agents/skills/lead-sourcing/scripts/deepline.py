@@ -316,6 +316,42 @@ def _artifact_refs(row: Dict[str, Any]) -> Any:
     return None
 
 
+def _is_email_validation_record(value: Any) -> bool:
+    """Return whether a row looks like a scalar email-validation result."""
+
+    if not isinstance(value, dict):
+        return False
+    email = value.get("address")
+    if not isinstance(email, str) or not email.strip():
+        person_fields = _CONTACT_RECORD_KEYS | {
+            "contact_url",
+            "person_url",
+            "profile_url",
+            "contact_title",
+            "person_title",
+            "job_title",
+            "current_title",
+        }
+        if any(field in value for field in person_fields):
+            return False
+        email = value.get("email")
+    status = value.get("status")
+    if not isinstance(email, str) or not email.strip():
+        return False
+    if not isinstance(status, str) or not status.strip():
+        return False
+    normalized = status.strip().lower().replace("-", "_")
+    return normalized not in _STATUS_WORDS and normalized not in {
+        "success",
+        "succeeded",
+        "complete",
+        "completed",
+        "failed",
+        "failure",
+        "error",
+    }
+
+
 def normalize_evidence(
     row: Any,
     provider: str = "deepline",
@@ -326,6 +362,7 @@ def normalize_evidence(
 
     source: Dict[str, Any] = row if isinstance(row, dict) else {"value": row}
     result: Dict[str, Any] = redact(source)
+    is_email_validation = _is_email_validation_record(source)
     basic_info = source.get("basic_info")
     basic_info = basic_info if isinstance(basic_info, dict) else {}
     positions = source.get("currentPositions")
@@ -456,7 +493,7 @@ def normalize_evidence(
             "emailAddress",
         )
     )
-    has_contact = not company_entity and any(
+    has_contact = not company_entity and not is_email_validation and any(
         value is not None for value in (contact, contact_url, contact_title, contact_email)
     )
     if has_contact:
@@ -467,8 +504,14 @@ def normalize_evidence(
         result["contact_title"] = contact_title
         result["current_title"] = contact_title
         result["contact_email"] = contact_email
+    if is_email_validation:
+        result["email"] = _text(_first(source, "address", "email"))
+        result["email_status"] = _text(source.get("status"))
+        result["email_sub_status"] = _text(source.get("sub_status"))
     if entity_type:
         result["entity_type"] = entity_type
+    elif is_email_validation:
+        result["entity_type"] = "email_validation"
     elif has_contact:
         # Only infer an entity type when contact-shaped fields make the intent
         # clear. The caller may provide any explicit wrapper label instead.
@@ -569,7 +612,36 @@ def _records(value: Any) -> List[Any]:
     scalar = _scalar_result(value)
     if scalar is not None:
         return [scalar]
+    if _is_email_validation_record(value):
+        return [value]
     return []
+
+
+def _email_validation_output(
+    parsed: Any, tool: str, limit: int
+) -> Optional[Dict[str, Any]]:
+    """Preserve explicit validator results even when its default verdict drops them."""
+
+    records = [
+        record
+        for record in _records(parsed)[:limit]
+        if _is_email_validation_record(record)
+    ]
+    if not records:
+        return None
+    evidence = [
+        normalize_evidence(record, "deepline", tool, "email_validation")
+        for record in records
+    ]
+    return {
+        "status": "ok",
+        "provider": "deepline",
+        "operation": "execute",
+        "tool": tool,
+        "entity_type": "email_validation",
+        "results": evidence,
+        "evidence": evidence,
+    }
 
 
 def _envelope_status(value: Any) -> Optional[str]:
@@ -687,6 +759,8 @@ def _known_envelope(value: Any) -> bool:
             "evidence_url",
         )
     ) or any(key in value for key in _CONTACT_RECORD_KEYS):
+        return True
+    if _is_email_validation_record(value):
         return True
     for key in ("extractedLists", "extracted_lists"):
         if key in value:
@@ -935,6 +1009,10 @@ def _execute_output(
     entity_type: Optional[str] = None,
     limit: int = 10,
 ) -> Dict[str, Any]:
+    if entity_type and entity_type.strip().casefold() == "email_validation":
+        validation = _email_validation_output(parsed, tool, limit)
+        if validation is not None:
+            return validation
     records = _records(parsed)[:limit]
     status = _envelope_status(parsed)
     if not _known_envelope(parsed):
@@ -1042,6 +1120,16 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
         except ValueError:
             parsed = None
     if returncode != 0:
+        if (
+            parsed is not None
+            and str(request.get("entity_type", "")).strip().casefold()
+            == "email_validation"
+        ):
+            validation = _email_validation_output(
+                parsed, request["tool"], request["limit"]
+            )
+            if validation is not None:
+                return validation, 0
         # A current CLI can print an update notice before a structured provider
         # error. Prefer that parsed error over notice/help text. Otherwise,
         # prefer stderr because stdout help examples can contain status words.

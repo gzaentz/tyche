@@ -59,8 +59,53 @@ try {
 
 
 def accepted_document(contact_fields: list[str] | None = None) -> dict:
+    effective_fields = ["email"] if contact_fields is None else contact_fields
+    request = {} if contact_fields is None else {"contact_fields": contact_fields}
+    contact = {
+        "full_name": "Ada Example",
+        "current_title": "Director of Supply Chain",
+        "contact_url": "https://example.com/team/ada",
+        "linkedin_url": "https://www.linkedin.com/in/ada-example",
+        "city": "Columbus",
+        "state": "Ohio",
+        "country": "United States",
+    }
+    routes = []
+    if "email" in effective_fields:
+        contact.update(
+            {
+                "email": "ada@example.com",
+                "email_validation": {
+                    "email": "ada@example.com",
+                    "status": "valid",
+                    "sub_status": None,
+                    "source": {
+                        "provider": "deepline",
+                        "validator": "zerobounce",
+                        "operation": "execute",
+                        "tool": "runtime-email-validator",
+                        "route_id": "email-validation-1",
+                    },
+                },
+            }
+        )
+        routes.append(
+            {
+                "route_id": "email-validation-1",
+                "phase": "email_validation",
+                "provider": "deepline",
+                "operation": "execute",
+                "tool": "runtime-email-validator",
+                "provider_status": "ok",
+                "paid_calls": 1,
+            }
+        )
+    if "phone" in effective_fields:
+        contact["phone"] = "+1 555 010 0200"
+
     return {
-        "request": {"contact_fields": contact_fields or []},
+        "request": request,
+        "routes": routes,
         "accepted": [
             {
                 "company": {
@@ -84,17 +129,7 @@ def accepted_document(contact_fields: list[str] | None = None) -> dict:
                     ),
                     "evidence_url": "https://example.com/news/wms-project",
                 },
-                "primary_contact": {
-                    "full_name": "Ada Example",
-                    "email": "ada@example.com",
-                    "current_title": "Director of Supply Chain",
-                    "contact_url": "https://example.com/team/ada",
-                    "linkedin_url": "https://www.linkedin.com/in/ada-example",
-                    "city": "Columbus",
-                    "state": "Ohio",
-                    "country": "United States",
-                    "phone": "+1 555 010 0200",
-                },
+                "primary_contact": contact,
             }
         ],
     }
@@ -210,11 +245,18 @@ class ExportXlsxTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload, {"columns": EXPECTED_COLUMNS, "rows": []})
 
-    def test_unrequested_email_and_phone_stay_blank(self):
-        result = self.run_rows_json(accepted_document())
+    def test_explicitly_unrequested_email_and_phone_stay_blank(self):
+        result = self.run_rows_json(accepted_document([]))
         self.assertEqual(result.returncode, 0, result.stderr)
         row = json.loads(result.stdout)["rows"][0]
         self.assertEqual(row["Email"], "")
+        self.assertEqual(row["Phone"], "")
+
+    def test_omitted_contact_fields_defaults_to_validated_email(self):
+        result = self.run_rows_json(accepted_document())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = json.loads(result.stdout)["rows"][0]
+        self.assertEqual(row["Email"], "ada@example.com")
         self.assertEqual(row["Phone"], "")
 
     def test_requested_missing_contact_field_fails_closed(self):
@@ -224,8 +266,36 @@ class ExportXlsxTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("primary_contact.email is required", result.stderr)
 
+    def test_missing_or_invalid_email_validation_fails_closed(self):
+        missing = accepted_document()
+        missing["accepted"][0]["primary_contact"].pop("email_validation")
+        result = self.run_rows_json(missing)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("requires a Deepline ZeroBounce receipt", result.stderr)
+
+        invalid = accepted_document()
+        invalid["accepted"][0]["primary_contact"]["email_validation"]["status"] = "INVALID"
+        result = self.run_rows_json(invalid)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("status is invalid", result.stderr)
+
+        unaccounted = accepted_document()
+        unaccounted["routes"][0]["paid_calls"] = 0
+        result = self.run_rows_json(unaccounted)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("successful paid Deepline validation route", result.stderr)
+
+    def test_every_explicit_non_invalid_zerobounce_status_exports(self):
+        for status in ("valid", "catch-all", "spamtrap", "abuse", "do_not_mail", "unknown"):
+            with self.subTest(status=status):
+                document = accepted_document()
+                document["accepted"][0]["primary_contact"]["email_validation"]["status"] = status
+                result = self.run_rows_json(document)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["rows"][0]["Email"], "ada@example.com")
+
     def test_missing_optional_values_stay_blank(self):
-        document = accepted_document()
+        document = accepted_document([])
         company = document["accepted"][0]["company"]
         contact = document["accepted"][0]["primary_contact"]
         for key in (

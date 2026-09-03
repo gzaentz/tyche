@@ -362,6 +362,75 @@ class ProviderScriptTests(unittest.TestCase):
         self.assertEqual(summary_body["results"][0]["count"], 7)
         self.assertEqual(summary_body["results"][0]["total"], 12)
 
+    def test_deepline_normalizes_scalar_email_validation_without_treating_status_as_route_failure(self):
+        response = {
+            "status": "completed",
+            "toolResponse": {
+                "raw": {
+                    "address": "ada@example.com",
+                    "status": "invalid",
+                    "sub_status": "mailbox_not_found",
+                    "processed_at": "2026-09-03 12:00:00",
+                }
+            },
+        }
+        body = DEEPLINE._execute_output(
+            response, "runtime-email-validator", "email_validation"
+        )
+
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(len(body["results"]), 1)
+        row = body["results"][0]
+        self.assertEqual(row["email"], "ada@example.com")
+        self.assertEqual(row["email_status"], "invalid")
+        self.assertEqual(row["email_sub_status"], "mailbox_not_found")
+        self.assertEqual(row["entity_type"], "email_validation")
+        self.assertNotIn("contact", row)
+
+        contact_row = {
+            "full_name": "Ada Example",
+            "job_title": "VP Sales",
+            "email": "ada@example.com",
+            "status": "valid",
+        }
+        contact = DEEPLINE.normalize_evidence(contact_row, entity_type="contact")
+        self.assertEqual(contact["full_name"], "Ada Example")
+        self.assertEqual(contact["current_title"], "VP Sales")
+        self.assertEqual(contact["entity_type"], "contact")
+
+    def test_deepline_keeps_explicit_zerobounce_status_when_default_verdict_fails(self):
+        response = json.dumps(
+            {
+                "status": "failed",
+                "error": {"message": "default send policy rejected the address"},
+                "toolResponse": {
+                    "raw": {
+                        "address": "ada@example.com",
+                        "status": "catch-all",
+                        "sub_status": None,
+                    }
+                },
+            }
+        )
+        with mock.patch.object(
+            DEEPLINE.subprocess,
+            "run",
+            return_value=FakeProcess(response, returncode=1),
+        ):
+            body, code = DEEPLINE.run(
+                {
+                    "operation": "execute",
+                    "tool": "runtime-email-validator",
+                    "entity_type": "email_validation",
+                    "payload": {"email": "ada@example.com"},
+                    "limit": 1,
+                }
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["results"][0]["email_status"], "catch-all")
+
     def test_deepline_non_numeric_count_shape_remains_schema_error(self):
         body = DEEPLINE._execute_output(
             {"toolResponse": {"raw": {"count": "unknown"}}},

@@ -36,11 +36,17 @@ The JSON Schema is draft 2020-12. A run directory is
 6. Accepted companies are unique by lower-case canonical domain with a leading
    `www.` removed. A contact may appear once per accepted company. A backup is
    not a second primary.
-7. `email` and `phone` are absent from JSON contact objects unless the input
-   `contact_fields` requests them. When requested, every accepted primary
-   contact must contain a non-empty valid value; otherwise the company remains
-   unresolved. In the workbook they are blank unless requested. Do not perform
-   the lookup before the identity/current-role gate.
+7. `contact_fields` defaults to `["email"]`. An explicit empty array opts out
+   of contact data, and an explicit `["phone"]` requests only a phone number.
+   Fields outside the effective request are absent from JSON contact objects.
+   Every accepted primary contact must contain each requested field; otherwise
+   the company remains unresolved. Every stored email must have a matching
+   Deepline ZeroBounce validation receipt. Only an explicit ZeroBounce status
+   of `invalid` fails the email gate; every other explicit status passes. A
+   missing status, missing receipt, failed call, or uncertain provider outcome
+   is unresolved. In the workbook unrequested fields are blank. Do not perform
+   contact-data lookup or email validation before the identity/current-role
+   gate.
 8. `target_count` is the completion condition. After account or contact
    attrition, source one replacement from a changed route while the accepted
    count is short and the route frontier is actionable. Do not prefetch or
@@ -107,7 +113,7 @@ the schema and must be applied before provider work.
       "type": "array",
       "uniqueItems": true,
       "items": {"enum": ["email", "phone"]},
-      "default": []
+      "default": ["email"]
     },
     "budget": {"$ref": "#/$defs/input_budget"},
     "run_id": {
@@ -331,6 +337,29 @@ top-level result list or hide rejected/unresolved rows in a count.
         "source": {"$ref": "#/$defs/source"}
       }
     },
+    "email_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email", "status", "source"],
+      "properties": {
+        "email": {"type": "string", "format": "email", "minLength": 3},
+        "status": {"type": "string", "minLength": 1},
+        "sub_status": {"type": ["string", "null"]},
+        "processed_at": {"type": ["string", "null"]},
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "validator", "operation", "tool", "route_id"],
+          "properties": {
+            "provider": {"const": "deepline"},
+            "validator": {"const": "zerobounce"},
+            "operation": {"const": "execute"},
+            "tool": {"type": "string", "minLength": 1},
+            "route_id": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
     "contact": {
       "type": "object",
       "additionalProperties": false,
@@ -354,6 +383,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "evidence_text": {"type": "string", "minLength": 1},
         "source": {"$ref": "#/$defs/source"},
         "email": {"type": "string", "format": "email", "minLength": 3},
+        "email_validation": {"$ref": "#/$defs/email_validation"},
         "phone": {"type": "string", "minLength": 3}
       }
     },
@@ -381,6 +411,8 @@ top-level result list or hide rejected/unresolved rows in a count.
         "requested_role": {"type": ["string", "null"]},
         "full_name": {"type": ["string", "null"]},
         "current_title": {"type": ["string", "null"]},
+        "email": {"type": ["string", "null"]},
+        "email_validation": {"anyOf": [{"$ref": "#/$defs/email_validation"}, {"type": "null"}]},
         "signal": {"type": ["string", "null"]},
         "evidence_url": {"anyOf": [{"$ref": "#/$defs/url"}, {"type": "null"}]},
         "provider": {"type": ["string", "null"]},
@@ -389,7 +421,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       }
     },
     "reason_code": {
-      "enum": ["explicit_exclusion", "not_icp_fit", "stale_signal", "missing_account_evidence", "invalid_evidence_url", "invalid_evidence_date", "search_result_only", "profile_only", "duplicate_domain", "identity_conflict", "missing_name", "missing_current_title", "role_mismatch", "current_role_unverified", "company_mismatch", "missing_contact_evidence", "stale_contact_evidence", "duplicate_contact", "no_current_role_contact", "contact_target_shortfall", "route_not_connected", "budget_exhausted", "timeout_unknown", "provider_status", "gate_not_reached"]
+      "enum": ["explicit_exclusion", "not_icp_fit", "stale_signal", "missing_account_evidence", "invalid_evidence_url", "invalid_evidence_date", "search_result_only", "profile_only", "duplicate_domain", "identity_conflict", "missing_name", "missing_current_title", "role_mismatch", "current_role_unverified", "company_mismatch", "missing_contact_evidence", "stale_contact_evidence", "duplicate_contact", "missing_email", "email_invalid", "email_validation_unresolved", "no_current_role_contact", "contact_target_shortfall", "route_not_connected", "budget_exhausted", "timeout_unknown", "provider_status", "gate_not_reached"]
     },
     "outcome_row": {
       "type": "object",
@@ -411,7 +443,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "required": ["route_id", "phase", "hypothesis", "provider", "operation", "request_summary", "pilot_max_rows", "paid_calls", "rows_returned", "rows_usable", "provider_status", "cost_credits"],
       "properties": {
         "route_id": {"type": "string", "minLength": 1},
-        "phase": {"enum": ["account_discovery", "account_verification", "contact_discovery", "contact_verification"]},
+        "phase": {"enum": ["account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"]},
         "hypothesis": {"type": "string", "minLength": 1},
         "provider": {"enum": ["deepline", "scrapingdog", "public_web"]},
         "operation": {"type": "string", "minLength": 1},
@@ -432,7 +464,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "required": ["route_id", "phase", "provider", "operation", "request_summary", "state", "reason"],
       "properties": {
         "route_id": {"type": "string", "minLength": 1},
-        "phase": {"enum": ["account_discovery", "account_verification", "contact_discovery", "contact_verification"]},
+        "phase": {"enum": ["account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"]},
         "provider": {"enum": ["deepline", "scrapingdog", "public_web"]},
         "operation": {"type": "string", "minLength": 1},
         "request_summary": {"type": "string", "minLength": 1},
@@ -561,7 +593,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "contact_role_groups": {"$ref": "#/$defs/contact_role_groups"},
         "contacts_per_company": {"type": "integer", "minimum": 1, "maximum": 3},
         "time_window": {"$ref": "#/$defs/time_window"},
-        "contact_fields": {"type": "array", "uniqueItems": true, "items": {"enum": ["email", "phone"]}},
+        "contact_fields": {"type": "array", "uniqueItems": true, "items": {"enum": ["email", "phone"]}, "default": ["email"]},
         "budget": {"$ref": "#/$defs/input_budget"},
         "run_id": {"type": "string"},
         "as_of_date": {"$ref": "#/$defs/date"}
@@ -625,8 +657,17 @@ is absent); their evidence URLs and sources may differ; contact evidence must
 explicitly support a current role at that company; `approved_family` must be
 within the full user-approved role family and never an unapproved adjacent
 function; every accepted contact's `requested_role` must be in
-`request.requested_roles`; and optional contact fields must be absent unless
-requested. Validate `primary_contact` and every item in `backup_contacts` with
+`request.requested_roles`; and contact fields must be absent unless requested
+by the effective field set, which defaults to email. Every accepted primary
+must contain every requested field. Every stored email, including an email on
+a backup, must have an `email_validation` receipt for the same address. Its
+source must identify Deepline and ZeroBounce, link to the matching successful
+or partial `email_validation` route, use the same dynamically discovered tool,
+and record a non-empty explicit status. Only a case-insensitive status of
+`invalid` fails; all other explicit ZeroBounce statuses pass under this
+policy. Missing receipts or statuses and blocked, failed, or uncertain
+validation routes are unresolved and cannot appear on an accepted contact.
+Validate `primary_contact` and every item in `backup_contacts` with
 the same role and role-group rules. When
 `request.contact_role_groups` is present, its `primary` and
 `secondary` arrays must have `request.requested_roles` as their deduplicated
@@ -695,7 +736,7 @@ route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 | Workbook column | `results.json` source |
 |---|---|
 | `Name` | `primary_contact.full_name` |
-| `Email` | `primary_contact.email`, otherwise blank |
+| `Email` | validated `primary_contact.email`, otherwise blank |
 | `Role` | `primary_contact.current_title` |
 | `Company` | `company.canonical_name` |
 | `LinkedIn` | `primary_contact.linkedin_url`; use `contact_url` only when it is a LinkedIn URL |

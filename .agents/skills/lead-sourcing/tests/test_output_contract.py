@@ -72,8 +72,52 @@ def shortfall_result(frontier_state="exhausted", stop_reason="no_productive_rout
     return result
 
 
+def email_validation_receipt(status="valid", route_id="email-validation-1", tool="live-validator"):
+    return {
+        "email": "ada@example.org",
+        "status": status,
+        "sub_status": None,
+        "source": {
+            "provider": "deepline",
+            "validator": "zerobounce",
+            "operation": "execute",
+            "tool": tool,
+            "route_id": route_id,
+        },
+    }
+
+
+def accepted_email_result(status="valid"):
+    return {
+        "request": {"target_count": 1},
+        "summary": {"accepted_companies": 1},
+        "accepted": [
+            {
+                "company": {"canonical_name": "Example", "domain": "example.org"},
+                "primary_contact": {
+                    "full_name": "Ada Example",
+                    "email": "ada@example.org",
+                    "email_validation": email_validation_receipt(status=status),
+                },
+            }
+        ],
+        "routes": [
+            {
+                "route_id": "email-validation-1",
+                "phase": "email_validation",
+                "provider": "deepline",
+                "operation": "execute",
+                "tool": "live-validator",
+                "provider_status": "ok",
+                "paid_calls": 1,
+            }
+        ],
+        "stop_reason": "target_met",
+    }
+
+
 class OutputContractExtensionTests(unittest.TestCase):
-    def test_legacy_request_remains_valid_without_new_fields(self):
+    def test_omitted_contact_fields_remains_valid_and_defaults_to_email(self):
         request = {
             "target_count": 1,
             "icp": {"geographies": ["US"]},
@@ -86,6 +130,31 @@ class OutputContractExtensionTests(unittest.TestCase):
         self.assertNotIn("signal_match_mode", request)
         self.assertNotIn("min_age_days", request["buying_signals"][0])
         self.assertNotIn("contact_role_groups", request)
+        input_schema, result_schema = load_schemas()
+        self.assertEqual(
+            input_schema["properties"]["contact_fields"]["default"], ["email"]
+        )
+        self.assertEqual(
+            result_schema["$defs"]["request_snapshot"]["properties"]["contact_fields"]["default"],
+            ["email"],
+        )
+
+    def test_email_validation_receipt_is_deepline_zerobounce_with_dynamic_tool(self):
+        _, result_schema = load_schemas()
+        validation = result_schema["$defs"]["email_validation"]
+        source = validation["properties"]["source"]
+        self.assertEqual(source["properties"]["provider"]["const"], "deepline")
+        self.assertEqual(source["properties"]["validator"]["const"], "zerobounce")
+        self.assertEqual(source["properties"]["operation"]["const"], "execute")
+        self.assertNotIn("const", source["properties"]["tool"])
+        self.assertEqual(
+            result_schema["$defs"]["contact"]["properties"]["email_validation"]["$ref"],
+            "#/$defs/email_validation",
+        )
+        self.assertIn(
+            "email_validation",
+            result_schema["$defs"]["route"]["properties"]["phase"]["enum"],
+        )
 
     def test_contact_role_groups_are_optional_and_role_group_is_traceable(self):
         input_schema, result_schema = load_schemas()
@@ -347,6 +416,7 @@ class OutputContractExtensionTests(unittest.TestCase):
         result = {
             "request": {
                 "target_count": 1,
+                "contact_fields": [],
                 "requested_roles": ["Executive Director", "Chief Program Officer"],
                 "contact_role_groups": {
                     "primary": ["Executive Director"],
@@ -550,6 +620,89 @@ class OutputContractExtensionTests(unittest.TestCase):
         errors = VALIDATOR.validate_run(result)
         self.assertTrue(any("duplicate canonical domains" in error for error in errors))
         self.assertEqual(sum("requires requested email" in error for error in errors), 2)
+
+    def test_default_email_and_zerobounce_receipt_are_required(self):
+        result = accepted_email_result()
+        self.assertEqual(VALIDATOR.validate_run(result), [])
+
+        result["accepted"][0]["primary_contact"].pop("email")
+        result["accepted"][0]["primary_contact"].pop("email_validation")
+        errors = VALIDATOR.validate_run(result)
+        self.assertIn(
+            "accepted[0].primary_contact requires requested email", errors
+        )
+
+        result = accepted_email_result()
+        result["accepted"][0]["primary_contact"].pop("email_validation")
+        errors = VALIDATOR.validate_run(result)
+        self.assertTrue(any("ZeroBounce email_validation receipt" in error for error in errors))
+
+    def test_only_explicit_zerobounce_invalid_status_fails(self):
+        for status in ("valid", "catch-all", "spamtrap", "abuse", "do_not_mail", "unknown"):
+            with self.subTest(status=status):
+                self.assertEqual(VALIDATOR.validate_run(accepted_email_result(status)), [])
+
+        errors = VALIDATOR.validate_run(accepted_email_result(" INVALID "))
+        self.assertTrue(any("email_validation.status is invalid" in error for error in errors))
+
+    def test_missing_status_or_unsuccessful_validation_route_is_unresolved(self):
+        missing_status = accepted_email_result()
+        missing_status["accepted"][0]["primary_contact"]["email_validation"]["status"] = ""
+        errors = VALIDATOR.validate_run(missing_status)
+        self.assertTrue(any("status is unresolved or missing" in error for error in errors))
+
+        failed_route = accepted_email_result()
+        failed_route["routes"][0]["provider_status"] = "timeout"
+        errors = VALIDATOR.validate_run(failed_route)
+        self.assertTrue(any("route email-validation-1 is unresolved" in error for error in errors))
+
+        unaccounted_route = accepted_email_result()
+        unaccounted_route["routes"][0]["paid_calls"] = 0
+        errors = VALIDATOR.validate_run(unaccounted_route)
+        self.assertTrue(any("must record its paid Deepline call" in error for error in errors))
+
+    def test_email_validation_receipt_must_match_route_and_provider(self):
+        wrong_provider = accepted_email_result()
+        source = wrong_provider["accepted"][0]["primary_contact"]["email_validation"]["source"]
+        source["provider"] = "public_web"
+        errors = VALIDATOR.validate_run(wrong_provider)
+        self.assertTrue(any("source.provider must be deepline" in error for error in errors))
+
+        wrong_tool = accepted_email_result()
+        source = wrong_tool["accepted"][0]["primary_contact"]["email_validation"]["source"]
+        source["tool"] = "different-live-tool"
+        errors = VALIDATOR.validate_run(wrong_tool)
+        self.assertTrue(any("source.tool must match route" in error for error in errors))
+
+    def test_stored_backup_email_must_pass_the_same_gate(self):
+        result = accepted_email_result()
+        backup_receipt = email_validation_receipt(
+            status="invalid", route_id="email-validation-2", tool="second-live-validator"
+        )
+        backup_receipt["email"] = "bea@example.org"
+        result["accepted"][0]["backup_contacts"] = [
+            {
+                "full_name": "Bea Example",
+                "email": "bea@example.org",
+                "email_validation": backup_receipt,
+            }
+        ]
+        result["routes"].append(
+            {
+                "route_id": "email-validation-2",
+                "phase": "email_validation",
+                "provider": "deepline",
+                "operation": "execute",
+                "tool": "second-live-validator",
+                "provider_status": "ok",
+                "paid_calls": 1,
+            }
+        )
+
+        errors = VALIDATOR.validate_run(result)
+        self.assertTrue(
+            any("backup_contacts[0].email_validation.status is invalid" in error for error in errors)
+        )
 
     def test_stop_audit_counts_unique_company_reviews(self):
         result = shortfall_result()

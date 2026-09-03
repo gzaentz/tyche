@@ -36,8 +36,18 @@ for the exact input, output, and Excel workbook contracts.
   the same company; a contact needs a current role and company identity that
   match the accepted company/domain and the requested role family. Apply the
   identity/current-role gate before any email or phone lookup.
-- Request and retrieve email or phone only when the input asks for that field.
-  Never fabricate a value or infer a current role from model memory.
+- Apply `contact_fields: ["email"]` when the input omits contact fields. An
+  explicit empty array opts out, and an explicit phone-only array overrides
+  the email default. Retrieve contact data only after the identity/current-role
+  gate. Never fabricate a value or infer a current role from model memory.
+- Before storing any email, discover and describe a current ZeroBounce email
+  validation capability through Deepline, then validate the exact address.
+  Do not pin its Deepline tool ID. Only an explicit, case-insensitive
+  ZeroBounce status of `invalid` fails this gate; every other explicit status
+  passes under the requested policy. A missing status, missing receipt,
+  `no_results`, or failed or uncertain provider call is unresolved, not valid.
+  Count each validation execution against both the Deepline credit cap and the
+  paid-call cap.
 - Keep accepted, rejected, and unresolved output states separate from provider
   statuses. `no_results` is not proof that a signal or contact is absent.
 - Treat `target_count` as the completion condition. While accepted companies
@@ -67,8 +77,10 @@ for the exact input, output, and Excel workbook contracts.
 ## Inputs and workflow
 
 The normalized request must state the target count, ICP and exclusions,
-geography, buying-signal kinds and freshness window, requested roles, optional
-contact fields, and per-provider budget caps. It may set a one-to-three contact
+geography, buying-signal kinds and freshness window, requested roles, contact
+fields, and per-provider budget caps. Email is required by default; apply
+`["email"]` when the field is omitted, while preserving an explicit empty or
+phone-only override. It may set a one-to-three contact
 target per company, `signal_match_mode` (`any` or `all`, default `any`),
 per-signal `min_age_days`/`max_age_days`, run ID, and as-of date. Validate that
 each signal's lower bound is no greater than its upper bound. It may also set
@@ -97,7 +109,15 @@ negative. Resolve obvious company identity ambiguity before paid work.
    contact can be the output primary when no primary-role contact passes; mark
    it with `role_group: "secondary"` when known. If only one current contact
    passes, keep the company accepted and record the backup shortfall. If no
-   approved role passes, record the company as unresolved.
+   approved role passes, record the company as unresolved. After a contact
+   passes, retrieve each requested contact field. For every email, search the
+   live Deepline catalog for ZeroBounce validation, describe the selected tool,
+   and execute it once against the exact address. Store the status and source
+   receipt. If ZeroBounce returns `invalid`, reject that contact and try another
+   current-role contact. If validation is missing or uncertain, keep the
+   contact unresolved and change route; do not accept it or retry the uncertain
+   paid call automatically. Store an email on a backup only after the same
+   validation gate passes.
 5. Refill from a changed route whenever an account or contact candidate fails
    a gate. Continue while the accepted count is below the target and the
    frontier contains an `untried` or `continuable` route. Do not infer route
@@ -143,6 +163,15 @@ lookup. Only `ok` or `partial` provider responses can supply candidates; all
 provider statuses and stable reasons belong in the receipts, while output
 `accepted`, `rejected`, and `unresolved` remain separate states.
 
+The email gate follows the contact gate. It requires the email, a matching
+ZeroBounce status, and a source receipt linked to one successful or partial
+Deepline `email_validation` route. The receipt records `provider: "deepline"`,
+`validator: "zerobounce"`, `operation: "execute"`, the dynamically discovered
+tool, and route ID. Use the explicit provider `status` for this policy, not a
+stricter generic send verdict: only `invalid` fails, and all other explicit
+statuses pass. A missing status or a failed, blocked, timed-out, or otherwise
+uncertain call cannot supply an accepted email.
+
 Write `reports/<run-id>/report.md`, `reports/<run-id>/results.json`, and
 `reports/<run-id>/leads.xlsx`. The report must contain the request, assumptions,
 hypotheses, route and evidence receipts, pilot observations, costs, statuses,
@@ -154,8 +183,9 @@ credentials or raw secrets.
 
 The workbook is the sales-ready primary-contact view. Its `Leads` worksheet
 uses the exact fixed header in the output contract. Company and contact fields
-that are not verified stay blank; their absence does not become a qualification
-failure unless the input explicitly requests that contact field. Keep full
+that are not verified stay blank. Email is requested by default, so its absence
+is a qualification failure unless the input explicitly opts out or requests
+phone only. Keep full
 evidence, backup contacts, run status, and rejection details in `results.json`
 and the report.
 

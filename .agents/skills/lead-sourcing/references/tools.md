@@ -25,6 +25,7 @@ search seeds, not fixed IDs; use only the tool ID returned by the current search
 - `company firmographic search by industry geography and size`
 - `people by company domain and requested job title`
 - `current title roster or leadership team by company domain`
+- `ZeroBounce validate one known email address`
 
 For each selected tool, call `describe` immediately before `execute` and record
 its live input schema, connection state, and price. Prefer a title-roster tool
@@ -58,6 +59,36 @@ or `config_error`. Only `ok` and `partial` can supply candidates. `no_results`
 does not prove absence. Other statuses are unresolved provider outcomes; stop or
 change route and retain `status`, `error` when present, `provider`, `operation`,
 `tool`, and normalized `results` in the report.
+
+### Deepline ZeroBounce email gate
+
+When the effective contact fields include email, first find and verify the
+person and current role. Then search the live Deepline catalog for a ZeroBounce
+single-address validation capability. Select only a result whose current
+description identifies ZeroBounce email validation, and call `describe` to
+confirm its input, output, connection, and price. The catalog tool ID is runtime
+data; do not copy a fixed ID into this skill.
+
+```bash
+python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"search","query":"ZeroBounce validate one known email address"}'
+python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"describe","tool":"<current ZeroBounce validation tool from search>"}'
+python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"execute","tool":"<same described tool>","entity_type":"email_validation","payload":{"email":"person@example.com"},"limit":1}'
+```
+
+Use the exact payload names returned by the live description; the example
+shows the current scalar shape but does not override the live schema. The
+adapter preserves the provider row and exposes `email`, `email_status`, and
+`email_sub_status` for a recognized scalar validation result. Link the final
+receipt to a unique `email_validation` route and record actual usage.
+
+Apply TYCHE's current gate to the explicit ZeroBounce status after trimming and
+case normalization. Only `invalid` fails. Every other explicit status passes,
+including `catch-all`, `spamtrap`, `abuse`, `do_not_mail`, and `unknown`. This
+is intentionally more permissive than ZeroBounce's normal outbound guidance.
+A missing status, `no_results`, provider error, timeout, or other uncertain
+call is unresolved and cannot support an accepted email. Do not retry an
+uncertain paid validation call automatically. Deepline owns the provider
+credential; do not require or read a direct ZeroBounce key.
 
 ## ScrapingDog wrapper
 

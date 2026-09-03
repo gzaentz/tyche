@@ -20,6 +20,8 @@ provider adapters, budget controls, and output contract.
   are searched first; secondary roles are valid fallbacks and are never
   rejected only because they are secondary.
 - Requires a current title and company match for every accepted contact.
+- Requires email by default and validates every stored email with ZeroBounce
+  through Deepline. Only an explicit `invalid` status is rejected.
 - Uses live Deepline capability discovery instead of fixed Deepline tool IDs.
 - Supports bounded ScrapingDog operations through one local adapter.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
@@ -37,6 +39,7 @@ Codex
   -> Deepline CLI adapter or ScrapingDog adapter
   -> company gate
   -> contact gate
+  -> Deepline ZeroBounce email gate (unless explicitly opted out)
   -> reports/<run-id>/{report.md,results.json,leads.xlsx}
 ```
 
@@ -76,7 +79,8 @@ Make the ScrapingDog key available to the process that starts Codex:
 export SCRAPINGDOG_API_KEY="your-key"
 ```
 
-The Deepline adapter delegates authentication to the installed Deepline CLI.
+The Deepline adapter delegates authentication, including managed ZeroBounce
+access, to the installed Deepline CLI. A separate ZeroBounce key is not needed.
 If your Deepline setup uses `DEEPLINE_API_KEY`, export it in the same shell.
 If the `deepline` executable is not on `PATH`, set `DEEPLINE_BIN` to its
 absolute path.
@@ -112,6 +116,12 @@ The agent normalizes the request, discovers current provider capabilities,
 runs small pilots, checks evidence, and writes the three output files under a
 new `reports/<run-id>/` directory.
 
+Email is the default contact field. If a request does not mention contact
+fields, TYCHE requires one email for each accepted primary contact and validates
+the exact address with ZeroBounce through Deepline. The demo above says “Do not
+find email or phone,” so it is an explicit opt-out. A structured request can
+use `contact_fields: []` to opt out or `["phone"]` to request phone only.
+
 For grouped contact requests, keep `requested_roles` as the required union of
 the optional `contact_role_groups.primary` and `.secondary` arrays. TYCHE
 searches and ranks primary roles first, then uses secondary roles when no
@@ -126,6 +136,8 @@ legacy `requested_roles` behavior.
 - A material route starts with one paid call and at most 10 returned rows.
 - Deepline catalog `search` and `describe` calls are read-only.
 - The agent checks the live Deepline schema and price before `execute`.
+- Each ZeroBounce validation is a Deepline execution and counts against both
+  the Deepline credit cap and the total paid-call cap.
 - An uncertain paid result is not retried automatically.
 - An uncertain or failed call does not end the run when another route, query,
   page, tool, or provider remains available.
@@ -179,9 +191,12 @@ Contact objects may include `role_group` (`primary` or `secondary`) for
 traceability. The output slot `primary_contact` is separate from this role
 group and may contain a valid secondary fallback.
 
-Email and phone fields stay absent from JSON and blank in the workbook unless the input
-requests them. Generated reports are ignored by Git because evidence and
-contact data become stale.
+Email is required by default. Every exported email has a matching Deepline
+ZeroBounce receipt in `results.json`; only an explicit `invalid` status is
+blocked. All other explicit statuses pass, including statuses that may be poor
+choices for outbound email. Email and phone stay absent from JSON and blank in
+the workbook when the input explicitly opts out of them. Generated reports are
+ignored by Git because evidence and contact data become stale.
 
 ## Provider adapters
 
@@ -198,7 +213,9 @@ python3 .agents/skills/lead-sourcing/scripts/deepline.py \
 ```
 
 Use `search`, then `describe`, then a bounded `execute`. An `execute` call can
-spend provider credits.
+spend provider credits. For email validation, search for a current ZeroBounce
+validator and keep its returned tool ID as runtime data. Do not fix that ID in
+the project.
 
 ### ScrapingDog
 

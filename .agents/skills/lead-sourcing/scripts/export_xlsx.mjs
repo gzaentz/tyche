@@ -103,7 +103,7 @@ function intentDetails(signal) {
 function requestedContactFields(document) {
   const request = object(document.request);
   const fields = request.contact_fields;
-  if (fields === undefined) return new Set();
+  if (fields === undefined) return new Set(["email"]);
   if (!Array.isArray(fields)) {
     throw new ExportError("results.json request.contact_fields must be an array");
   }
@@ -122,6 +122,60 @@ function requestedValue(contact, field, requestedFields, index) {
     throw new ExportError(`accepted[${index}].primary_contact.email is invalid`);
   }
   return value;
+}
+
+function validateEmailReceipt(document, contact, email, index) {
+  const path = `accepted[${index}].primary_contact.email_validation`;
+  const receipt = object(contact.email_validation);
+  if (!Object.keys(receipt).length) {
+    throw new ExportError(`${path} requires a Deepline ZeroBounce receipt`);
+  }
+  if (text(receipt.email).toLowerCase() !== email.toLowerCase()) {
+    throw new ExportError(`${path}.email must match the contact email`);
+  }
+  const status = text(receipt.status);
+  if (!status) {
+    throw new ExportError(`${path}.status is unresolved or missing`);
+  }
+  if (status.toLowerCase() === "invalid") {
+    throw new ExportError(`${path}.status is invalid`);
+  }
+
+  const source = object(receipt.source);
+  if (text(source.provider).toLowerCase() !== "deepline") {
+    throw new ExportError(`${path}.source.provider must be deepline`);
+  }
+  if (text(source.validator).toLowerCase() !== "zerobounce") {
+    throw new ExportError(`${path}.source.validator must be zerobounce`);
+  }
+  if (text(source.operation) !== "execute") {
+    throw new ExportError(`${path}.source.operation must be execute`);
+  }
+  const tool = text(source.tool);
+  const routeId = text(source.route_id);
+  if (!tool || !routeId) {
+    throw new ExportError(`${path}.source requires tool and route_id`);
+  }
+
+  const routes = Array.isArray(document.routes) ? document.routes : [];
+  const matchingRoutes = routes.filter(
+    (candidate) => text(object(candidate).route_id) === routeId,
+  );
+  if (matchingRoutes.length !== 1) {
+    throw new ExportError(`${path}.source.route_id must identify one route receipt`);
+  }
+  const route = object(matchingRoutes[0]);
+  if (
+    route.provider !== "deepline"
+    || route.phase !== "email_validation"
+    || route.operation !== "execute"
+    || route.tool !== tool
+    || !["ok", "partial"].includes(route.provider_status)
+    || !Number.isInteger(route.paid_calls)
+    || route.paid_calls < 1
+  ) {
+    throw new ExportError(`${path} does not match a successful paid Deepline validation route`);
+  }
 }
 
 export function rowsFor(document) {
@@ -155,9 +209,13 @@ export function rowsFor(document) {
       if (!value) throw new ExportError(`accepted[${index}] requires ${label}`);
     }
 
+    const email = requestedValue(contact, "email", requestedFields, index);
+    const phone = requestedValue(contact, "phone", requestedFields, index);
+    if (email) validateEmailReceipt(document, contact, email, index);
+
     return {
       Name: requiredValues.Name,
-      Email: requestedValue(contact, "email", requestedFields, index),
+      Email: email,
       Role: requiredValues.Role,
       Company: requiredValues.Company,
       LinkedIn: contactLinkedIn(contact),
@@ -173,7 +231,7 @@ export function rowsFor(document) {
       "Employee Count": employeeCount(company.employee_count),
       Description: text(company.description),
       "Intent Details": intentDetails(signal),
-      Phone: requestedValue(contact, "phone", requestedFields, index),
+      Phone: phone,
     };
   });
 }
