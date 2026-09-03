@@ -12,11 +12,19 @@ provider adapters, budget controls, and output contract.
 
 - Sources companies before people.
 - Checks company fit and buying-signal evidence separately.
+- Supports explicit `any`/`all` signal matching and per-signal age bounds.
+- Records required and preferred qualification checks as `pass`, `fail`, or
+  `unknown`, with separate supporting evidence.
 - Searches for contacts only after a company passes the account gate.
+- Supports optional primary and secondary contact-role groups. Primary roles
+  are searched first; secondary roles are valid fallbacks and are never
+  rejected only because they are secondary.
 - Requires a current title and company match for every accepted contact.
 - Uses live Deepline capability discovery instead of fixed Deepline tool IDs.
 - Supports bounded ScrapingDog operations through one local adapter.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
+- Keeps an auditable paid and public-web route frontier, and continues refilling
+  until the target is met or every remaining route is exhausted or blocked.
 - Produces an audit report, structured JSON, and a clean CSV.
 - Does not send outreach or write to a CRM.
 
@@ -104,6 +112,14 @@ The agent normalizes the request, discovers current provider capabilities,
 runs small pilots, checks evidence, and writes the three output files under a
 new `reports/<run-id>/` directory.
 
+For grouped contact requests, keep `requested_roles` as the required union of
+the optional `contact_role_groups.primary` and `.secondary` arrays. TYCHE
+searches and ranks primary roles first, then uses secondary roles when no
+primary-role contact passes. A selected contact can still be the output
+`primary_contact` when it is a secondary-role fallback; `role_group` records
+that distinction when it is known. Requests without role groups keep the
+legacy `requested_roles` behavior.
+
 ## Budget behavior
 
 - Every provider has its own hard credit cap.
@@ -111,6 +127,8 @@ new `reports/<run-id>/` directory.
 - Deepline catalog `search` and `describe` calls are read-only.
 - The agent checks the live Deepline schema and price before `execute`.
 - An uncertain paid result is not retried automatically.
+- An uncertain or failed call does not end the run when another route, query,
+  page, tool, or provider remains available.
 - If a provider does not report invoice usage, TYCHE records actual spend as
   unknown instead of zero.
 - A cap of zero disables that provider.
@@ -134,6 +152,10 @@ reports/<run-id>/
 - `results.json` contains accepted, rejected, and unresolved outcomes under the
   versioned schema.
 - `leads.csv` contains one row per accepted company and primary contact.
+
+Contact objects may include `role_group` (`primary` or `secondary`) for
+traceability. The output slot `primary_contact` is separate from this role
+group and may contain a valid secondary fallback.
 
 Email and phone fields stay absent from JSON and blank in CSV unless the input
 requests them. Generated reports are ignored by Git because evidence and
@@ -171,17 +193,27 @@ This example is a paid provider call. The adapter reads the key only from
 
 ## Test
 
-Run the focused adapter suite:
+Run the focused skill suite:
 
 ```bash
 python3 -m unittest discover \
   -s .agents/skills/lead-sourcing/tests \
-  -p 'test_provider_scripts.py'
+  -p 'test_*.py'
 ```
 
 The tests cover request bounds, provider statuses, error redaction, current-role
-normalization, response-envelope handling, evidence truncation, and HTML text
-extraction.
+normalization, response-envelope handling, evidence truncation, HTML text
+extraction, output-contract semantics, budget accounting, and completion stops.
+
+Validate a completed run's target and route-exhaustion receipt with:
+
+```bash
+python3 .agents/skills/lead-sourcing/scripts/validate_run.py \
+  reports/<run-id>/results.json
+```
+
+A short run fails validation while any recorded route is untried or
+continuable. This check does not relax provider credit or paid-call caps.
 
 ## Project boundaries
 

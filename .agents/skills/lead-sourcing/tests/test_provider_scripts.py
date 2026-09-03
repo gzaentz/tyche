@@ -132,6 +132,19 @@ class ProviderScriptTests(unittest.TestCase):
         self.assertIn("unknown option", body["error"]["message"])
         self.assertNotIn("provider-secret", json.dumps(body))
 
+        with mock.patch.object(
+            DEEPLINE.subprocess,
+            "run",
+            return_value=FakeProcess(
+                'Update available\n{"status":"error","error":{"message":"provider rejected the filter"}}',
+                returncode=1,
+            ),
+        ):
+            body, code = DEEPLINE.run({"operation": "search", "query": "software"})
+        self.assertEqual(code, 0)
+        self.assertEqual(body["status"], "provider_error")
+        self.assertEqual(body["error"]["message"], "provider rejected the filter")
+
     def test_deepline_uses_bin_override_and_documented_describe_command(self):
         seen = {}
 
@@ -145,6 +158,7 @@ class ProviderScriptTests(unittest.TestCase):
             body, code = DEEPLINE.run({"operation": "describe", "tool": "company_search"})
         self.assertEqual(code, 0)
         self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["results"], [{"name": "company_search", "description": "find companies"}])
         self.assertEqual(seen["command"][:3], ["/opt/deepline", "tools", "describe"])
 
     def test_deepline_does_not_turn_unknown_or_row_status_into_no_results(self):
@@ -256,6 +270,148 @@ class ProviderScriptTests(unittest.TestCase):
                 self.assertEqual(
                     [row["company"] for row in body["results"]], ["Acme", "Beta"]
                 )
+
+    def test_deepline_scalar_count_envelope_is_one_normalized_result(self):
+        response = {
+            "status": "completed",
+            "toolResponse": {
+                "raw": {"count": 0, "total": 0, "provider_note": "empty"}
+            },
+        }
+        body = DEEPLINE._execute_output(response, "discolike_count")
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(len(body["results"]), 1)
+        self.assertEqual(body["results"][0]["count"], 0)
+        self.assertEqual(body["results"][0]["total"], 0)
+        self.assertEqual(body["results"][0]["provider_note"], "empty")
+
+        summary_body = DEEPLINE._execute_output(
+            {"summary": {"count": 7, "total": 12}}, "discolike_count"
+        )
+        self.assertEqual(summary_body["status"], "ok")
+        self.assertEqual(summary_body["results"][0]["count"], 7)
+        self.assertEqual(summary_body["results"][0]["total"], 12)
+
+    def test_deepline_non_numeric_count_shape_remains_schema_error(self):
+        body = DEEPLINE._execute_output(
+            {"toolResponse": {"raw": {"count": "unknown"}}},
+            "discolike_count",
+        )
+        self.assertEqual(body["status"], "schema_error")
+
+    def test_deepline_autocomplete_suggestions_are_normalized_from_declared_lists(self):
+        response = (
+            '{"status":"completed","extractedLists":{"suggestions":'
+            '[{"value":"Global Health"},{"value":"Humanitarian Aid"}]}}'
+        )
+        with mock.patch.object(
+            DEEPLINE.subprocess, "run", return_value=FakeProcess(response)
+        ):
+            body, code = DEEPLINE.run(
+                {
+                    "operation": "execute",
+                    "tool": "crustdata_v3_company_search_autocomplete",
+                    "payload": {"field": "industry", "query": "health", "limit": 2},
+                }
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(
+            [row["value"] for row in body["results"]],
+            ["Global Health", "Humanitarian Aid"],
+        )
+        self.assertTrue(all(row["company"] is None for row in body["results"]))
+        self.assertTrue(all("contact" not in row for row in body["results"]))
+
+        raw_response = (
+            '{"status":"completed","toolResponse":{"raw":{"suggestions":'
+            '[{"value":"Global Health"}]}}}'
+        )
+        with mock.patch.object(
+            DEEPLINE.subprocess, "run", return_value=FakeProcess(raw_response)
+        ):
+            raw_body, raw_code = DEEPLINE.run(
+                {
+                    "operation": "execute",
+                    "tool": "crustdata_v3_company_search_autocomplete",
+                    "payload": {"field": "industry", "query": "health", "limit": 1},
+                }
+            )
+        self.assertEqual(raw_code, 0)
+        self.assertEqual(raw_body["status"], "ok")
+        self.assertEqual(raw_body["results"][0]["value"], "Global Health")
+
+        preview_response = (
+            '{"status":"completed","output_preview":{"kind":"list",'
+            '"rowCount":1,"columns":["value"],"preview":'
+            '[{"value":"Humanitarian Aid"}]}}'
+        )
+        with mock.patch.object(
+            DEEPLINE.subprocess, "run", return_value=FakeProcess(preview_response)
+        ):
+            preview_body, preview_code = DEEPLINE.run(
+                {
+                    "operation": "execute",
+                    "tool": "crustdata_v3_company_search_autocomplete",
+                    "payload": {"field": "industry", "query": "aid", "limit": 1},
+                }
+            )
+        self.assertEqual(preview_code, 0)
+        self.assertEqual(preview_body["status"], "ok")
+        self.assertEqual(preview_body["results"][0]["value"], "Humanitarian Aid")
+
+    def test_deepline_autocomplete_handles_nested_suggestion_preview_and_empty_lists(self):
+        nested = {
+            "toolResponse": {
+                "rawV2": {
+                    "data": {
+                        "extracted_lists": {
+                            "suggestions": {"preview": [{"label": "Education"}]}
+                        }
+                    }
+                }
+            }
+        }
+        body = DEEPLINE._execute_output(
+            nested, "crustdata_v3_company_search_autocomplete"
+        )
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["results"][0]["label"], "Education")
+        self.assertIsNone(body["results"][0]["company"])
+
+        empty = {
+            "status": "completed",
+            "extractedLists": {"suggestions": []},
+        }
+        empty_body = DEEPLINE._execute_output(
+            empty, "crustdata_v3_company_search_autocomplete"
+        )
+        self.assertEqual(empty_body["status"], "no_results")
+        self.assertEqual(empty_body["results"], [])
+
+        malformed = {
+            "status": "completed",
+            "extractedLists": {"suggestions": {"unexpected": "shape"}},
+        }
+        malformed_body = DEEPLINE._execute_output(
+            malformed, "crustdata_v3_company_search_autocomplete"
+        )
+        self.assertEqual(malformed_body["status"], "schema_error")
+
+    def test_deepline_extracted_lists_prefer_result_keys_over_metadata_lists(self):
+        for result_key in ("suggestions", "results", "items", "records", "data"):
+            with self.subTest(result_key=result_key):
+                response = {
+                    "status": "completed",
+                    "extractedLists": {
+                        "columns": ["value"],
+                        "metadata": [{"name": "ignored"}],
+                        result_key: [{"value": result_key}],
+                    },
+                }
+                body = DEEPLINE._execute_output(response, "autocomplete")
+                self.assertEqual(body["status"], "ok")
+                self.assertEqual(body["results"][0]["value"], result_key)
 
     def test_invalid_deepline_cli_input_is_schema_error_and_single_json(self):
         completed = subprocess.run(
@@ -379,6 +535,38 @@ class ProviderScriptTests(unittest.TestCase):
         )
         self.assertEqual(inferred_company["entity_type"], "company")
         self.assertNotIn("contact_url", inferred_company)
+
+    def test_deepline_v3_company_basic_info_normalizes_identity_without_dropping_source_fields(self):
+        row = {
+            "basic_info": {
+                "name": "Global Health Partners",
+                "primary_domain": "https://www.globalhealthpartners.example/",
+                "professional_network_url": "https://www.linkedin.com/company/global-health-partners",
+            },
+            "headcount": {"total": 275},
+            "locations": {"headquarters": "New York, United States"},
+        }
+        result = DEEPLINE.normalize_evidence(row, entity_type="company")
+        self.assertEqual(result["company"], "Global Health Partners")
+        self.assertEqual(result["domain"], "globalhealthpartners.example")
+        self.assertEqual(result["basic_info"], row["basic_info"])
+        self.assertEqual(result["headcount"], {"total": 275})
+        self.assertEqual(result["entity_type"], "company")
+        self.assertNotIn("contact", result)
+
+        explicit = DEEPLINE.normalize_evidence(
+            {
+                "company_name": "Explicit Company",
+                "domain": "explicit.example",
+                "basic_info": {
+                    "name": "Nested Company",
+                    "primary_domain": "nested.example",
+                },
+            },
+            entity_type="company",
+        )
+        self.assertEqual(explicit["company"], "Explicit Company")
+        self.assertEqual(explicit["domain"], "explicit.example")
 
     def test_deepline_recognizes_direct_camelcase_contact_objects(self):
         direct = {

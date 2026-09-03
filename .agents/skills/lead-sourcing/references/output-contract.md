@@ -19,24 +19,51 @@ The JSON Schema is draft 2020-12. A run directory is
 3. Each accepted result has exactly one `primary_contact` and two or fewer
    `backup_contacts`. The stored candidate count is 1 to 3. Target the
    requested count (default 3), but keep a company accepted when one valid
-   primary is found and record `backup_shortfall`. If no primary passes, put the
-   company in `unresolved` with `no_current_role_contact`.
-4. `accepted`, `rejected`, and `unresolved` are output states. They are not
+   contact is found and record `backup_shortfall`. If no approved role passes,
+   put the company in `unresolved` with `no_current_role_contact`. When role
+   groups are present, a secondary-role contact is a valid fallback for that
+   output slot.
+4. `requested_roles` is always required. When `contact_role_groups` is present,
+   it contains the deduplicated primary and secondary role lists whose union is
+   `requested_roles`. Search and rank primary roles first; secondary roles are
+   valid fallbacks and must not be rejected only because they are secondary. A
+   selected contact may therefore be the output `primary_contact` with
+   `role_group: "secondary"`.
+5. `accepted`, `rejected`, and `unresolved` are output states. They are not
    provider statuses. A `no_results` provider response is not a rejection;
    `timeout`, quota, authentication, schema, and provider errors are
    unresolved outcomes.
-5. Accepted companies are unique by lower-case canonical domain with a leading
+6. Accepted companies are unique by lower-case canonical domain with a leading
    `www.` removed. A contact may appear once per accepted company. A backup is
    not a second primary.
-6. `email` and `phone` are absent from JSON contact objects unless the input
-   `contact_fields` requests them. In CSV they are blank unless requested. Do
-   not perform the lookup before the identity/current-role gate.
-7. Reserve and refill is adaptive: after observed account or contact attrition,
-   source one replacement from a changed route when budget permits. Do not
-   prefetch or refill by a fixed multiplier such as 5x.
-8. All dates are ISO calendar dates. A relative provider date may be resolved
+7. `email` and `phone` are absent from JSON contact objects unless the input
+   `contact_fields` requests them. When requested, every accepted primary
+   contact must contain a non-empty valid value; otherwise the company remains
+   unresolved. In CSV they are blank unless requested. Do not perform the
+   lookup before the identity/current-role gate.
+8. `target_count` is the completion condition. After account or contact
+   attrition, source one replacement from a changed route while the accepted
+   count is short and the route frontier is actionable. Do not prefetch or
+   refill by a fixed multiplier such as 5x.
+9. The route frontier contains paid-provider and public-web paths. Each path is
+   `untried`, `continuable`, `exhausted`, or `blocked`. A final shortfall is
+   invalid while any path is untried or continuable. A failed or uncertain paid
+   call is not retried automatically, but it does not exhaust other paths. The
+   frontier is append-only: paths may be added and states updated, but a planned
+   or discovered path must not be removed.
+10. All dates are ISO calendar dates. A relative provider date may be resolved
    from retrieval time only when the original wording is retained in
    `report.md`; never invent a date or a person.
+11. `signal_match_mode` defaults to `any`. It applies across the entries in
+   `buying_signals`; facts joined inside one signal query remain conjunctive.
+   A signal's `min_age_days` and `max_age_days` are measured backwards from
+   the effective as-of date. `min_age_days` is optional and defaults to zero;
+   when both bounds are present, the minimum must not exceed the maximum.
+12. A `qualification_check` uses `pass`, `fail`, or `unknown`. `unknown`
+   means that public evidence is missing or ambiguous; it is never a
+   substitute for `fail`. A required check that fails rejects the account. A
+   required check that is unknown is unresolved. Preferred checks affect
+   ranking and explanation but do not reject an otherwise qualified account.
 
 ## Input contract
 
@@ -59,11 +86,16 @@ the schema and must be applied before provider work.
       "minItems": 1,
       "items": {"$ref": "#/$defs/signal"}
     },
+    "signal_match_mode": {
+      "enum": ["any", "all"],
+      "default": "any"
+    },
     "requested_roles": {
       "type": "array",
       "minItems": 1,
       "items": {"type": "string", "minLength": 1}
     },
+    "contact_role_groups": {"$ref": "#/$defs/contact_role_groups"},
     "contacts_per_company": {
       "type": "integer",
       "minimum": 1,
@@ -118,8 +150,27 @@ the schema and must be applied before provider work.
       "properties": {
         "kind": {"type": "string", "minLength": 1},
         "query": {"type": "string", "minLength": 1},
+        "min_age_days": {"type": "integer", "minimum": 0},
         "max_age_days": {"type": "integer", "minimum": 1},
         "source_preferences": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "contact_role_groups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "secondary"],
+      "properties": {
+        "primary": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "secondary": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
       }
     },
     "time_window": {
@@ -185,6 +236,7 @@ top-level result list or hide rejected/unresolved rows in a count.
     "accepted": {"type": "array", "items": {"$ref": "#/$defs/accepted_company"}},
     "rejected": {"type": "array", "items": {"$ref": "#/$defs/outcome_row"}},
     "unresolved": {"type": "array", "items": {"$ref": "#/$defs/outcome_row"}},
+    "stop_audit": {"$ref": "#/$defs/stop_audit"},
     "stop_reason": {
       "enum": ["target_met", "budget_exhausted", "no_productive_route", "provider_stop", "input_or_configuration_stop"]
     }
@@ -234,6 +286,30 @@ top-level result list or hide rejected/unresolved rows in a count.
         "source": {"$ref": "#/$defs/source"}
       }
     },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "date", "date_basis", "text", "source"],
+      "properties": {
+        "url": {"$ref": "#/$defs/url"},
+        "date": {"$ref": "#/$defs/date"},
+        "date_basis": {"enum": ["published", "posted", "updated", "observed_current"]},
+        "text": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"}
+      }
+    },
+    "qualification_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion", "importance", "status", "claim", "evidence"],
+      "properties": {
+        "criterion": {"type": "string", "minLength": 1},
+        "importance": {"enum": ["required", "preferred"]},
+        "status": {"enum": ["pass", "fail", "unknown"]},
+        "claim": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
+      }
+    },
     "signal_evidence": {
       "type": "object",
       "additionalProperties": false,
@@ -256,6 +332,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "current_title": {"type": "string", "minLength": 1},
         "requested_role": {"type": "string", "minLength": 1},
         "role_match": {"enum": ["exact", "normalized", "approved_family"]},
+        "role_group": {"enum": ["primary", "secondary"]},
         "company": {"type": "string", "minLength": 1},
         "domain": {"type": "string", "minLength": 1},
         "contact_url": {"$ref": "#/$defs/url"},
@@ -276,6 +353,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "company": {"$ref": "#/$defs/company"},
         "account_fit": {"$ref": "#/$defs/account_fit"},
         "signal_evidence": {"$ref": "#/$defs/signal_evidence"},
+        "qualification_checks": {"type": "array", "items": {"$ref": "#/$defs/qualification_check"}},
         "primary_contact": {"$ref": "#/$defs/contact"},
         "backup_contacts": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/contact"}},
         "contact_candidate_count": {"type": "integer", "minimum": 1, "maximum": 3},
@@ -299,7 +377,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       }
     },
     "reason_code": {
-      "enum": ["not_icp_fit", "stale_signal", "missing_account_evidence", "invalid_evidence_url", "invalid_evidence_date", "search_result_only", "profile_only", "duplicate_domain", "identity_conflict", "missing_name", "missing_current_title", "role_mismatch", "current_role_unverified", "company_mismatch", "missing_contact_evidence", "stale_contact_evidence", "duplicate_contact", "no_current_role_contact", "contact_target_shortfall", "route_not_connected", "budget_exhausted", "timeout_unknown", "provider_status", "gate_not_reached"]
+      "enum": ["explicit_exclusion", "not_icp_fit", "stale_signal", "missing_account_evidence", "invalid_evidence_url", "invalid_evidence_date", "search_result_only", "profile_only", "duplicate_domain", "identity_conflict", "missing_name", "missing_current_title", "role_mismatch", "current_role_unverified", "company_mismatch", "missing_contact_evidence", "stale_contact_evidence", "duplicate_contact", "no_current_role_contact", "contact_target_shortfall", "route_not_connected", "budget_exhausted", "timeout_unknown", "provider_status", "gate_not_reached"]
     },
     "outcome_row": {
       "type": "object",
@@ -310,6 +388,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "reason_code": {"$ref": "#/$defs/reason_code"},
         "reason_text": {"type": "string", "minLength": 1},
         "candidate": {"$ref": "#/$defs/candidate"},
+        "qualification_checks": {"type": "array", "items": {"$ref": "#/$defs/qualification_check"}},
         "provider_status": {"$ref": "#/$defs/provider_status"},
         "route_id": {"type": "string", "minLength": 1}
       }
@@ -322,7 +401,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "route_id": {"type": "string", "minLength": 1},
         "phase": {"enum": ["account_discovery", "account_verification", "contact_discovery", "contact_verification"]},
         "hypothesis": {"type": "string", "minLength": 1},
-        "provider": {"enum": ["deepline", "scrapingdog"]},
+        "provider": {"enum": ["deepline", "scrapingdog", "public_web"]},
         "operation": {"type": "string", "minLength": 1},
         "tool": {"type": "string", "minLength": 1},
         "request_summary": {"type": "string", "minLength": 1},
@@ -333,6 +412,52 @@ top-level result list or hide rejected/unresolved rows in a count.
         "provider_status": {"$ref": "#/$defs/provider_status"},
         "cost_credits": {"type": ["number", "null"], "minimum": 0},
         "error": {"type": "string", "minLength": 1}
+      }
+    },
+    "route_frontier_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route_id", "phase", "provider", "operation", "request_summary", "state", "reason"],
+      "properties": {
+        "route_id": {"type": "string", "minLength": 1},
+        "phase": {"enum": ["account_discovery", "account_verification", "contact_discovery", "contact_verification"]},
+        "provider": {"enum": ["deepline", "scrapingdog", "public_web"]},
+        "operation": {"type": "string", "minLength": 1},
+        "request_summary": {"type": "string", "minLength": 1},
+        "state": {"enum": ["untried", "continuable", "exhausted", "blocked"]},
+        "exhaustion_basis": {"enum": ["no_results", "continuation_exhausted", "no_new_unique_candidates", "query_family_exhausted"]},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"const": "exhausted"}}, "required": ["state"]},
+          "then": {"required": ["exhaustion_basis"]}
+        }
+      ]
+    },
+    "provider_call_capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deepline", "scrapingdog", "paid_calls_remaining"],
+      "properties": {
+        "deepline": {"enum": ["available", "unavailable", "unknown"]},
+        "scrapingdog": {"enum": ["available", "unavailable", "unknown"]},
+        "paid_calls_remaining": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "stop_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_shortfall", "candidate_companies_reviewed", "substantive_account_reviews", "exclusion_only_rejections", "duplicate_candidates", "frontier_complete", "provider_call_capacity", "route_frontier"],
+      "properties": {
+        "target_shortfall": {"type": "integer", "minimum": 0},
+        "candidate_companies_reviewed": {"type": "integer", "minimum": 0},
+        "substantive_account_reviews": {"type": "integer", "minimum": 0},
+        "exclusion_only_rejections": {"type": "integer", "minimum": 0},
+        "duplicate_candidates": {"type": "integer", "minimum": 0},
+        "frontier_complete": {"const": true},
+        "provider_call_capacity": {"$ref": "#/$defs/provider_call_capacity"},
+        "route_frontier": {"type": "array", "items": {"$ref": "#/$defs/route_frontier_item"}}
       }
     },
     "icp": {
@@ -364,8 +489,27 @@ top-level result list or hide rejected/unresolved rows in a count.
       "properties": {
         "kind": {"type": "string", "minLength": 1},
         "query": {"type": "string", "minLength": 1},
+        "min_age_days": {"type": "integer", "minimum": 0},
         "max_age_days": {"type": "integer", "minimum": 1},
         "source_preferences": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "contact_role_groups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "secondary"],
+      "properties": {
+        "primary": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "secondary": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
       }
     },
     "time_window": {
@@ -400,7 +544,9 @@ top-level result list or hide rejected/unresolved rows in a count.
         "target_count": {"type": "integer", "minimum": 1},
         "icp": {"$ref": "#/$defs/icp"},
         "buying_signals": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/signal"}},
+        "signal_match_mode": {"enum": ["any", "all"], "default": "any"},
         "requested_roles": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "contact_role_groups": {"$ref": "#/$defs/contact_role_groups"},
         "contacts_per_company": {"type": "integer", "minimum": 1, "maximum": 3},
         "time_window": {"$ref": "#/$defs/time_window"},
         "contact_fields": {"type": "array", "uniqueItems": true, "items": {"enum": ["email", "phone"]}},
@@ -454,18 +600,72 @@ top-level result list or hide rejected/unresolved rows in a count.
 }
 ```
 
-The following semantic checks supplement JSON Schema: every accepted contact's
+The following semantic checks supplement JSON Schema: every signal's
+`min_age_days` must be no greater than its `max_age_days` when both are
+present; every accepted contact's
 `domain` must equal its accepted company domain; `contact_candidate_count` must
 equal one plus the number of backups; `backup_shortfall` must equal
 `max(0, request.contacts_per_company - contact_candidate_count)`; each accepted
 account domain must be unique; `account_fit` must support ICP fit;
-`signal_evidence` must support the current signal and fall within the input
-signal window; their evidence URLs and sources may differ; contact evidence
-must explicitly support a current role at that company; `approved_family` must
-be within the full user-approved role family and never an unapproved adjacent
-function; and optional contact fields must be absent unless requested.
+`signal_evidence` must support a signal selected by `signal_match_mode` and
+fall within that signal's bounds (or the input time window when a signal bound
+is absent); their evidence URLs and sources may differ; contact evidence must
+explicitly support a current role at that company; `approved_family` must be
+within the full user-approved role family and never an unapproved adjacent
+function; every accepted contact's `requested_role` must be in
+`request.requested_roles`; and optional contact fields must be absent unless
+requested. Validate `primary_contact` and every item in `backup_contacts` with
+the same role and role-group rules. When
+`request.contact_role_groups` is present, its `primary` and
+`secondary` arrays must have `request.requested_roles` as their deduplicated
+union. Search and rank primary roles before secondary roles, but a valid
+secondary-role contact remains eligible when no primary-role contact passes;
+it must not create a false negative. If `role_group` is present, it must match
+the group containing `requested_role`; omit it when the group is unknown or
+the legacy request has no role groups. When
+`qualification_checks` is present, required checks with `fail` reject the
+account, required checks with `unknown` make it unresolved, and preferred
+checks do not reject an account. A check with `unknown` must not be rewritten
+as `fail` merely because no source was found.
 `provider_status` belongs to a route or outcome receipt, never in place of
-`state`.
+`state`. When accepted companies are below `target_count`, `stop_audit` is
+required and every route-frontier item must be `exhausted` or `blocked` before
+the run may end, and `frontier_complete` must be true. Every `exhausted`
+frontier item must have a determinate `ok`, `partial`, or `no_results` attempt
+receipt in `routes` and an `exhaustion_basis`. A rate limit, authentication,
+quota, timeout, schema, provider, or configuration error makes a route
+`blocked`, never `exhausted`. Every `blocked` item must have either a blocking
+attempt receipt or an unresolved route-outcome receipt;
+this records routes that cannot start because of budget, connection, or
+configuration. Every item in `routes`, including a no-cost `public_web` query,
+must have the same `route_id` in the frontier. `route_id` identifies one route path:
+it may appear once in `routes`, once among stage=`route` outcomes, and once in
+`route_frontier`. A route receipt and a route outcome may share an ID only when
+the receipt itself has a blocking provider status and the outcome records that
+same failed attempt. A determinate `ok`, `partial`, or `no_results` receipt must
+not share its ID with a later blocked continuation; that continuation needs a
+new route ID. Reuse for separate attempts is invalid. `target_shortfall`
+equals
+`max(0, target_count - accepted_companies)`. Reviewed-company counts use unique
+canonical domains, or normalized company names when a domain is not yet known;
+`explicit_exclusion` is the only exclusion-only reason. `budget_exhausted` is
+valid only when both paid providers have `unavailable` call capacity and no
+public-web route remains actionable. `provider_stop` requires at least one
+blocked route and is invalid while either paid provider can make another
+bounded call. `no_productive_route` requires at least one exhausted route; use
+`provider_stop` when every route is blocked. Run `scripts/validate_run.py` against the
+completed `results.json` to enforce these completion rules. This completion
+validator supplements rather than replaces validation against the JSON Schema
+and the other semantic checks above.
+
+Budget accounting uses actual provider usage, not planning estimates. Output
+`paid_calls` must equal the sum of route `paid_calls`. For each provider, a
+numeric `spent` value must equal the sum of its numeric route `cost_credits`.
+If any paid route has unknown cost, that provider's `spent` value, its call
+capacity, and the overall budget status must be `unknown`. `within_budget`
+requires known actual spend for both providers. Known spend or paid calls above
+a hard limit are invalid. Put planning estimates in the report or route
+explanation, not in actual-spend fields.
 
 ## `leads.csv` contract
 
@@ -493,5 +693,6 @@ capability search/describe and execute receipt (without secrets); pilot limits,
 rows, duplicates, costs, and live provider statuses; account and contact gate
 decisions; primary/backups selection; adaptive reserve/refill decisions; all
 accepted, rejected, and unresolved rows with stable reasons; contact target
-shortfalls; and the final stop reason. Do not claim a discovery-candidate
-endpoint ran, and do not include raw provider payloads or credentials.
+shortfalls; the route frontier and call capacity; reviewed-company counts; and
+the final stop reason. Do not claim a discovery-candidate endpoint ran, and do
+not include raw provider payloads or credentials.

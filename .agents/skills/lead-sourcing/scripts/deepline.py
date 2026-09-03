@@ -46,7 +46,16 @@ _INLINE_SECRET = re.compile(
 )
 _STATUS_WORDS = {status: status for status in STATUSES}
 _DEEPLINE_BIN = "DEEPLINE_BIN"
-_EMPTY_CONTAINER_KEYS = {"toolResponse", "tool_response", "rawV2", "raw_v2", "raw", "getters"}
+_EMPTY_CONTAINER_KEYS = {
+    "toolResponse",
+    "tool_response",
+    "rawV2",
+    "raw_v2",
+    "raw",
+    "getters",
+    "extractedLists",
+    "extracted_lists",
+}
 _PROVIDER_ERROR_STATUSES = {"rate_limited", "auth_failed", "quota_exceeded", "timeout", "provider_error"}
 _FAILURE_STATUSES = _PROVIDER_ERROR_STATUSES | {"schema_error", "config_error"}
 _CONTACT_RECORD_KEYS = {
@@ -61,6 +70,96 @@ _CONTACT_RECORD_KEYS = {
     "last_name",
     "lastName",
 }
+_SCALAR_RESULT_KEYS = ("count", "total")
+_EXTRACTED_RESULT_KEYS = (
+    "suggestions",
+    "results",
+    "items",
+    "records",
+    "data",
+    "rows",
+    "values",
+    "preview",
+    "elements",
+    "matches",
+    "evidence",
+)
+
+
+def _extracted_list_records(value: Any) -> List[Any]:
+    """Extract rows from serialized Deepline list/getter output.
+
+    ``deepline tools execute --json`` normally exposes provider rows through
+    ``toolResponse.raw``. Some tools, including autocomplete tools, expose
+    only a declared list such as ``suggestions`` (or a serialized dataset
+    preview) in the command envelope. Keep this handling scoped to the
+    extracted-list container so a generic ``{"value": ...}`` response is not
+    accepted as a provider envelope by accident.
+    """
+
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return []
+    empty_rows: Optional[List[Any]] = None
+    # The CLI may include several lists in this container. Only inspect known
+    # result-bearing keys first, because metadata lists such as ``columns``
+    # can appear before the actual provider rows.
+    for key in _EXTRACTED_RESULT_KEYS:
+        candidate = value.get(key)
+        if isinstance(candidate, list):
+            if candidate:
+                return candidate
+            empty_rows = candidate
+            continue
+        if not isinstance(candidate, dict):
+            continue
+        if any(row_key in candidate for row_key in ("value", "label")):
+            return [candidate]
+        rows = _extracted_list_records(candidate)
+        if rows:
+            return rows
+    # A serialized single row can be represented directly in the container.
+    if any(key in value for key in ("value", "label")):
+        return [value]
+    return empty_rows or []
+
+
+def _is_extracted_list_envelope(value: Any) -> bool:
+    """Return whether a serialized extracted-list container has a known shape."""
+
+    if isinstance(value, list):
+        return True
+    if not isinstance(value, dict):
+        return False
+    if not value:
+        return True
+    if any(key in value for key in ("value", "label")):
+        return True
+    for key in _EXTRACTED_RESULT_KEYS:
+        if key not in value:
+            continue
+        candidate = value[key]
+        if isinstance(candidate, list):
+            return True
+        if isinstance(candidate, dict) and _is_extracted_list_envelope(candidate):
+            return True
+    return False
+
+
+def _scalar_result(value: Any) -> Optional[Dict[str, Any]]:
+    """Return a valid count/total summary object as one result row."""
+
+    if not isinstance(value, dict):
+        return None
+    if not any(
+        key in value
+        and isinstance(value[key], (int, float))
+        and not isinstance(value[key], bool)
+        for key in _SCALAR_RESULT_KEYS
+    ):
+        return None
+    return value
 
 
 class InputError(ValueError):
@@ -227,7 +326,11 @@ def normalize_evidence(
 
     source: Dict[str, Any] = row if isinstance(row, dict) else {"value": row}
     result: Dict[str, Any] = redact(source)
-    result["company"] = _text(_first(source, "company", "company_name", "account", "organization"))
+    basic_info = source.get("basic_info")
+    basic_info = basic_info if isinstance(basic_info, dict) else {}
+    result["company"] = _text(
+        _first(source, "company", "company_name", "account", "organization")
+    ) or _text(_first(basic_info, "name", "company", "company_name"))
     domain_value = _first(source, "domain", "company_domain")
     if _is_linkedin_url(domain_value):
         domain_value = None
@@ -237,6 +340,10 @@ def normalize_evidence(
             if candidate not in (None, "") and not _is_linkedin_url(candidate):
                 domain_value = candidate
                 break
+    if domain_value in (None, ""):
+        domain_value = _first(
+            basic_info, "primary_domain", "domain", "website", "company_url"
+        )
     result["domain"] = None if _is_linkedin_url(domain_value) else _domain(domain_value)
     result["signal"] = _text(_first(source, "signal", "signal_type", "intent", "type", "category"))
     result["evidence_url"] = _text(_first(source, "evidence_url", "source_url", "url", "link", "source"))
@@ -371,6 +478,7 @@ def _records(value: Any) -> List[Any]:
         return value
     if not isinstance(value, dict):
         return []
+    empty_direct: Optional[List[Any]] = None
     for key in (
         "evidence",
         "results",
@@ -381,15 +489,25 @@ def _records(value: Any) -> List[Any]:
         "tools",
         "getters",
         "elements",
+        "suggestions",
     ):
         candidate = value.get(key)
         if isinstance(candidate, list):
-            return candidate
+            if candidate:
+                return candidate
+            empty_direct = candidate
+    for key in ("extractedLists", "extracted_lists"):
+        candidate = value.get(key)
+        if isinstance(candidate, (dict, list)):
+            records = _extracted_list_records(candidate)
+            if records:
+                return records
     for key in (
         "data",
         "output",
         "result",
         "response",
+        "summary",
         "toolResponse",
         "tool_response",
         "rawV2",
@@ -403,6 +521,21 @@ def _records(value: Any) -> List[Any]:
             found = _records(candidate)
             if found:
                 return found
+    # The CLI emits a bounded row preview when it materializes a declared list
+    # but the raw provider envelope does not contain the list inline.
+    for key in ("output_preview", "outputPreview"):
+        candidate = value.get(key)
+        if isinstance(candidate, dict):
+            for preview_key in ("rows", "preview", "items"):
+                rows = candidate.get(preview_key)
+                if isinstance(rows, list):
+                    return rows
+            summary = candidate.get("summary")
+            scalar = _scalar_result(summary)
+            if scalar is not None:
+                return [scalar]
+    if empty_direct is not None:
+        return empty_direct
     # A single row is useful for a provider that returns one company/evidence
     # object or one contact object. Contact-shaped direct responses are common
     # for person search tools and must not be treated as an unknown envelope.
@@ -418,6 +551,9 @@ def _records(value: Any) -> List[Any]:
         )
     ) or any(key in value for key in _CONTACT_RECORD_KEYS):
         return [value]
+    scalar = _scalar_result(value)
+    if scalar is not None:
+        return [scalar]
     return []
 
 
@@ -508,9 +644,21 @@ def _known_envelope(value: Any) -> bool:
             except ValueError:
                 return False
         return False
+    if _scalar_result(value) is not None:
+        return True
     if any(
         key in value
-        for key in ("evidence", "results", "items", "records", "rows", "matches", "tools", "elements")
+        for key in (
+            "evidence",
+            "results",
+            "items",
+            "records",
+            "rows",
+            "matches",
+            "tools",
+            "elements",
+            "suggestions",
+        )
     ):
         return True
     if any(
@@ -525,10 +673,23 @@ def _known_envelope(value: Any) -> bool:
         )
     ) or any(key in value for key in _CONTACT_RECORD_KEYS):
         return True
+    for key in ("extractedLists", "extracted_lists"):
+        if key in value:
+            candidate = value[key]
+            if candidate in (None, ""):
+                return True
+            if isinstance(candidate, (dict, list)):
+                return _is_extracted_list_envelope(candidate)
+    for key in ("output_preview", "outputPreview"):
+        candidate = value.get(key)
+        if isinstance(candidate, dict):
+            if any(isinstance(candidate.get(preview_key), list) for preview_key in ("rows", "preview", "items")):
+                return True
     for key in (
         "toolResponse",
         "tool_response",
         "response",
+        "summary",
         "data",
         "output",
         "result",
@@ -846,15 +1007,27 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
         except ValueError:
             parsed = None
     if returncode != 0:
-        # Prefer stderr for classification. Some CLI help text contains words
-        # such as ``rate_limit`` in examples and must not change the outcome.
+        # A current CLI can print an update notice before a structured provider
+        # error. Prefer that parsed error over notice/help text. Otherwise,
+        # prefer stderr because stdout help examples can contain status words.
+        parsed_error = _envelope_error(parsed)
+        parsed_status = _envelope_status(parsed)
         diagnostic = stderr.strip() or stdout.strip()
-        status = _classify_error(diagnostic)
+        if parsed_error:
+            status = (
+                parsed_status
+                if parsed_status in _FAILURE_STATUSES
+                else _classify_error(parsed_error["message"])
+            )
+            error = parsed_error
+        else:
+            status = _classify_error(diagnostic)
+            error = _safe_error(diagnostic)
         body = {
             "status": status,
             "provider": "deepline",
             "operation": request["operation"],
-            "error": _safe_error(diagnostic),
+            "error": error,
         }
         if request.get("tool"):
             body["tool"] = request["tool"]
