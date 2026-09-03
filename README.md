@@ -151,7 +151,24 @@ reports/<run-id>/
   decision, and stop receipts.
 - `results.json` contains accepted, rejected, and unresolved outcomes under the
   versioned schema.
-- `leads.csv` contains one row per accepted company and primary contact.
+- `leads.csv` contains one sales-ready row per accepted company and primary
+  contact. Its fixed columns are:
+
+```text
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Details,Phone
+```
+
+Generate it from the structured result instead of assembling rows by hand:
+
+```bash
+python3 .agents/skills/lead-sourcing/scripts/export_csv.py \
+  reports/<run-id>/results.json \
+  reports/<run-id>/leads.csv
+```
+
+The exporter keeps the exact column order and RFC 4180 quoting. Full evidence,
+run state, rejected rows, unresolved rows, and backup contacts stay in
+`results.json` and `report.md`.
 
 Contact objects may include `role_group` (`primary` or `secondary`) for
 traceability. The output slot `primary_contact` is separate from this role
@@ -203,7 +220,8 @@ python3 -m unittest discover \
 
 The tests cover request bounds, provider statuses, error redaction, current-role
 normalization, response-envelope handling, evidence truncation, HTML text
-extraction, output-contract semantics, budget accounting, and completion stops.
+extraction, CSV export, output-contract semantics, budget accounting, and
+completion stops.
 
 Validate a completed run's target and route-exhaustion receipt with:
 

@@ -328,9 +328,24 @@ def normalize_evidence(
     result: Dict[str, Any] = redact(source)
     basic_info = source.get("basic_info")
     basic_info = basic_info if isinstance(basic_info, dict) else {}
+    positions = source.get("currentPositions")
+    positions = positions if isinstance(positions, list) else []
+    current_position = next(
+        (
+            position
+            for position in positions
+            if isinstance(position, dict) and position.get("current") is True
+        ),
+        next((position for position in positions if isinstance(position, dict)), {}),
+    )
     result["company"] = _text(
         _first(source, "company", "company_name", "account", "organization")
-    ) or _text(_first(basic_info, "name", "company", "company_name"))
+    ) or _text(_first(basic_info, "name", "company", "company_name")) or _text(
+        _first(current_position, "companyName", "company_name")
+    )
+    result["company_linkedin_url"] = _text(
+        _first(source, "company_linkedin_url", "companyLinkedinUrl")
+    ) or _text(_first(current_position, "companyLinkedinUrl", "company_linkedin_url"))
     domain_value = _first(source, "domain", "company_domain")
     if _is_linkedin_url(domain_value):
         domain_value = None
@@ -430,7 +445,7 @@ def normalize_evidence(
             "jobTitle",
             "contactTitle",
         )
-    )
+    ) or _text(_first(current_position, "title"))
     contact_email = _text(
         _first(
             source,
@@ -775,6 +790,20 @@ def _timeout_seconds(value: Any, default: float = 30.0, maximum: float = 120.0) 
     return min(number, maximum)
 
 
+def _result_limit(value: Any, default: int = 10, maximum: int = 10) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise InputError("limit must be an integer")
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise InputError("limit must be an integer") from exc
+    if number != value or number <= 0:
+        raise InputError("limit must be a positive integer")
+    return min(number, maximum)
+
+
 def _validate_request(request: Any) -> Dict[str, Any]:
     if not isinstance(request, dict):
         raise InputError("input must be a JSON object")
@@ -820,6 +849,9 @@ def _validate_request(request: Any) -> Dict[str, Any]:
             raise InputError("execute payload must be a JSON object")
         request["tool"] = tool.strip()
         request["payload"] = payload
+        # This wrapper-only bound keeps every execute pilot within the skill's
+        # maximum returned-row limit. It is not sent to the provider tool.
+        request["limit"] = _result_limit(request.get("limit"))
     # Paid execute calls can take longer than catalog reads. A longer default
     # reduces the risk that a local timeout tempts a caller to repeat a paid
     # call whose remote outcome is unknown.
@@ -898,9 +930,12 @@ def _catalog_output(
 
 
 def _execute_output(
-    parsed: Any, tool: str, entity_type: Optional[str] = None
+    parsed: Any,
+    tool: str,
+    entity_type: Optional[str] = None,
+    limit: int = 10,
 ) -> Dict[str, Any]:
-    records = _records(parsed)
+    records = _records(parsed)[:limit]
     status = _envelope_status(parsed)
     if not _known_envelope(parsed):
         body = {
@@ -1046,7 +1081,12 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
             body["entity_type"] = request["entity_type"]
         return body, 0
     if request["operation"] == "execute":
-        return _execute_output(parsed, request["tool"], request.get("entity_type")), 0
+        return _execute_output(
+            parsed,
+            request["tool"],
+            request.get("entity_type"),
+            request["limit"],
+        ), 0
     return _catalog_output(
         request["operation"], parsed, request.get("tool"), request.get("entity_type")
     ), 0

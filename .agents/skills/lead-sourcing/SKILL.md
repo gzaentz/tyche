@@ -110,8 +110,10 @@ negative. Resolve obvious company identity ambiguity before paid work.
    blocked. `budget_exhausted`
    additionally requires that neither paid provider can make another bounded
    call. Never exceed a hard cap to reach the target.
-7. Write all required artifacts and validate them against the full output
-   contract. Then run the separate completion validator with
+7. Write `results.json`, generate `leads.csv` with
+   `python3 scripts/export_csv.py <results.json> <leads.csv>`, and write the
+   report. Do not hand-build or reorder CSV columns. Validate all artifacts
+   against the full output contract. Then run the separate completion validator with
    `python3 scripts/validate_run.py <path-to-results.json>` from this skill
    directory. If validation reports an actionable frontier item or incomplete
    stop audit, continue the run instead of presenting it as complete.
@@ -146,6 +148,12 @@ reason. For a target shortfall it must also show the full route frontier,
 continuation decisions, remaining call capacity, reviewed-company counts, and
 the reason each remaining route is exhausted or blocked. Do not store
 credentials or raw secrets.
+
+The CSV is the sales-ready primary-contact view. It uses the exact fixed header
+in the output contract. Company and contact fields that are not verified stay
+blank; their absence does not become a qualification failure unless the input
+explicitly requests that contact field. Keep full evidence, backup contacts,
+run status, and rejection details in `results.json` and the report.
 
 This is a small direct-wrapper workflow. It has no `Sourcing_model` or `pp`
 runtime dependency, browser harness, server, database, queue, CRM write,

@@ -259,7 +259,15 @@ top-level result list or hide rejected/unresolved rows in a count.
       "required": ["canonical_name", "domain"],
       "properties": {
         "canonical_name": {"type": "string", "minLength": 1},
-        "domain": {"type": "string", "minLength": 1}
+        "domain": {"type": "string", "minLength": 1},
+        "website": {"$ref": "#/$defs/url"},
+        "linkedin_url": {"$ref": "#/$defs/url"},
+        "industry": {"type": "string", "minLength": 1},
+        "sub_industry": {"type": "string", "minLength": 1},
+        "hq_state": {"type": "string", "minLength": 1},
+        "hq_country": {"type": "string", "minLength": 1},
+        "employee_count": {"type": "integer", "minimum": 0},
+        "description": {"type": "string", "minLength": 1}
       }
     },
     "source": {
@@ -336,6 +344,10 @@ top-level result list or hide rejected/unresolved rows in a count.
         "company": {"type": "string", "minLength": 1},
         "domain": {"type": "string", "minLength": 1},
         "contact_url": {"$ref": "#/$defs/url"},
+        "linkedin_url": {"$ref": "#/$defs/url"},
+        "city": {"type": "string", "minLength": 1},
+        "state": {"type": "string", "minLength": 1},
+        "country": {"type": "string", "minLength": 1},
         "evidence_url": {"$ref": "#/$defs/url"},
         "evidence_date": {"$ref": "#/$defs/date"},
         "evidence_date_basis": {"enum": ["published", "posted", "updated", "observed_current"]},
@@ -672,18 +684,39 @@ explanation, not in actual-spend fields.
 Write UTF-8 CSV using RFC 4180 quoting. The header is fixed and ordered:
 
 ```text
-state,run_id,company,domain,fit_claim,fit_evidence_url,fit_evidence_date,fit_evidence_text,signal,evidence_url,evidence_date,evidence_text,requested_role,primary_contact_name,primary_contact_title,primary_contact_url,contact_evidence_url,contact_evidence_date,contact_evidence_text,backup_contacts_json,email,phone
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Details,Phone
 ```
 
 `leads.csv` is the clean flattened deliverable. Write exactly one row for each
 accepted primary company-contact pair and no rows for rejected, unresolved, or
-route outcomes. `state` is always the literal `accepted`; uniqueness is by
-canonical domain. `fit_claim`, `fit_evidence_url`, `fit_evidence_date`, and
-`fit_evidence_text` come from `account_fit`; `signal`, `evidence_url`,
-`evidence_date`, and `evidence_text` come from `signal_evidence`.
-`backup_contacts_json` is a JSON array of zero to two backup contacts. Rejected,
-unresolved, and provider receipts remain in `results.json` and `report.md`.
-`email` and `phone` are blank unless requested in `contact_fields`.
+route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
+
+| CSV column | `results.json` source |
+|---|---|
+| `Name` | `primary_contact.full_name` |
+| `Email` | `primary_contact.email`, otherwise blank |
+| `Role` | `primary_contact.current_title` |
+| `Company` | `company.canonical_name` |
+| `LinkedIn` | `primary_contact.linkedin_url`; use `contact_url` only when it is a LinkedIn URL |
+| `Website` | `company.website`; otherwise `https://` plus the canonical `company.domain` |
+| `Company LinkedIn` | `company.linkedin_url`, otherwise blank |
+| `Industry` | `company.industry`, otherwise blank |
+| `Sub Industry` | `company.sub_industry`, otherwise blank |
+| `City` | `primary_contact.city`, otherwise blank |
+| `State` | `primary_contact.state`, otherwise blank |
+| `Country` | `primary_contact.country`, otherwise blank |
+| `HQ State` | `company.hq_state`, otherwise blank |
+| `HQ Country` | `company.hq_country`, otherwise blank |
+| `Employee Count` | `company.employee_count`, otherwise blank; never turn a range into an exact count |
+| `Description` | `company.description`, otherwise blank |
+| `Intent Details` | signal name, date, evidence text, and source URL from `signal_evidence` |
+| `Phone` | `primary_contact.phone`, otherwise blank |
+
+Rejected, unresolved, backup contacts, provider receipts, fit evidence, and the
+full signal-evidence structure remain in `results.json` and `report.md` instead
+of widening the sales-ready CSV. `Email` and `Phone` are blank unless the input
+requests them and a verified value is available. Generate the file with
+`scripts/export_csv.py` so the spelling, order, and quoting stay deterministic.
 
 ## `report.md` minimum contents
 

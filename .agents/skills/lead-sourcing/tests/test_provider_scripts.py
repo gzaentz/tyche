@@ -104,6 +104,43 @@ class ProviderScriptTests(unittest.TestCase):
         self.assertNotIn("payload-only-secret", json.dumps(body))
         self.assertFalse(pathlib.Path(seen["payload_path"]).exists())
 
+    def test_deepline_execute_limit_is_wrapper_only_and_capped_at_ten(self):
+        seen = {}
+        rows = [
+            {"company_name": f"Company {index}", "website": f"c{index}.test"}
+            for index in range(12)
+        ]
+
+        def fake_run(command, **_kwargs):
+            payload_path = command[command.index("--input") + 1][1:]
+            with open(payload_path, encoding="utf-8") as handle:
+                seen["payload"] = json.load(handle)
+            return FakeProcess(json.dumps({"toolResponse": {"rawV2": {"results": rows}}}))
+
+        with mock.patch.object(DEEPLINE.subprocess, "run", side_effect=fake_run):
+            body, code = DEEPLINE.run(
+                {
+                    "operation": "execute",
+                    "tool": "company_search",
+                    "payload": {"query": "inventory"},
+                    "limit": 20,
+                }
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(body["results"]), 10)
+        self.assertEqual(seen["payload"], {"query": "inventory"})
+
+        with self.assertRaises(DEEPLINE.InputError):
+            DEEPLINE._validate_request(
+                {
+                    "operation": "execute",
+                    "tool": "company_search",
+                    "payload": {},
+                    "limit": 0,
+                }
+            )
+
     def test_deepline_leading_json_notice_and_provider_outcomes(self):
         self.assertEqual(DEEPLINE._json_from_text("notice\n[1, 2]"), [1, 2])
 
@@ -252,6 +289,39 @@ class ProviderScriptTests(unittest.TestCase):
             }
         }
         self.assertEqual(DEEPLINE._records(parsed)[0]["company_name"], "Solo")
+
+    def test_deepline_normalizes_current_linkedin_position(self):
+        body = DEEPLINE._execute_output(
+            {
+                "toolResponse": {
+                    "rawV2": {
+                        "elements": [
+                            {
+                                "firstName": "Alex",
+                                "lastName": "Rivera",
+                                "linkedinUrl": "https://www.linkedin.com/in/alex-rivera",
+                                "currentPositions": [
+                                    {
+                                        "companyName": "Acme",
+                                        "companyLinkedinUrl": "https://www.linkedin.com/company/acme",
+                                        "title": "Logistics Director",
+                                        "current": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            },
+            "harvestapi_search_leads",
+            "contact",
+        )
+
+        row = body["results"][0]
+        self.assertEqual(row["company"], "Acme")
+        self.assertEqual(row["company_linkedin_url"], "https://www.linkedin.com/company/acme")
+        self.assertEqual(row["full_name"], "Alex Rivera")
+        self.assertEqual(row["current_title"], "Logistics Director")
 
     def test_deepline_current_and_legacy_envelopes_preserve_all_rows(self):
         rows = [
