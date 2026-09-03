@@ -25,7 +25,7 @@ provider adapters, budget controls, and output contract.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
 - Keeps an auditable paid and public-web route frontier, and continues refilling
   until the target is met or every remaining route is exhausted or blocked.
-- Produces an audit report, structured JSON, and a clean CSV.
+- Produces an audit report, structured JSON, and a clean Excel workbook.
 - Does not send outreach or write to a CRM.
 
 ## How it works
@@ -37,13 +37,13 @@ Codex
   -> Deepline CLI adapter or ScrapingDog adapter
   -> company gate
   -> contact gate
-  -> reports/<run-id>/{report.md,results.json,leads.csv}
+  -> reports/<run-id>/{report.md,results.json,leads.xlsx}
 ```
 
 The main instructions are in
 [SKILL.md](.agents/skills/lead-sourcing/SKILL.md). Provider operations are in
 [tools.md](.agents/skills/lead-sourcing/references/tools.md). The exact input,
-JSON, and CSV contracts are in
+JSON, and Excel workbook contracts are in
 [output-contract.md](.agents/skills/lead-sourcing/references/output-contract.md).
 
 ## Requirements
@@ -144,37 +144,42 @@ Each run creates exactly:
 reports/<run-id>/
 |-- report.md
 |-- results.json
-`-- leads.csv
+`-- leads.xlsx
 ```
 
 - `report.md` is the human audit record. It includes route, evidence, cost,
   decision, and stop receipts.
 - `results.json` contains accepted, rejected, and unresolved outcomes under the
   versioned schema.
-- `leads.csv` contains one sales-ready row per accepted company and primary
+- `leads.xlsx` contains one sales-ready row per accepted company and primary
   contact. Its fixed columns are:
 
 ```text
 Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Details,Phone
 ```
 
-Generate it from the structured result instead of assembling rows by hand:
+Generate it from the structured result instead of assembling rows by hand. The
+Codex agent first loads the bundled workspace dependencies, then passes the
+returned Node and node_modules paths to the exporter:
 
 ```bash
-python3 .agents/skills/lead-sourcing/scripts/export_csv.py \
+<bundled-node> .agents/skills/lead-sourcing/scripts/export_xlsx.mjs \
   reports/<run-id>/results.json \
-  reports/<run-id>/leads.csv
+  reports/<run-id>/leads.xlsx \
+  --node-modules <bundled-node-modules>
 ```
 
-The exporter keeps the exact column order and RFC 4180 quoting. Full evidence,
-run state, rejected rows, unresolved rows, and backup contacts stay in
-`results.json` and `report.md`.
+The exporter keeps the exact column order, adds filters and clear headers, and
+formats long text for review. The workbook library comes from the Codex
+harness, so TYCHE does not add an npm dependency. Full evidence, run state,
+rejected rows, unresolved rows, and backup contacts stay in `results.json` and
+`report.md`.
 
 Contact objects may include `role_group` (`primary` or `secondary`) for
 traceability. The output slot `primary_contact` is separate from this role
 group and may contain a valid secondary fallback.
 
-Email and phone fields stay absent from JSON and blank in CSV unless the input
+Email and phone fields stay absent from JSON and blank in the workbook unless the input
 requests them. Generated reports are ignored by Git because evidence and
 contact data become stale.
 
@@ -220,7 +225,7 @@ python3 -m unittest discover \
 
 The tests cover request bounds, provider statuses, error redaction, current-role
 normalization, response-envelope handling, evidence truncation, HTML text
-extraction, CSV export, output-contract semantics, budget accounting, and
+extraction, workbook export, output-contract semantics, budget accounting, and
 completion stops.
 
 Validate a completed run's target and route-exhaustion receipt with:

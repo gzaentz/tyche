@@ -13,3 +13,6 @@ __pycache__/
 
 # Generated sourcing runs
 reports/
+
+# Conversation workbook previews and deliverables
+outputs/

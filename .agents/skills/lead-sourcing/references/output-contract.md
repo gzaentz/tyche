@@ -3,7 +3,7 @@
 This is the normative, machine-readable contract for one lead-sourcing run.
 The JSON Schema is draft 2020-12. A run directory is
 `reports/<run-id>/` and contains exactly `report.md`, `results.json`, and
-`leads.csv`.
+`leads.xlsx`.
 
 ## Lifecycle invariants
 
@@ -39,8 +39,8 @@ The JSON Schema is draft 2020-12. A run directory is
 7. `email` and `phone` are absent from JSON contact objects unless the input
    `contact_fields` requests them. When requested, every accepted primary
    contact must contain a non-empty valid value; otherwise the company remains
-   unresolved. In CSV they are blank unless requested. Do not perform the
-   lookup before the identity/current-role gate.
+   unresolved. In the workbook they are blank unless requested. Do not perform
+   the lookup before the identity/current-role gate.
 8. `target_count` is the completion condition. After account or contact
    attrition, source one replacement from a changed route while the accepted
    count is short and the route frontier is actionable. Do not prefetch or
@@ -679,19 +679,20 @@ requires known actual spend for both providers. Known spend or paid calls above
 a hard limit are invalid. Put planning estimates in the report or route
 explanation, not in actual-spend fields.
 
-## `leads.csv` contract
+## `leads.xlsx` contract
 
-Write UTF-8 CSV using RFC 4180 quoting. The header is fixed and ordered:
+Write one valid Excel workbook with one worksheet named `Leads`. The first row
+is the fixed, ordered header:
 
 ```text
 Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Details,Phone
 ```
 
-`leads.csv` is the clean flattened deliverable. Write exactly one row for each
+`leads.xlsx` is the clean flattened deliverable. Write exactly one row for each
 accepted primary company-contact pair and no rows for rejected, unresolved, or
 route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 
-| CSV column | `results.json` source |
+| Workbook column | `results.json` source |
 |---|---|
 | `Name` | `primary_contact.full_name` |
 | `Email` | `primary_contact.email`, otherwise blank |
@@ -714,9 +715,15 @@ route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 
 Rejected, unresolved, backup contacts, provider receipts, fit evidence, and the
 full signal-evidence structure remain in `results.json` and `report.md` instead
-of widening the sales-ready CSV. `Email` and `Phone` are blank unless the input
-requests them and a verified value is available. Generate the file with
-`scripts/export_csv.py` so the spelling, order, and quoting stay deterministic.
+of widening the sales-ready workbook. `Email` and `Phone` are blank unless the
+input requests them and a verified value is available. Generate the file with
+`scripts/export_xlsx.mjs` so the spelling, order, types, and layout stay
+deterministic. Use the harness-provided `@oai/artifact-tool`; it is not a TYCHE
+project dependency and TYCHE does not install or pin it. When accepted rows
+exist, format the range as an Excel table with filters, hide gridlines, and wrap
+long description and intent text.
+Preserve exact employee counts as numbers, keep ranges as text, and leave
+unverified optional values as empty cells rather than placeholder text.
 
 ## `report.md` minimum contents
 

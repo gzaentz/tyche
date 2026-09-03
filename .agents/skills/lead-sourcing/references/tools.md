@@ -267,7 +267,7 @@ never a value:
 - `SCRAPINGDOG_API_KEY`.
 
 For each run, write exactly `reports/<run-id>/report.md`,
-`reports/<run-id>/results.json`, and `reports/<run-id>/leads.csv`. Include the
+`reports/<run-id>/results.json`, and `reports/<run-id>/leads.xlsx`. Include the
 request, hypotheses, route commands and filters, pilot observations, statuses,
 costs, accepted evidence, contact selection, and rejected or unresolved rows
 with stable reasons. Keep provider receipts separate from output state. Never

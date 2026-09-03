@@ -10,7 +10,7 @@ signal, and one or more requested contact roles. The run produces unique,
 evidence-backed companies and, for each accepted company, one primary contact
 plus zero to two backups. Read [references/tools.md](references/tools.md) for
 live provider operations and [references/output-contract.md](references/output-contract.md)
-for the exact input, output, and CSV contracts.
+for the exact input, output, and Excel workbook contracts.
 
 ## Operating rules
 
@@ -110,10 +110,13 @@ negative. Resolve obvious company identity ambiguity before paid work.
    blocked. `budget_exhausted`
    additionally requires that neither paid provider can make another bounded
    call. Never exceed a hard cap to reach the target.
-7. Write `results.json`, generate `leads.csv` with
-   `python3 scripts/export_csv.py <results.json> <leads.csv>`, and write the
-   report. Do not hand-build or reorder CSV columns. Validate all artifacts
-   against the full output contract. Then run the separate completion validator with
+7. Write `results.json`, load the harness workspace dependencies, and generate
+   `leads.xlsx` with the returned Node and node_modules paths:
+   `<node> scripts/export_xlsx.mjs <results.json> <leads.xlsx> --node-modules
+   <node_modules>`. Write the report. The workbook library is supplied by the
+   Codex harness; do not add it as a project dependency. Do not hand-build the
+   XLSX archive or reorder columns. Validate all artifacts against the full
+   output contract. Then run the separate completion validator with
    `python3 scripts/validate_run.py <path-to-results.json>` from this skill
    directory. If validation reports an actionable frontier item or incomplete
    stop audit, continue the run instead of presenting it as complete.
@@ -141,7 +144,7 @@ provider statuses and stable reasons belong in the receipts, while output
 `accepted`, `rejected`, and `unresolved` remain separate states.
 
 Write `reports/<run-id>/report.md`, `reports/<run-id>/results.json`, and
-`reports/<run-id>/leads.csv`. The report must contain the request, assumptions,
+`reports/<run-id>/leads.xlsx`. The report must contain the request, assumptions,
 hypotheses, route and evidence receipts, pilot observations, costs, statuses,
 accepted rows, rejected rows, unresolved rows, contact selection, and stop
 reason. For a target shortfall it must also show the full route frontier,
@@ -149,11 +152,12 @@ continuation decisions, remaining call capacity, reviewed-company counts, and
 the reason each remaining route is exhausted or blocked. Do not store
 credentials or raw secrets.
 
-The CSV is the sales-ready primary-contact view. It uses the exact fixed header
-in the output contract. Company and contact fields that are not verified stay
-blank; their absence does not become a qualification failure unless the input
-explicitly requests that contact field. Keep full evidence, backup contacts,
-run status, and rejection details in `results.json` and the report.
+The workbook is the sales-ready primary-contact view. Its `Leads` worksheet
+uses the exact fixed header in the output contract. Company and contact fields
+that are not verified stay blank; their absence does not become a qualification
+failure unless the input explicitly requests that contact field. Keep full
+evidence, backup contacts, run status, and rejection details in `results.json`
+and the report.
 
 This is a small direct-wrapper workflow. It has no `Sourcing_model` or `pp`
 runtime dependency, browser harness, server, database, queue, CRM write,
