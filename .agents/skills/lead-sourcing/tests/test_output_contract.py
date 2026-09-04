@@ -372,6 +372,24 @@ class OutputContractExtensionTests(unittest.TestCase):
         self.assertIn(
             "explicit_exclusion", result_schema["$defs"]["reason_code"]["enum"]
         )
+        self.assertEqual(
+            input_schema["$defs"]["input_budget"]["properties"]
+            ["max_deepline_credits_per_next_lead"]["default"],
+            5,
+        )
+        self.assertEqual(
+            result_schema["$defs"]["input_budget"]["properties"]
+            ["max_deepline_credits_per_next_lead"]["default"],
+            5,
+        )
+        self.assertIn(
+            "max_deepline_credits_per_next_lead",
+            result_schema["$defs"]["output_budget"]["properties"]["limits"]["properties"],
+        )
+        self.assertIn(
+            "accepted_leads_before_call",
+            result_schema["$defs"]["route"]["properties"],
+        )
 
         request = {
             "target_count": 1,
@@ -605,6 +623,133 @@ class OutputContractExtensionTests(unittest.TestCase):
         errors = VALIDATOR.validate_run(result)
         self.assertTrue(any("route paid-call sum" in error for error in errors))
         self.assertTrue(any("known route cost sum" in error for error in errors))
+
+    def test_next_lead_allowance_groups_routes_without_resetting(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 2,
+                    "cost_upper_bound_credits": 2,
+                    "cost_basis": "actual",
+                    "accepted_leads_before_call": 0,
+                },
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": None,
+                    "cost_upper_bound_credits": 3,
+                    "cost_basis": "estimated",
+                    "accepted_leads_before_call": 0,
+                },
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 5,
+                    "cost_upper_bound_credits": 5,
+                    "cost_basis": "actual",
+                    "accepted_leads_before_call": 1,
+                },
+            ],
+            accepted_contacts=1,
+        )
+        result["request"]["budget"] = {
+            "deepline_credits": 100,
+            "hard_stop": True,
+            "max_deepline_credits_per_next_lead": 5,
+        }
+        result["budget"]["limits"]["max_deepline_credits_per_next_lead"] = 5
+        self.assertEqual(VALIDATOR.validate_run(result), [])
+
+        result["routes"][1]["cost_upper_bound_credits"] = 4
+        result["cost_summary"] = VALIDATOR.calculate_cost_summary(result)
+        errors = VALIDATOR.validate_run(result)
+        self.assertTrue(any("next-lead allowance exceeded" in error for error in errors))
+
+    def test_next_lead_allowance_rejects_unknown_or_unmarked_paid_deepline_cost(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": None,
+                    "cost_upper_bound_credits": None,
+                    "cost_basis": "unknown",
+                    "accepted_leads_before_call": 0,
+                }
+            ]
+        )
+        result["request"]["budget"] = {
+            "deepline_credits": 100,
+            "hard_stop": True,
+            "max_deepline_credits_per_next_lead": 5,
+        }
+        result["budget"]["limits"]["max_deepline_credits_per_next_lead"] = 5
+        errors = VALIDATOR.validate_run(result)
+        self.assertTrue(any("unknown Deepline cost" in error for error in errors))
+
+        marked = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 1,
+                    "cost_upper_bound_credits": 1,
+                    "cost_basis": "actual",
+                }
+            ]
+        )
+        marked["request"]["budget"] = {
+            "deepline_credits": 100,
+            "hard_stop": True,
+            "max_deepline_credits_per_next_lead": 5,
+        }
+        marked["budget"]["limits"]["max_deepline_credits_per_next_lead"] = 5
+        errors = VALIDATOR.validate_run(marked)
+        self.assertTrue(any("accepted_leads_before_call is required" in error for error in errors))
+
+    def test_next_lead_allowance_rejects_impossible_or_decreasing_counts(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 1,
+                    "cost_upper_bound_credits": 1,
+                    "cost_basis": "actual",
+                    "accepted_leads_before_call": 1,
+                },
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 1,
+                    "cost_upper_bound_credits": 1,
+                    "cost_basis": "actual",
+                    "accepted_leads_before_call": 0,
+                },
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 1,
+                    "cost_upper_bound_credits": 1,
+                    "cost_basis": "actual",
+                    "accepted_leads_before_call": 2,
+                },
+            ],
+            accepted_contacts=1,
+        )
+        result["request"]["budget"] = {
+            "deepline_credits": 100,
+            "hard_stop": True,
+            "max_deepline_credits_per_next_lead": 5,
+        }
+        result["budget"]["limits"]["max_deepline_credits_per_next_lead"] = 5
+
+        errors = VALIDATOR.validate_run(result)
+
+        self.assertTrue(any("must not decrease" in error for error in errors))
+        self.assertTrue(any("cannot exceed the final accepted lead count" in error for error in errors))
 
     def test_unknown_route_cost_requires_unknown_spend_status_and_capacity(self):
         result = shortfall_result()
