@@ -44,6 +44,14 @@ and evidentiary. The wrapper invokes `deepline tools search`, `describe`, or
 `execute`, writes a temporary payload file, redacts secrets, and emits one JSON
 object. Catalog calls default to 30 seconds (cap 120); execute calls
 default to 240 seconds (cap 780). Never automatically retry an uncertain call.
+After each execute, use billed usage as `cost_credits` with
+`cost_basis: "actual"`. If billed usage is unavailable but the live description
+gives a conservative bound for all calls recorded by the route, use
+`cost_credits: null`, that total bound as
+`cost_upper_bound_credits`, and `cost_basis: "estimated"`. Use `unknown` with
+both values `null` only when neither value is available.
+A typical or midpoint price is not a conservative bound. Use `unknown` when
+unresolved pricing inputs can make the route cost higher.
 
 The wrapper normalizes candidate fields to `company`, `domain`, `signal`,
 `evidence_url`, `evidence_date`, `evidence_text`, `provider`, and `tool`.
@@ -145,7 +153,12 @@ The wrapper reads only `SCRAPINGDOG_API_KEY` from the environment. Never put a
 key in JSON, shell history, or an artifact. Paid calls are one-call pilots with
 no automatic retry. Treat listed prices as planning estimates: confirm the
 current plan before spending, and record the live estimate in the route receipt.
-The wrapper does not report invoice usage.
+The wrapper does not report invoice usage. Record the confirmed current-plan
+conservative estimate for every call recorded by the route as
+`cost_upper_bound_credits` with
+`cost_basis: "estimated"`; keep `cost_credits` and actual provider spend
+`null`. If the plan cannot bound the call, record both cost values as `null`
+with `cost_basis: "unknown"`.
 
 When a response includes a provider page token, the wrapper returns it as
 `continuation_cursor`. It searches the top level and nested `pagination`,
@@ -284,9 +297,9 @@ does not return a full raw provider response. Never put a key in JSON, shell
 history, or an artifact. Each paid call is a bounded pilot or explicitly
 budgeted expansion; do not automatically retry a timeout, 202, provider error,
 or uncertain paid outcome. Keep Deepline and ScrapingDog credit caps separate.
-Treat the estimates above as planning values, record live estimates and
-provider statuses in the route receipt, and set unknown usage to `null` rather
-than `0`.
+Treat the estimates above as planning values and confirm the current plan.
+Record each exact-call bound and provider status in the route receipt. Set
+unknown usage and unknown bounds to `null` rather than `0`.
 
 ## Credentials and artifacts
 
@@ -300,6 +313,7 @@ never a value:
 For each run, write exactly `reports/<run-id>/report.md`,
 `reports/<run-id>/results.json`, and `reports/<run-id>/leads.xlsx`. Include the
 request, hypotheses, route commands and filters, pilot observations, statuses,
-costs, accepted evidence, contact selection, and rejected or unresolved rows
-with stable reasons. Keep provider receipts separate from output state. Never
+route cost bases, confirmed and maximum credits, Deepline dollar cost and cost
+per accepted lead, accepted evidence, contact selection, and rejected or
+unresolved rows with stable reasons. Keep provider receipts separate from output state. Never
 infer evidence from memory or present an unverified company or contact as final.

@@ -116,7 +116,76 @@ def accepted_email_result(status="valid"):
     }
 
 
+def cost_result(routes, accepted_contacts=1):
+    accepted = [
+        {
+            "company": {
+                "canonical_name": f"Example {index}",
+                "domain": f"example-{index}.org",
+            },
+            "primary_contact": {"full_name": f"Ada Example {index}"},
+        }
+        for index in range(accepted_contacts)
+    ]
+    spent = {}
+    for provider in ("deepline", "scrapingdog"):
+        provider_routes = [
+            route
+            for route in routes
+            if route.get("provider") == provider and route.get("paid_calls", 0) > 0
+        ]
+        spent[f"{provider}_credits"] = (
+            None
+            if any(route.get("cost_credits") is None for route in provider_routes)
+            else sum(route.get("cost_credits", 0) for route in provider_routes)
+        )
+    result = {
+        "schema_version": "1.1",
+        "request": {"target_count": accepted_contacts or 1, "contact_fields": []},
+        "summary": {
+            "accepted_companies": accepted_contacts,
+            "accepted_contacts": accepted_contacts,
+        },
+        "accepted": accepted,
+        "rejected": [],
+        "unresolved": [],
+        "routes": routes,
+        "budget": {
+            "limits": {
+                "deepline_credits": 100,
+                "scrapingdog_credits": 100,
+                "max_paid_calls": 100,
+            },
+            "spent": spent,
+            "paid_calls": sum(route.get("paid_calls", 0) for route in routes),
+            "status": "unknown" if any(value is None for value in spent.values()) else "within_budget",
+        },
+        "stop_reason": "target_met",
+    }
+    result["cost_summary"] = VALIDATOR.calculate_cost_summary(result)
+    return result
+
+
 class OutputContractExtensionTests(unittest.TestCase):
+    def test_cost_schema_adds_backward_compatible_version_1_1_fields(self):
+        _, result_schema = load_schemas()
+        self.assertEqual(
+            result_schema["properties"]["schema_version"]["enum"],
+            ["1.0", "1.1"],
+        )
+        route = result_schema["$defs"]["route"]
+        self.assertIn("cost_upper_bound_credits", route["properties"])
+        self.assertEqual(
+            route["properties"]["cost_basis"]["enum"],
+            ["actual", "estimated", "unknown"],
+        )
+        self.assertIn("cost_summary", result_schema["properties"])
+        self.assertIn("cost_summary", result_schema["allOf"][0]["then"]["required"])
+        self.assertEqual(
+            result_schema["$defs"]["deepline_cost"]["properties"]["usd_per_credit"]["const"],
+            0.1,
+        )
+
     def test_omitted_contact_fields_remains_valid_and_defaults_to_email(self):
         request = {
             "target_count": 1,
@@ -580,6 +649,217 @@ class OutputContractExtensionTests(unittest.TestCase):
         errors = VALIDATOR.validate_run(result)
         self.assertTrue(any("deepline_credits exceeds limit" in error for error in errors))
         self.assertTrue(any("paid_calls exceeds limit" in error for error in errors))
+
+    def test_exact_deepline_cost_and_cost_per_lead(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 4.2,
+                    "cost_upper_bound_credits": 4.2,
+                    "cost_basis": "actual",
+                }
+            ],
+            accepted_contacts=5,
+        )
+        self.assertEqual(VALIDATOR.validate_run(result), [])
+        self.assertEqual(
+            result["cost_summary"],
+            {
+                "status": "exact",
+                "accepted_leads": 5,
+                "deepline": {
+                    "usd_per_credit": 0.1,
+                    "confirmed_credits": 4.2,
+                    "maximum_credits": 4.2,
+                    "confirmed_usd": 0.42,
+                    "maximum_usd": 0.42,
+                },
+                "scrapingdog": {
+                    "confirmed_credits": 0,
+                    "maximum_credits": 0,
+                },
+                "deepline_cost_per_lead_usd": {
+                    "minimum": 0.084,
+                    "maximum": 0.084,
+                },
+            },
+        )
+
+    def test_estimated_deepline_range_is_separate_from_confirmed_spend(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 2.8,
+                    "cost_upper_bound_credits": 2.8,
+                    "cost_basis": "actual",
+                },
+                {
+                    "provider": "deepline",
+                    "paid_calls": 4,
+                    "cost_credits": None,
+                    "cost_upper_bound_credits": 6.7,
+                    "cost_basis": "estimated",
+                },
+            ],
+            accepted_contacts=2,
+        )
+        self.assertEqual(VALIDATOR.validate_run(result), [])
+        self.assertEqual(result["budget"]["spent"]["deepline_credits"], None)
+        self.assertEqual(result["cost_summary"]["status"], "estimated_range")
+        self.assertEqual(result["cost_summary"]["deepline"]["confirmed_usd"], 0.28)
+        self.assertEqual(result["cost_summary"]["deepline"]["maximum_usd"], 0.95)
+        self.assertEqual(
+            result["cost_summary"]["deepline_cost_per_lead_usd"],
+            {"minimum": 0.14, "maximum": 0.475},
+        )
+
+    def test_unknown_paid_route_keeps_upper_cost_unknown(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 1,
+                    "cost_upper_bound_credits": 1,
+                    "cost_basis": "actual",
+                },
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": None,
+                    "cost_upper_bound_credits": None,
+                    "cost_basis": "unknown",
+                },
+            ]
+        )
+        self.assertEqual(VALIDATOR.validate_run(result), [])
+        self.assertEqual(result["cost_summary"]["status"], "unknown")
+        self.assertEqual(result["cost_summary"]["deepline"]["confirmed_usd"], 0.1)
+        self.assertIsNone(result["cost_summary"]["deepline"]["maximum_usd"])
+        self.assertEqual(
+            result["cost_summary"]["deepline_cost_per_lead_usd"],
+            {"minimum": 0.1, "maximum": None},
+        )
+
+    def test_zero_accepted_leads_has_no_cost_per_lead(self):
+        result = shortfall_result()
+        result["schema_version"] = "1.1"
+        result["summary"]["accepted_contacts"] = 0
+        result["routes"][0].update(
+            {
+                "provider": "public_web",
+                "paid_calls": 0,
+                "cost_credits": 0,
+                "cost_upper_bound_credits": 0,
+                "cost_basis": "actual",
+            }
+        )
+        result["budget"] = {
+            "limits": {
+                "deepline_credits": 5,
+                "scrapingdog_credits": 5,
+                "max_paid_calls": 2,
+            },
+            "spent": {"deepline_credits": 0, "scrapingdog_credits": 0},
+            "paid_calls": 0,
+            "status": "within_budget",
+        }
+        result["cost_summary"] = VALIDATOR.calculate_cost_summary(result)
+        self.assertEqual(VALIDATOR.validate_run(result), [])
+        self.assertEqual(
+            result["cost_summary"]["deepline_cost_per_lead_usd"],
+            {"minimum": None, "maximum": None},
+        )
+
+    def test_version_1_1_rejects_invalid_route_cost_semantics_and_summary(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 1,
+                    "cost_upper_bound_credits": 2,
+                    "cost_basis": "actual",
+                }
+            ]
+        )
+        result["cost_summary"]["deepline"]["maximum_usd"] = 99
+        errors = VALIDATOR.validate_run(result)
+        self.assertTrue(any("must equal actual cost_credits" in error for error in errors))
+        self.assertTrue(any("cost_summary must equal" in error for error in errors))
+
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 1,
+                    "cost_upper_bound_credits": 2,
+                    "cost_basis": "estimated",
+                }
+            ]
+        )
+        errors = VALIDATOR.validate_run(result)
+        self.assertTrue(any("must be null for estimated cost" in error for error in errors))
+
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 1,
+                    "cost_upper_bound_credits": 1,
+                    "cost_basis": "actual",
+                }
+            ]
+        )
+        result["routes"][0].pop("cost_upper_bound_credits")
+        errors = VALIDATOR.validate_run(result)
+        self.assertTrue(any("requires cost fields" in error for error in errors))
+
+    def test_cost_per_lead_uses_verified_primary_count_and_rounds(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 0.1,
+                    "cost_upper_bound_credits": 0.1,
+                    "cost_basis": "actual",
+                }
+            ],
+            accepted_contacts=3,
+        )
+        self.assertEqual(
+            result["cost_summary"]["deepline_cost_per_lead_usd"],
+            {"minimum": 0.0033, "maximum": 0.0033},
+        )
+        result["summary"]["accepted_contacts"] = 99
+        result["cost_summary"] = VALIDATOR.calculate_cost_summary(result)
+        errors = VALIDATOR.validate_run(result)
+        self.assertTrue(any("accepted_contacts must equal len(accepted)" in error for error in errors))
+
+    def test_version_1_0_remains_valid_without_new_cost_fields(self):
+        result = shortfall_result()
+        result["schema_version"] = "1.0"
+        result["routes"][0].update(
+            {"provider": "deepline", "paid_calls": 1, "cost_credits": 1}
+        )
+        result["budget"] = {
+            "limits": {
+                "deepline_credits": 5,
+                "scrapingdog_credits": 5,
+                "max_paid_calls": 2,
+            },
+            "spent": {"deepline_credits": 1, "scrapingdog_credits": 0},
+            "paid_calls": 1,
+            "status": "within_budget",
+        }
+        self.assertEqual(VALIDATOR.validate_run(result), [])
 
     def test_target_and_shortfall_stop_reasons_are_consistent(self):
         reached = {

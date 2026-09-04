@@ -27,6 +27,8 @@ provider adapters, budget controls, and output contract.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
 - Keeps an auditable paid and public-web route frontier, and continues refilling
   until the target is met or every remaining route is exhausted or blocked.
+- Reports confirmed and maximum provider credits, Deepline cost at $0.10 per
+  credit, and Deepline cost per accepted lead.
 - Produces an audit report, structured JSON, and a clean Excel workbook.
 - Does not send outreach or write to a CRM.
 
@@ -142,11 +144,17 @@ legacy `requested_roles` behavior.
 - An uncertain or failed call does not end the run when another route, query,
   page, tool, or provider remains available.
 - If a provider does not report invoice usage, TYCHE records actual spend as
-  unknown instead of zero.
+  unknown instead of zero. It records a separate upper bound when the live plan
+  can conservatively price every call in the route.
 - A cap of zero disables that provider.
 
 Prices in the provider catalog are planning estimates. Check the current
-provider plan before a live run.
+provider plan before a live run. New `results.json` files use schema version
+`1.1`. Each route labels its cost as `actual`, `estimated`, or `unknown`, and a
+derived `cost_summary` gives confirmed and maximum credits. Deepline dollars
+use the configured rate of $0.10 per credit. ScrapingDog remains credit-only
+because no dollar rate is configured. OpenRouter is not used, and Codex model
+cost is not included in direct provider cost.
 
 ## Output
 
@@ -162,7 +170,7 @@ reports/<run-id>/
 - `report.md` is the human audit record. It includes route, evidence, cost,
   decision, and stop receipts.
 - `results.json` contains accepted, rejected, and unresolved outcomes under the
-  versioned schema.
+  versioned schema. Its `cost_summary` contains run and per-lead cost values.
 - `leads.xlsx` contains one sales-ready row per accepted company and primary
   contact. Its fixed columns are:
 
@@ -251,6 +259,11 @@ Validate a completed run's target and route-exhaustion receipt with:
 python3 .agents/skills/lead-sourcing/scripts/validate_run.py \
   reports/<run-id>/results.json
 ```
+
+While drafting a version `1.1` result, add `--show-cost-summary` to print the
+route-derived block. Copy `calculated_cost_summary` into the top-level
+`cost_summary`, then run the validator again without the flag. Old version
+`1.0` run files remain valid.
 
 A short run fails validation while any recorded route is untried or
 continuable. This check does not relax provider credit or paid-call caps.

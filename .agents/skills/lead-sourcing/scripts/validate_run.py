@@ -8,7 +8,7 @@ import json
 import math
 import pathlib
 import sys
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional
 
 
@@ -32,6 +32,9 @@ ROUTE_OUTCOME_RECEIPT_STATUSES = {
     "timeout_unknown": {"timeout"},
 }
 CONTACT_FIELD_NAMES = {"email", "phone"}
+COST_BASES = {"actual", "estimated", "unknown"}
+DEEPLINE_USD_PER_CREDIT = Decimal("0.10")
+COST_OUTPUT_QUANTUM = Decimal("0.0001")
 
 
 def _company_key(row: Any) -> Optional[str]:
@@ -204,6 +207,222 @@ def _decimal(value: Any) -> Optional[Decimal]:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _json_decimal(value: Decimal, quantum: Optional[Decimal] = None) -> int | float:
+    """Return a stable JSON number, with optional deterministic rounding."""
+
+    if quantum is not None:
+        value = value.quantize(quantum, rounding=ROUND_HALF_UP)
+    if value == value.to_integral_value():
+        return int(value)
+    return float(value)
+
+
+def calculate_cost_summary(document: dict[str, Any]) -> dict[str, Any]:
+    """Calculate provider cost bounds from route receipts.
+
+    Legacy routes without ``cost_basis`` are interpreted as actual when they
+    have a numeric ``cost_credits`` value and unknown otherwise. This keeps the
+    calculator useful for old artifacts without changing their validation.
+    """
+
+    summary = document.get("summary", {})
+    accepted_contacts = summary.get("accepted_contacts") if isinstance(summary, dict) else None
+    if (
+        not isinstance(accepted_contacts, int)
+        or isinstance(accepted_contacts, bool)
+        or accepted_contacts < 0
+    ):
+        accepted = document.get("accepted", [])
+        accepted_contacts = len(accepted) if isinstance(accepted, list) else 0
+
+    provider_totals: dict[str, dict[str, Any]] = {
+        provider: {
+            "confirmed": Decimal("0"),
+            "maximum": Decimal("0"),
+            "unknown": False,
+        }
+        for provider in PAID_PROVIDERS
+    }
+    has_estimated = False
+    has_unknown = False
+    routes = document.get("routes", [])
+    if not isinstance(routes, list):
+        routes = []
+
+    for route in routes:
+        if not isinstance(route, dict):
+            continue
+        provider = route.get("provider")
+        paid_calls = route.get("paid_calls")
+        if provider not in PAID_PROVIDERS or not isinstance(paid_calls, int) or paid_calls < 1:
+            continue
+
+        cost = _decimal(route.get("cost_credits"))
+        upper = _decimal(route.get("cost_upper_bound_credits"))
+        basis = route.get("cost_basis")
+        if basis not in COST_BASES:
+            basis = "actual" if cost is not None else "unknown"
+
+        totals = provider_totals[provider]
+        if basis == "actual" and cost is not None and cost >= 0:
+            totals["confirmed"] += cost
+            totals["maximum"] += cost
+        elif basis == "estimated" and upper is not None and upper >= 0:
+            totals["maximum"] += upper
+            has_estimated = True
+        else:
+            totals["unknown"] = True
+            has_unknown = True
+
+    if has_unknown:
+        status = "unknown"
+    elif has_estimated:
+        status = "estimated_range"
+    else:
+        status = "exact"
+
+    providers: dict[str, dict[str, int | float | None]] = {}
+    for provider in sorted(PAID_PROVIDERS):
+        totals = provider_totals[provider]
+        providers[provider] = {
+            "confirmed_credits": _json_decimal(totals["confirmed"]),
+            "maximum_credits": None
+            if totals["unknown"]
+            else _json_decimal(totals["maximum"]),
+        }
+
+    deepline = providers["deepline"]
+    deepline_confirmed_usd = (
+        Decimal(str(deepline["confirmed_credits"])) * DEEPLINE_USD_PER_CREDIT
+    )
+    deepline_maximum_usd = (
+        None
+        if deepline["maximum_credits"] is None
+        else Decimal(str(deepline["maximum_credits"])) * DEEPLINE_USD_PER_CREDIT
+    )
+    deepline_summary: dict[str, int | float | None] = {
+        "usd_per_credit": _json_decimal(DEEPLINE_USD_PER_CREDIT),
+        "confirmed_credits": deepline["confirmed_credits"],
+        "maximum_credits": deepline["maximum_credits"],
+        "confirmed_usd": _json_decimal(deepline_confirmed_usd, COST_OUTPUT_QUANTUM),
+        "maximum_usd": None
+        if deepline_maximum_usd is None
+        else _json_decimal(deepline_maximum_usd, COST_OUTPUT_QUANTUM),
+    }
+
+    if accepted_contacts == 0:
+        per_lead = {"minimum": None, "maximum": None}
+    else:
+        denominator = Decimal(accepted_contacts)
+        per_lead = {
+            "minimum": _json_decimal(
+                deepline_confirmed_usd / denominator, COST_OUTPUT_QUANTUM
+            ),
+            "maximum": None
+            if deepline_maximum_usd is None
+            else _json_decimal(
+                deepline_maximum_usd / denominator, COST_OUTPUT_QUANTUM
+            ),
+        }
+
+    return {
+        "status": status,
+        "accepted_leads": accepted_contacts,
+        "deepline": deepline_summary,
+        "scrapingdog": providers["scrapingdog"],
+        "deepline_cost_per_lead_usd": per_lead,
+    }
+
+
+def _validate_cost_accounting(document: dict[str, Any], errors: list[str]) -> None:
+    """Enforce the version 1.1 route-cost and summary contract."""
+
+    if document.get("schema_version") != "1.1":
+        return
+
+    summary = document.get("summary", {})
+    accepted_contacts = summary.get("accepted_contacts") if isinstance(summary, dict) else None
+    if (
+        not isinstance(accepted_contacts, int)
+        or isinstance(accepted_contacts, bool)
+        or accepted_contacts < 0
+    ):
+        errors.append("summary.accepted_contacts must be a non-negative integer for cost accounting")
+    else:
+        accepted = document.get("accepted", [])
+        if isinstance(accepted, list) and accepted_contacts != len(accepted):
+            errors.append("summary.accepted_contacts must equal len(accepted) for cost accounting")
+
+    routes = document.get("routes", [])
+    if not isinstance(routes, list):
+        errors.append("routes must be an array for cost accounting")
+        routes = []
+    for index, route in enumerate(routes):
+        if not isinstance(route, dict):
+            continue
+        path = f"routes[{index}]"
+        missing = [
+            field
+            for field in ("cost_credits", "cost_upper_bound_credits", "cost_basis")
+            if field not in route
+        ]
+        if missing:
+            errors.append(f"{path} requires cost fields: {', '.join(missing)}")
+            continue
+
+        paid_calls = route.get("paid_calls")
+        provider = route.get("provider")
+        cost = _decimal(route.get("cost_credits"))
+        upper = _decimal(route.get("cost_upper_bound_credits"))
+        basis = route.get("cost_basis")
+        if basis not in COST_BASES:
+            errors.append(f"{path}.cost_basis must be actual, estimated, or unknown")
+            continue
+        if not isinstance(paid_calls, int) or isinstance(paid_calls, bool) or paid_calls < 0:
+            continue
+        if provider == "public_web" and paid_calls > 0:
+            errors.append(f"{path}.paid_calls must be 0 for public_web")
+
+        if paid_calls == 0:
+            if basis != "actual" or cost != Decimal("0") or upper != Decimal("0"):
+                errors.append(
+                    f"{path} with no paid call must use actual cost with 0 actual and upper-bound credits"
+                )
+        elif basis == "actual":
+            if cost is None or cost < 0:
+                errors.append(f"{path}.cost_credits must be non-negative for actual cost")
+            if upper is None or upper < 0:
+                errors.append(
+                    f"{path}.cost_upper_bound_credits must be non-negative for actual cost"
+                )
+            elif cost is not None and upper != cost:
+                errors.append(
+                    f"{path}.cost_upper_bound_credits must equal actual cost_credits"
+                )
+        elif basis == "estimated":
+            if route.get("cost_credits") is not None:
+                errors.append(f"{path}.cost_credits must be null for estimated cost")
+            if upper is None or upper < 0:
+                errors.append(
+                    f"{path}.cost_upper_bound_credits must be a non-negative estimate"
+                )
+        else:
+            if route.get("cost_credits") is not None:
+                errors.append(f"{path}.cost_credits must be null for unknown cost")
+            if route.get("cost_upper_bound_credits") is not None:
+                errors.append(
+                    f"{path}.cost_upper_bound_credits must be null for unknown cost"
+                )
+
+    expected = calculate_cost_summary(document)
+    actual = document.get("cost_summary")
+    if actual != expected:
+        errors.append(
+            "cost_summary must equal calculated route cost summary: "
+            + json.dumps(expected, sort_keys=True)
+        )
 
 
 def _validate_budget_accounting(document: dict[str, Any], errors: list[str]) -> None:
@@ -477,6 +696,7 @@ def validate_run(document: Any) -> list[str]:
         )
 
     _validate_budget_accounting(document, errors)
+    _validate_cost_accounting(document, errors)
 
     stop_reason = document.get("stop_reason")
     shortfall = max(0, target - accepted_count)
@@ -765,6 +985,11 @@ def main() -> int:
         description="Validate TYCHE run-completion and route-exhaustion invariants."
     )
     parser.add_argument("results", type=pathlib.Path)
+    parser.add_argument(
+        "--show-cost-summary",
+        action="store_true",
+        help="include the route-derived cost summary in validator output",
+    )
     args = parser.parse_args()
     try:
         document = json.loads(args.results.read_text(encoding="utf-8"))
@@ -773,7 +998,10 @@ def main() -> int:
         return 2
 
     errors = validate_run(document)
-    print(json.dumps({"valid": not errors, "errors": errors}, sort_keys=True))
+    output: dict[str, Any] = {"valid": not errors, "errors": errors}
+    if args.show_cost_summary:
+        output["calculated_cost_summary"] = calculate_cost_summary(document)
+    print(json.dumps(output, sort_keys=True))
     return 0 if not errors else 2
 
 
