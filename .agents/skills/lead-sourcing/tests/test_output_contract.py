@@ -916,6 +916,12 @@ class OutputContractExtensionTests(unittest.TestCase):
         }
         self.assertEqual(VALIDATOR.validate_run(result), [])
 
+    def test_validator_rejects_unsupported_result_schema_version(self):
+        result = shortfall_result()
+        result["schema_version"] = "1.2"
+        errors = VALIDATOR.validate_run(result)
+        self.assertIn("schema_version must be 1.0 or 1.1", errors)
+
     def test_target_and_shortfall_stop_reasons_are_consistent(self):
         reached = {
             "request": {"target_count": 1, "contact_fields": []},

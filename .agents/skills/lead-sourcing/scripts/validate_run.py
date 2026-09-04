@@ -15,6 +15,7 @@ from typing import Any, Optional
 ACTIONABLE_FRONTIER_STATES = {"untried", "continuable"}
 FINAL_FRONTIER_STATES = {"exhausted", "blocked"}
 PAID_PROVIDERS = {"deepline", "scrapingdog"}
+SUPPORTED_RESULT_SCHEMA_VERSIONS = {"1.0", "1.1"}
 DETERMINATE_PROVIDER_STATUSES = {"ok", "partial", "no_results"}
 BLOCKING_PROVIDER_STATUSES = {
     "rate_limited",
@@ -557,6 +558,12 @@ def validate_run(document: Any) -> list[str]:
     errors: list[str] = []
     if not isinstance(document, dict):
         return ["results.json must contain one JSON object"]
+    schema_version = document.get("schema_version")
+    if "schema_version" in document and (
+        not isinstance(schema_version, str)
+        or schema_version not in SUPPORTED_RESULT_SCHEMA_VERSIONS
+    ):
+        errors.append("schema_version must be 1.0 or 1.1")
 
     request = document.get("request", {})
     summary = document.get("summary", {})
