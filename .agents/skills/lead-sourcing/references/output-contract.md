@@ -812,13 +812,21 @@ Codex model cost is not part of direct provider cost.
 Route cost values are totals, not per-call rates. When `paid_calls` is greater
 than one, both cost fields cover all paid calls represented by that route.
 A typical, midpoint, or unconfirmed price is not an upper bound; use `unknown`
-when the full route cannot be conservatively bounded.
+when the full route cannot be conservatively bounded. In version `1.1`, a
+known provider `maximum_credits` must not exceed the matching
+`budget.limits.<provider>_credits`; an unknown maximum remains allowed under
+the existing unknown-spend rules.
 
 To calculate the expected block while drafting, run
 `scripts/validate_run.py <results.json> --show-cost-summary`, copy
 `calculated_cost_summary` to the top-level `cost_summary`, and run the validator
 again without the flag. The final report must use those same values and label
 them as exact, estimated range, or unknown.
+
+For a legacy version `1.0` route without `cost_basis`, `--show-cost-summary`
+keeps any paid cost unclassified and unknown. It does not promote a numeric
+legacy `cost_credits` value to confirmed actual usage. Migrate the route to
+version `1.1` cost fields before reporting confirmed or estimated cost.
 
 ## `leads.xlsx` contract
 

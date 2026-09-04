@@ -222,9 +222,9 @@ def _json_decimal(value: Decimal, quantum: Optional[Decimal] = None) -> int | fl
 def calculate_cost_summary(document: dict[str, Any]) -> dict[str, Any]:
     """Calculate provider cost bounds from route receipts.
 
-    Legacy routes without ``cost_basis`` are interpreted as actual when they
-    have a numeric ``cost_credits`` value and unknown otherwise. This keeps the
-    calculator useful for old artifacts without changing their validation.
+    Legacy routes without ``cost_basis`` remain unclassified and unknown. This
+    keeps the calculator useful for old artifacts without promoting legacy
+    planning values to confirmed actual costs or changing their validation.
     """
 
     summary = document.get("summary", {})
@@ -263,7 +263,7 @@ def calculate_cost_summary(document: dict[str, Any]) -> dict[str, Any]:
         upper = _decimal(route.get("cost_upper_bound_credits"))
         basis = route.get("cost_basis")
         if basis not in COST_BASES:
-            basis = "actual" if cost is not None else "unknown"
+            basis = "unknown"
 
         totals = provider_totals[provider]
         if basis == "actual" and cost is not None and cost >= 0:
@@ -423,6 +423,29 @@ def _validate_cost_accounting(document: dict[str, Any], errors: list[str]) -> No
             "cost_summary must equal calculated route cost summary: "
             + json.dumps(expected, sort_keys=True)
         )
+
+    budget = document.get("budget")
+    limits = budget.get("limits") if isinstance(budget, dict) else None
+    spent = budget.get("spent") if isinstance(budget, dict) else None
+    if isinstance(limits, dict):
+        for provider in sorted(PAID_PROVIDERS):
+            limit = _decimal(limits.get(f"{provider}_credits"))
+            maximum = _decimal(expected[provider]["maximum_credits"])
+            actual_spend = (
+                _decimal(spent.get(f"{provider}_credits"))
+                if isinstance(spent, dict)
+                else None
+            )
+            if (
+                limit is not None
+                and maximum is not None
+                and maximum > limit
+                and not (actual_spend is not None and actual_spend > limit)
+            ):
+                errors.append(
+                    f"cost_summary.{provider}.maximum_credits exceeds "
+                    f"budget.limits.{provider}_credits {limit}"
+                )
 
 
 def _validate_budget_accounting(document: dict[str, Any], errors: list[str]) -> None:

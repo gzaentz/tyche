@@ -745,6 +745,61 @@ class OutputContractExtensionTests(unittest.TestCase):
             {"minimum": 0.1, "maximum": None},
         )
 
+    def test_estimated_maximum_cannot_exceed_provider_cap(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": None,
+                    "cost_upper_bound_credits": 101,
+                    "cost_basis": "estimated",
+                },
+                {
+                    "provider": "scrapingdog",
+                    "paid_calls": 1,
+                    "cost_credits": None,
+                    "cost_upper_bound_credits": 101,
+                    "cost_basis": "estimated",
+                },
+            ]
+        )
+        errors = VALIDATOR.validate_run(result)
+        self.assertTrue(
+            any(
+                "cost_summary.deepline.maximum_credits exceeds"
+                in error
+                for error in errors
+            )
+        )
+        self.assertTrue(
+            any(
+                "cost_summary.scrapingdog.maximum_credits exceeds"
+                in error
+                for error in errors
+            )
+        )
+
+    def test_legacy_cost_summary_does_not_promote_numeric_cost_to_actual(self):
+        result = cost_result(
+            [
+                {
+                    "provider": "deepline",
+                    "paid_calls": 1,
+                    "cost_credits": 4.2,
+                    "cost_upper_bound_credits": 4.2,
+                    "cost_basis": "actual",
+                }
+            ]
+        )
+        result["schema_version"] = "1.0"
+        result["routes"][0].pop("cost_basis")
+        self.assertEqual(VALIDATOR.validate_run(result), [])
+        summary = VALIDATOR.calculate_cost_summary(result)
+        self.assertEqual(summary["status"], "unknown")
+        self.assertEqual(summary["deepline"]["confirmed_credits"], 0)
+        self.assertIsNone(summary["deepline"]["maximum_credits"])
+
     def test_zero_accepted_leads_has_no_cost_per_lead(self):
         result = shortfall_result()
         result["schema_version"] = "1.1"
