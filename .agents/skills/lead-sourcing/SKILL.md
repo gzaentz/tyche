@@ -71,8 +71,10 @@ for the exact input, output, and Excel workbook contracts.
   a later continuation always needs a new ID.
 - Record actual provider usage only from a usage or billing receipt. If a paid
   route's actual cost is unavailable, store `null` for that route and provider
-  spend, mark budget status and provider capacity `unknown`, and keep planning
-  estimates separate in the report. Never present an estimate as actual spend.
+  spend and mark budget status and provider capacity `unknown`. In version
+  `1.1`, also record a route-total upper bound when the live plan provides one,
+  with `cost_basis: "estimated"`; use `unknown` when no bound exists. Never
+  present an estimate as actual spend.
 
 ## Inputs and workflow
 
@@ -130,7 +132,12 @@ negative. Resolve obvious company identity ambiguity before paid work.
    blocked. `budget_exhausted`
    additionally requires that neither paid provider can make another bounded
    call. Never exceed a hard cap to reach the target.
-7. Write `results.json`, load the harness workspace dependencies, and generate
+7. Write version `1.1` `results.json`. Every route must include actual,
+   estimated, or unknown cost fields. Run
+   `python3 scripts/validate_run.py <path-to-results.json> --show-cost-summary`,
+   copy `calculated_cost_summary` into the top-level `cost_summary`, and use the
+   same exact or bounded values in the report. Load the harness workspace
+   dependencies and generate
    `leads.xlsx` with the returned Node and node_modules paths:
    `<node> scripts/export_xlsx.mjs <results.json> <leads.xlsx> --node-modules
    <node_modules>`. Write the report. The workbook library is supplied by the
@@ -174,8 +181,9 @@ uncertain call cannot supply an accepted email.
 
 Write `reports/<run-id>/report.md`, `reports/<run-id>/results.json`, and
 `reports/<run-id>/leads.xlsx`. The report must contain the request, assumptions,
-hypotheses, route and evidence receipts, pilot observations, costs, statuses,
-accepted rows, rejected rows, unresolved rows, contact selection, and stop
+hypotheses, route and evidence receipts, pilot observations, route cost bases,
+confirmed and maximum credits, Deepline dollars and cost per accepted lead,
+statuses, accepted rows, rejected rows, unresolved rows, contact selection, and stop
 reason. For a target shortfall it must also show the full route frontier,
 continuation decisions, remaining call capacity, reviewed-company counts, and
 the reason each remaining route is exhausted or blocked. Do not store

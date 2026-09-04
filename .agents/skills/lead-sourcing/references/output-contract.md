@@ -216,7 +216,8 @@ true. `max_paid_calls` is an optional additional guard and may be 0, but it is
 not a substitute for a provider credit cap. Catalog search/describe calls are
 read-only, but every paid call counts against its provider cap and call guard.
 If a provider does not expose usage, set its output `spent` and route
-`cost_credits` to `null`; never use `0` to mean unknown.
+`cost_credits` to `null`; never use `0` to mean unknown. New runs use result
+schema version `1.1`. Version `1.0` remains valid for existing artifacts.
 
 ## `results.json` schema
 
@@ -232,12 +233,13 @@ top-level result list or hide rejected/unresolved rows in a count.
   "additionalProperties": false,
   "required": ["schema_version", "run_id", "retrieved_at", "request", "budget", "routes", "summary", "accepted", "rejected", "unresolved", "stop_reason"],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"enum": ["1.0", "1.1"]},
     "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"},
     "retrieved_at": {"type": "string", "format": "date-time"},
     "request": {"$ref": "#/$defs/request_snapshot"},
     "budget": {"$ref": "#/$defs/output_budget"},
     "routes": {"type": "array", "items": {"$ref": "#/$defs/route"}},
+    "cost_summary": {"$ref": "#/$defs/cost_summary"},
     "summary": {"$ref": "#/$defs/summary"},
     "accepted": {"type": "array", "items": {"$ref": "#/$defs/accepted_company"}},
     "rejected": {"type": "array", "items": {"$ref": "#/$defs/outcome_row"}},
@@ -247,6 +249,24 @@ top-level result list or hide rejected/unresolved rows in a count.
       "enum": ["target_met", "budget_exhausted", "no_productive_route", "provider_stop", "input_or_configuration_stop"]
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "1.1"}},
+        "required": ["schema_version"]
+      },
+      "then": {
+        "required": ["cost_summary"],
+        "properties": {
+          "routes": {
+            "items": {
+              "required": ["cost_credits", "cost_upper_bound_credits", "cost_basis"]
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "date": {
       "type": "string",
@@ -455,6 +475,8 @@ top-level result list or hide rejected/unresolved rows in a count.
         "rows_usable": {"type": "integer", "minimum": 0},
         "provider_status": {"$ref": "#/$defs/provider_status"},
         "cost_credits": {"type": ["number", "null"], "minimum": 0},
+        "cost_upper_bound_credits": {"type": ["number", "null"], "minimum": 0},
+        "cost_basis": {"enum": ["actual", "estimated", "unknown"]},
         "error": {"type": "string", "minLength": 1}
       }
     },
@@ -627,6 +649,48 @@ top-level result list or hide rejected/unresolved rows in a count.
         "status": {"enum": ["within_budget", "exhausted", "unknown"]}
       }
     },
+    "provider_credit_cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confirmed_credits", "maximum_credits"],
+      "properties": {
+        "confirmed_credits": {"type": "number", "minimum": 0},
+        "maximum_credits": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "deepline_cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usd_per_credit", "confirmed_credits", "maximum_credits", "confirmed_usd", "maximum_usd"],
+      "properties": {
+        "usd_per_credit": {"const": 0.1},
+        "confirmed_credits": {"type": "number", "minimum": 0},
+        "maximum_credits": {"type": ["number", "null"], "minimum": 0},
+        "confirmed_usd": {"type": "number", "minimum": 0},
+        "maximum_usd": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "cost_per_lead": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum"],
+      "properties": {
+        "minimum": {"type": ["number", "null"], "minimum": 0},
+        "maximum": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "cost_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "accepted_leads", "deepline", "scrapingdog", "deepline_cost_per_lead_usd"],
+      "properties": {
+        "status": {"enum": ["exact", "estimated_range", "unknown"]},
+        "accepted_leads": {"type": "integer", "minimum": 0},
+        "deepline": {"$ref": "#/$defs/deepline_cost"},
+        "scrapingdog": {"$ref": "#/$defs/provider_credit_cost"},
+        "deepline_cost_per_lead_usd": {"$ref": "#/$defs/cost_per_lead"}
+      }
+    },
     "summary": {
       "type": "object",
       "additionalProperties": false,
@@ -714,11 +778,55 @@ and the other semantic checks above.
 Budget accounting uses actual provider usage, not planning estimates. Output
 `paid_calls` must equal the sum of route `paid_calls`. For each provider, a
 numeric `spent` value must equal the sum of its numeric route `cost_credits`.
-If any paid route has unknown cost, that provider's `spent` value, its call
-capacity, and the overall budget status must be `unknown`. `within_budget`
-requires known actual spend for both providers. Known spend or paid calls above
-a hard limit are invalid. Put planning estimates in the report or route
-explanation, not in actual-spend fields.
+If any paid route has unknown actual cost, that provider's `spent` value, its
+call capacity, and the overall budget status must be `unknown`. This remains
+true when a conservative upper bound is available. `within_budget` requires
+known actual spend for both providers. Known spend or paid calls above a hard
+limit are invalid.
+
+Every version `1.1` route has `cost_credits`,
+`cost_upper_bound_credits`, and `cost_basis`. Use these combinations:
+
+- `actual`: actual and upper-bound credits are numeric, non-negative, and
+  equal. This means billed usage observed from the provider, not a planned
+  price; the route is the usage receipt.
+- `estimated`: actual credits are `null`; upper-bound credits are a numeric,
+  non-negative conservative estimate for every paid call recorded on that
+  route.
+- `unknown`: actual and upper-bound credits are both `null`.
+- No paid call, including a public-web route: use `actual` with both values set
+  to `0`.
+
+The version `1.1` `cost_summary` is derived only from route fields. Confirmed
+credits sum `actual` routes. Maximum credits sum actual costs and estimated
+upper bounds; the maximum is `null` for a provider with any `unknown` paid
+route. The overall status is `unknown` if any paid route is unknown,
+`estimated_range` if at least one paid route is estimated, and `exact`
+otherwise. Convert Deepline credits at the configured fixed rate of `$0.10`
+per credit. Keep ScrapingDog in credits because no dollar rate is configured.
+`accepted_leads` equals `summary.accepted_contacts`; divide Deepline dollars by
+that value for cost per lead, or use `null` when it is zero. Round derived
+dollar values to four decimal places. OpenRouter is not used by this skill, and
+Codex model cost is not part of direct provider cost.
+
+Route cost values are totals, not per-call rates. When `paid_calls` is greater
+than one, both cost fields cover all paid calls represented by that route.
+A typical, midpoint, or unconfirmed price is not an upper bound; use `unknown`
+when the full route cannot be conservatively bounded. In version `1.1`, a
+known provider `maximum_credits` must not exceed the matching
+`budget.limits.<provider>_credits`; an unknown maximum remains allowed under
+the existing unknown-spend rules.
+
+To calculate the expected block while drafting, run
+`scripts/validate_run.py <results.json> --show-cost-summary`, copy
+`calculated_cost_summary` to the top-level `cost_summary`, and run the validator
+again without the flag. The final report must use those same values and label
+them as exact, estimated range, or unknown.
+
+For a legacy version `1.0` route without `cost_basis`, `--show-cost-summary`
+keeps any paid cost unclassified and unknown. It does not promote a numeric
+legacy `cost_credits` value to confirmed actual usage. Migrate the route to
+version `1.1` cost fields before reporting confirmed or estimated cost.
 
 ## `leads.xlsx` contract
 
@@ -771,8 +879,10 @@ unverified optional values as empty cells rather than placeholder text.
 The Markdown report is the human audit receipt. Include the normalized request,
 assumptions and as-of date; signal hypotheses and why routes differ; every
 capability search/describe and execute receipt (without secrets); pilot limits,
-rows, duplicates, costs, and live provider statuses; account and contact gate
-decisions; primary/backups selection; adaptive reserve/refill decisions; all
+rows, duplicates, route cost bases, confirmed and maximum provider credits,
+Deepline dollars and cost per accepted lead, and live provider statuses;
+account and contact gate decisions; primary/backups selection; adaptive
+reserve/refill decisions; all
 accepted, rejected, and unresolved rows with stable reasons; contact target
 shortfalls; the route frontier and call capacity; reviewed-company counts; and
 the final stop reason. Do not claim a discovery-candidate endpoint ran, and do
