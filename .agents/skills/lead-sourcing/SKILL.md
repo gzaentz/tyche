@@ -75,14 +75,30 @@ for the exact input, output, and Excel workbook contracts.
   `1.1`, also record a route-total upper bound when the live plan provides one,
   with `cost_basis: "estimated"`; use `unknown` when no bound exists. Never
   present an estimate as actual spend.
+- Apply `budget.max_deepline_credits_per_next_lead` with a default of `5`.
+  Record `accepted_leads_before_call` on every paid Deepline route receipt.
+  Group each route's actual cost, or its conservative upper bound when actual
+  cost is unavailable, by that accepted-lead count. Route changes, rejected
+  candidates, and failed lookups do not reset the group. Reset the allowance
+  only after a complete accepted lead (company, signal, requested contact,
+  and requested contact fields) is stored. Any stored email must pass the
+  ZeroBounce gate; preserve explicit email opt-outs. Before every paid Deepline
+  execution, add the route's conservative cost upper bound to the amount
+  already charged to the current group. Do not run the call if that sum would
+  exceed the allowance, or when the route cost has no conservative upper
+  bound. Keep the overall provider and paid-call caps as independent
+  backstops. The agent performs this pre-call check; the result validator
+  checks recorded costs after the run. The provider wrapper does not enforce
+  this allowance. Legacy artifacts without this optional field remain valid.
 
 ## Inputs and workflow
 
 The normalized request must state the target count, ICP and exclusions,
 geography, buying-signal kinds and freshness window, requested roles, contact
-fields, and per-provider budget caps. Email is required by default; apply
-`["email"]` when the field is omitted, while preserving an explicit empty or
-phone-only override. It may set a one-to-three contact
+fields, and per-provider budget caps. Set
+`budget.max_deepline_credits_per_next_lead` to `5` when it is omitted. Email is
+required by default; apply `["email"]` when the field is omitted, while
+preserving an explicit empty or phone-only override. It may set a one-to-three contact
 target per company, `signal_match_mode` (`any` or `all`, default `any`),
 per-signal `min_age_days`/`max_age_days`, run ID, and as-of date. Validate that
 each signal's lower bound is no greater than its upper bound. It may also set
@@ -91,6 +107,11 @@ required `requested_roles` as their deduplicated union for compatibility. If
 groups are present, search primary roles first and use secondary roles only as
 valid fallbacks; do not turn a secondary fallback into a contact false
 negative. Resolve obvious company identity ambiguity before paid work.
+Numeric employee filters use inclusive range semantics: a company passes when
+its verified count is between the requested minimum and maximum. Translate that
+range to the provider's live field semantics. If the provider exposes upper-bound
+buckets, select every bucket that overlaps the requested range and verify the
+exact count from external evidence before acceptance.
 
 1. Record the request, assumptions, signal hypotheses, route frontier, and
    budget. Seed the frontier with materially different discovery paths for the

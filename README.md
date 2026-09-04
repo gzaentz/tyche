@@ -135,6 +135,8 @@ legacy `requested_roles` behavior.
 ## Budget behavior
 
 - Every provider has its own hard credit cap.
+- New normalized requests apply a default Deepline allowance of 5 credits per
+  next complete lead (`budget.max_deepline_credits_per_next_lead`).
 - A material route starts with one paid call and at most 10 returned rows.
 - Deepline catalog `search` and `describe` calls are read-only.
 - The agent checks the live Deepline schema and price before `execute`.
@@ -147,6 +149,22 @@ legacy `requested_roles` behavior.
   unknown instead of zero. It records a separate upper bound when the live plan
   can conservatively price every call in the route.
 - A cap of zero disables that provider.
+
+The next-lead allowance is grouped by `accepted_leads_before_call` on each paid
+Deepline route receipt. TYCHE sums actual route cost, or the conservative route
+upper bound when actual cost is unavailable, within each group. Route changes,
+rejected candidates, and failed lookups do not reset the group. The allowance
+resets only after a complete lead passes the company, signal, requested-role,
+and requested-contact-field gates. Any stored email must pass ZeroBounce;
+explicit email opt-outs still apply. Before each paid execution, the agent
+must check that the route's conservative upper bound plus the current group's
+prior charges does not exceed the allowance. The agent must not execute a
+route without a conservative cost bound. The result validator checks recorded
+costs after the run; the provider wrapper does not enforce this allowance.
+Recorded accepted-lead counts cannot move backward
+or exceed the final accepted total. The overall provider credit and paid-call
+caps stay as independent backstops. Older artifacts without this optional
+field remain valid.
 
 Prices in the provider catalog are planning estimates. Check the current
 provider plan before a live run. New `results.json` files use schema version

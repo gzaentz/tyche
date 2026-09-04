@@ -196,6 +196,7 @@ the schema and must be applied before provider work.
         "deepline_credits": {"type": "number", "minimum": 0},
         "scrapingdog_credits": {"type": "number", "minimum": 0},
         "max_paid_calls": {"type": "integer", "minimum": 0},
+        "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0, "default": 5},
         "hard_stop": {"const": true}
       },
       "anyOf": [
@@ -477,6 +478,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "cost_credits": {"type": ["number", "null"], "minimum": 0},
         "cost_upper_bound_credits": {"type": ["number", "null"], "minimum": 0},
         "cost_basis": {"enum": ["actual", "estimated", "unknown"]},
+        "accepted_leads_before_call": {"type": "integer", "minimum": 0},
         "error": {"type": "string", "minLength": 1}
       }
     },
@@ -595,6 +597,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "deepline_credits": {"type": "number", "minimum": 0},
         "scrapingdog_credits": {"type": "number", "minimum": 0},
         "max_paid_calls": {"type": "integer", "minimum": 0},
+        "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0, "default": 5},
         "hard_stop": {"const": true}
       },
       "anyOf": [
@@ -633,7 +636,8 @@ top-level result list or hide rejected/unresolved rows in a count.
           "properties": {
             "deepline_credits": {"type": ["number", "null"], "minimum": 0},
             "scrapingdog_credits": {"type": ["number", "null"], "minimum": 0},
-            "max_paid_calls": {"type": ["integer", "null"], "minimum": 0}
+            "max_paid_calls": {"type": ["integer", "null"], "minimum": 0},
+            "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0}
           }
         },
         "spent": {
@@ -783,6 +787,25 @@ call capacity, and the overall budget status must be `unknown`. This remains
 true when a conservative upper bound is available. `within_budget` requires
 known actual spend for both providers. Known spend or paid calls above a hard
 limit are invalid.
+
+The optional `max_deepline_credits_per_next_lead` budget field defaults to `5`
+for new normalized requests. When it is active, every paid Deepline route must
+record the non-negative `accepted_leads_before_call` count. Sum each route's
+actual `cost_credits`, or its `cost_upper_bound_credits` when
+`cost_basis` is `estimated`, by that count. A paid Deepline route with unknown
+cost cannot prove the allowance and is invalid while the guard is active. The
+sum for each count must not exceed the configured allowance. Route changes,
+rejections, and failed lookups do not change the count; only a fully accepted
+lead advances it. Acceptance uses the requested contact fields and preserves
+explicit email opt-outs; any stored email must pass ZeroBounce. Before a paid
+Deepline execution, the agent must add its conservative cost upper bound to
+the amount already charged to the current count and must not run the call if
+the sum would exceed the allowance. This is an agent pre-call check and a
+post-run validation rule, not a spend cap enforced by the provider wrapper.
+Recorded counts must not move
+backward and cannot exceed the final number of accepted leads. The output
+limit, when present, must match the request limit. Artifacts without this
+optional field remain valid for backward compatibility.
 
 Every version `1.1` route has `cost_credits`,
 `cost_upper_bound_credits`, and `cost_basis`. Use these combinations:

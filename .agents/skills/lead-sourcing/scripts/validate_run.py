@@ -554,6 +554,103 @@ def _validate_budget_accounting(document: dict[str, Any], errors: list[str]) -> 
         errors.append(f"budget.paid_calls exceeds limit {call_limit}")
 
 
+def _validate_next_lead_budget(document: dict[str, Any], errors: list[str]) -> None:
+    """Enforce the optional Deepline allowance for finding the next lead.
+
+    The allowance is grouped by the number of accepted leads before a call.
+    This makes route changes and rejected candidates part of the same budget
+    window. It is opt-in in the validator so legacy artifacts without the new
+    field remain valid; new normalized requests apply the documented default.
+    """
+
+    request = document.get("request")
+    request_budget = request.get("budget") if isinstance(request, dict) else None
+    output_budget = document.get("budget")
+    output_limits = output_budget.get("limits") if isinstance(output_budget, dict) else None
+
+    configured: list[tuple[str, Decimal]] = []
+    for path, source in (
+        ("request.budget.max_deepline_credits_per_next_lead", request_budget),
+        ("budget.limits.max_deepline_credits_per_next_lead", output_limits),
+    ):
+        if not isinstance(source, dict) or path.rsplit(".", 1)[-1] not in source:
+            continue
+        value = _decimal(source.get(path.rsplit(".", 1)[-1]))
+        if value is None or value < 0:
+            errors.append(f"{path} must be a non-negative number")
+            continue
+        configured.append((path, value))
+
+    if not configured:
+        return
+    if len(configured) == 2 and configured[0][1] != configured[1][1]:
+        errors.append(
+            "request.budget.max_deepline_credits_per_next_lead must match "
+            "budget.limits.max_deepline_credits_per_next_lead"
+        )
+    limit = configured[0][1]
+
+    routes = document.get("routes", [])
+    if not isinstance(routes, list):
+        return
+    accepted = document.get("accepted", [])
+    accepted_count = len(accepted) if isinstance(accepted, list) else 0
+    grouped_costs: dict[int, Decimal] = {}
+    previous_accepted_before: int | None = None
+    for index, route in enumerate(routes):
+        if not isinstance(route, dict):
+            continue
+        if route.get("provider") != "deepline":
+            continue
+        paid_calls = route.get("paid_calls")
+        if not isinstance(paid_calls, int) or isinstance(paid_calls, bool) or paid_calls <= 0:
+            continue
+
+        accepted_before = route.get("accepted_leads_before_call")
+        if not isinstance(accepted_before, int) or isinstance(accepted_before, bool) or accepted_before < 0:
+            errors.append(
+                f"routes[{index}].accepted_leads_before_call is required when the "
+                "next-lead Deepline allowance is active"
+            )
+            continue
+        if accepted_before > accepted_count:
+            errors.append(
+                f"routes[{index}].accepted_leads_before_call cannot exceed the "
+                f"final accepted lead count {accepted_count}"
+            )
+        if (
+            previous_accepted_before is not None
+            and accepted_before < previous_accepted_before
+        ):
+            errors.append(
+                f"routes[{index}].accepted_leads_before_call must not decrease "
+                "across paid Deepline routes"
+            )
+        previous_accepted_before = accepted_before
+
+        basis = route.get("cost_basis")
+        if basis == "actual":
+            charge = _decimal(route.get("cost_credits"))
+        elif basis == "estimated":
+            charge = _decimal(route.get("cost_upper_bound_credits"))
+        else:
+            charge = None
+        if charge is None or charge < 0:
+            errors.append(
+                f"routes[{index}] has unknown Deepline cost and cannot prove the "
+                "next-lead allowance"
+            )
+            continue
+        grouped_costs[accepted_before] = grouped_costs.get(accepted_before, Decimal("0")) + charge
+
+    for accepted_before, total in sorted(grouped_costs.items()):
+        if total > limit:
+            errors.append(
+                "Deepline next-lead allowance exceeded for "
+                f"accepted_leads_before_call={accepted_before}: {total} > {limit} credits"
+            )
+
+
 def validate_run(document: Any) -> list[str]:
     errors: list[str] = []
     if not isinstance(document, dict):
@@ -727,6 +824,7 @@ def validate_run(document: Any) -> list[str]:
 
     _validate_budget_accounting(document, errors)
     _validate_cost_accounting(document, errors)
+    _validate_next_lead_budget(document, errors)
 
     stop_reason = document.get("stop_reason")
     shortfall = max(0, target - accepted_count)
