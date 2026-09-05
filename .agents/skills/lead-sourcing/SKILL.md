@@ -22,7 +22,9 @@ for the exact input, output, and Excel workbook contracts.
   the account stage. Contact lookup may use accepted company/domain rows only.
 - Discover live Deepline capabilities with `search`, inspect a chosen tool with
   `describe`, and confirm its live input and price before every `execute`.
-  Never invent or pin a Deepline tool ID.
+  Never invent or pin a Deepline tool ID. Optional provider hypotheses such as
+  PredictLeads events, HarvestAPI LinkedIn posts, TheirStack jobs/projects, or
+  DiscoLike niche discovery are choices to test, not a mandatory fanout.
 - Pilot each material route with at most 10 returned rows and one paid call.
   Inspect rows, evidence, duplicates, misses, provider status, and cost before
   expanding. No automatic retry; a timeout or other uncertain paid outcome is

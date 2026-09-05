@@ -141,6 +141,62 @@ class ProviderScriptTests(unittest.TestCase):
                 }
             )
 
+    def test_deepline_post_response_through_cli_preserves_bounds_and_redaction(self):
+        seen = {}
+        response = {
+            "status": "success",
+            "extractedLists": {"data": [{"company_name": "Stale preview"}]},
+            "toolResponse": {
+                "rawV2": {
+                    "elements": [
+                        {
+                            "id": str(index),
+                            "linkedinUrl": f"https://www.linkedin.com/posts/update-{index}",
+                            "content": "An expansion update.",
+                        }
+                        for index in range(2)
+                    ],
+                    "pagination": {
+                        "pageNumber": 1,
+                        "paginationToken": "opaque-page-2",
+                        "access_token": "provider-secret",
+                    },
+                }
+            },
+        }
+
+        def fake_run(command, **_kwargs):
+            payload_path = command[command.index("--input") + 1][1:]
+            seen["payload_path"] = payload_path
+            with open(payload_path, encoding="utf-8") as handle:
+                seen["payload"] = json.load(handle)
+            return FakeProcess(json.dumps(response))
+
+        payload = {"search": "expansion", "page": 1}
+        request = {
+            "operation": "execute",
+            "tool": "runtime_discovered_post_tool",
+            "payload": payload,
+            "limit": 1,
+        }
+        with mock.patch.object(
+            DEEPLINE.subprocess, "run", side_effect=fake_run
+        ) as invoke, mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            code = DEEPLINE.main(["--input", json.dumps(request)])
+        body = json.loads(stdout.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(len(body["results"]), 1)
+        self.assertEqual(body["results"][0]["entity_type"], "signal")
+        self.assertNotIn("contact_url", body["results"][0])
+        self.assertIsNone(body["results"][0]["evidence_date"])
+        self.assertEqual(body["pagination"]["next_cursor"], "opaque-page-2")
+        self.assertEqual(body["pagination"]["paginationToken"], "[REDACTED]")
+        self.assertNotIn("provider-secret", stdout.getvalue())
+        self.assertEqual(seen["payload"], payload)
+        self.assertFalse(pathlib.Path(seen["payload_path"]).exists())
+        invoke.assert_called_once()
+
     def test_deepline_leading_json_notice_and_provider_outcomes(self):
         self.assertEqual(DEEPLINE._json_from_text("notice\n[1, 2]"), [1, 2])
 

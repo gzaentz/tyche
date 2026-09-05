@@ -361,6 +361,17 @@ def normalize_evidence(
     """Normalize one provider row while retaining useful provider metadata."""
 
     source: Dict[str, Any] = row if isinstance(row, dict) else {"value": row}
+    nested_contact = source.get("contact")
+    if isinstance(nested_contact, dict) and (entity_type or "").strip().lower() not in {
+        "account", "company", "organization"
+    }:
+        # Some enrichment tools return contact fields inside a scalar envelope.
+        source = dict(source)
+        source["contact_details"] = nested_contact
+        for key, nested_key in (("full_name", "name"), ("contact_email", "email"), ("domain", "domain")):
+            value = nested_contact.get(nested_key)
+            if source.get(key) is None and isinstance(value, str) and value.strip():
+                source[key] = value
     result: Dict[str, Any] = redact(source)
     is_email_validation = _is_email_validation_record(source)
     basic_info = source.get("basic_info")
@@ -522,6 +533,260 @@ def normalize_evidence(
     if refs is not None:
         result["raw_artifact_refs"] = refs
     return result
+
+
+def _jsonapi_resource(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("id"), str)
+        and isinstance(value.get("type"), str)
+        and isinstance(value.get("attributes"), dict)
+        and (
+            "relationships" not in value
+            or isinstance(value.get("relationships"), dict)
+        )
+    )
+
+
+def _is_linkedin_post_url(value: Any) -> bool:
+    text = _text(value)
+    if not text:
+        return False
+    parsed = urlparse(text if "://" in text else "https://" + text)
+    host = (parsed.hostname or "").lower()
+    path = parsed.path.lower()
+    return (host == "linkedin.com" or host.endswith(".linkedin.com")) and path.startswith(
+        ("/posts/", "/feed/update/", "/pulse/")
+    )
+
+
+def _structured_execute_envelope(value: Any) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """Select a complete JSON:API or Harvest envelope for execute only."""
+
+    if isinstance(value, str):
+        try:
+            value = _json_from_text(value)
+        except ValueError:
+            return None
+    if not isinstance(value, dict):
+        return None
+    data = value.get("data")
+    resources = data if isinstance(data, list) else [data]
+    if (
+        isinstance(data, (dict, list))
+        and all(_jsonapi_resource(resource) for resource in resources)
+        and ("included" not in value or isinstance(value.get("included"), list))
+    ):
+        return "jsonapi", value
+    elements = value.get("elements")
+    if isinstance(elements, list) and all(
+        isinstance(post, dict)
+        and isinstance(post.get("id"), str)
+        and _is_linkedin_post_url(post.get("linkedinUrl"))
+        and any(
+            key in post
+            for key in ("content", "author", "postedAt", "repost", "repostedBy")
+        )
+        for post in elements
+    ):
+        return "harvest", value
+    for key in ("toolResponse", "tool_response", "rawV2", "raw_v2", "result", "response", "output", "raw"):
+        selected = _structured_execute_envelope(value.get(key))
+        if selected:
+            return selected
+    return None
+
+
+def _included_index(included: Any) -> Tuple[Dict[Tuple[str, str], Dict[str, Any]], set]:
+    index: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    conflicts = set()
+    for resource in included if isinstance(included, list) else []:
+        if not _jsonapi_resource(resource):
+            continue
+        key = (resource["type"], resource["id"])
+        if key in index and index[key] != resource:
+            conflicts.add(key)
+        else:
+            index[key] = resource
+    return index, conflicts
+
+
+def _relationship_refs(resource: Dict[str, Any], relationship: str) -> List[Dict[str, Any]]:
+    relationships = resource.get("relationships", {})
+    relation = relationships.get(relationship) if isinstance(relationships, dict) else None
+    data = relation.get("data") if isinstance(relation, dict) else None
+    refs = data if isinstance(data, list) else [data]
+    return [
+        ref
+        for ref in refs
+        if isinstance(ref, dict)
+        and isinstance(ref.get("type"), str)
+        and isinstance(ref.get("id"), str)
+    ]
+
+
+def _normalize_jsonapi(
+    envelope: Dict[str, Any], tool: str, entity_type: Optional[str]
+) -> List[Dict[str, Any]]:
+    data = envelope.get("data")
+    resources = data if isinstance(data, list) else [data]
+    included, conflicts = _included_index(envelope.get("included"))
+    results = []
+    for resource in resources:
+        attributes = resource["attributes"]
+        row = redact(resource)
+        related_companies = []
+        company_keys = set()
+        unresolved_company = False
+        for relationship, relation in resource.get("relationships", {}).items():
+            relation_data = relation.get("data") if isinstance(relation, dict) else None
+            relation_refs = relation_data if isinstance(relation_data, list) else [relation_data]
+            if any(
+                isinstance(ref, dict)
+                and ref.get("type") == "company"
+                and not isinstance(ref.get("id"), str)
+                for ref in relation_refs
+            ):
+                unresolved_company = True
+            for ref in _relationship_refs(resource, relationship):
+                if ref["type"] != "company":
+                    continue
+                key = (ref["type"], ref["id"])
+                linked = None if key in conflicts else included.get(key)
+                linked_attributes = linked.get("attributes", {}) if linked else {}
+                related_companies.append(
+                    {
+                        "relationship": relationship,
+                        "id": ref["id"],
+                        "company": _text(linked_attributes.get("company_name")),
+                        "domain": _domain(linked_attributes.get("domain")),
+                    }
+                )
+                company_keys.add(key)
+                unresolved_company = unresolved_company or linked is None
+        source = None
+        source_refs = _relationship_refs(resource, "most_relevant_source")
+        if len(source_refs) == 1 and source_refs[0]["type"] == "news_article":
+            key = (source_refs[0]["type"], source_refs[0]["id"])
+            if key not in conflicts:
+                source = included.get(key)
+        source_attributes = source.get("attributes", {}) if source else {}
+        row.update(
+            {
+                "company": None,
+                "domain": None,
+                "signal": _text(attributes.get("category")) or resource["type"],
+                "evidence_url": _text(source_attributes.get("url"))
+                or _text(attributes.get("url")),
+                "evidence_date": _text(source_attributes.get("published_at"))
+                or _text(attributes.get("published_at")),
+                "evidence_text": _text(
+                    _first(
+                        attributes,
+                        "article_sentence",
+                        "summary",
+                        "description",
+                        "content",
+                        "title",
+                    )
+                ),
+                "provider": "deepline",
+                "tool": tool,
+                "entity_type": entity_type or "signal",
+            }
+        )
+        if "effective_date" in attributes:
+            row["event_date"] = _text(attributes.get("effective_date"))
+        if related_companies:
+            row["related_companies"] = related_companies
+        if len(company_keys) == 1 and not unresolved_company:
+            row["company"] = related_companies[0]["company"]
+            row["domain"] = related_companies[0]["domain"]
+        if source is not None:
+            row["related_source"] = redact(source)
+        results.append(redact(row))
+    return results
+
+
+def _normalize_harvest(
+    envelope: Dict[str, Any], tool: str, entity_type: Optional[str]
+) -> List[Dict[str, Any]]:
+    results = []
+    for post in envelope["elements"]:
+        author = post.get("author")
+        author = author if isinstance(author, dict) else {}
+        author_url = _text(author.get("linkedinUrl"))
+        company_author = _is_linkedin_company_url(author_url)
+        posted_at = post.get("postedAt")
+        posted_at = posted_at if isinstance(posted_at, dict) else {}
+        row = redact(post)
+        row.update(
+            {
+                "company": _text(author.get("name")) if company_author else None,
+                "domain": None,
+                "company_linkedin_url": author_url if company_author else None,
+                "signal": "linkedin_post",
+                "evidence_url": _text(post.get("linkedinUrl")),
+                "evidence_date": _text(posted_at.get("date")),
+                "evidence_text": _text(post.get("content")),
+                "provider": "deepline",
+                "tool": tool,
+                "entity_type": entity_type or "signal",
+            }
+        )
+        results.append(redact(row))
+    return results
+
+
+def _structured_metadata(kind: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = {
+        key: redact(envelope[key])
+        for key in ("meta", "links", "pagination")
+        if key in envelope
+    }
+    pagination = envelope.get("pagination")
+    if kind == "harvest" and isinstance(pagination, dict):
+        cursor = pagination.get("paginationToken")
+        if isinstance(cursor, str) and cursor:
+            safe_pagination = metadata.setdefault("pagination", {})
+            if isinstance(safe_pagination, dict):
+                safe_pagination["next_cursor"] = redact(cursor)
+    return metadata
+
+
+def _structured_status(envelope: Dict[str, Any]) -> Optional[str]:
+    """Read route failure state only from a selected provider envelope."""
+
+    status = envelope.get("status")
+    if status is not None and (
+        isinstance(status, bool) or not isinstance(status, (str, int, float))
+    ):
+        return "schema_error"
+    error = envelope.get("error") or envelope.get("errors")
+    diagnostic = json.dumps(redact(error), ensure_ascii=False) if error not in (None, "", [], {}) else ""
+    if status == 429:
+        return "rate_limited"
+    if status == 401 or status == 403:
+        return "auth_failed"
+    if isinstance(status, (int, float)) and not isinstance(status, bool) and status >= 400:
+        return "provider_error"
+    if isinstance(status, str):
+        normalized = status.strip().lower().replace("-", "_")
+        if normalized in _FAILURE_STATUSES:
+            return normalized
+        if normalized in {"failed", "failure", "error"}:
+            return _classify_error(diagnostic) if diagnostic else "provider_error"
+        if normalized.isdigit() and int(normalized) >= 400:
+            return _classify_error(normalized + " " + diagnostic)
+    if diagnostic:
+        return _classify_error(diagnostic)
+    if envelope.get("partial") is True:
+        return "partial"
+    if isinstance(status, str) and normalized in _STATUS_WORDS:
+        return normalized
+    if isinstance(status, str) and normalized in {"success", "succeeded", "complete", "completed"}:
+        return "ok"
+    return None
 
 
 def _records(value: Any) -> List[Any]:
@@ -1013,9 +1278,26 @@ def _execute_output(
         validation = _email_validation_output(parsed, tool, limit)
         if validation is not None:
             return validation
-    records = _records(parsed)[:limit]
-    status = _envelope_status(parsed)
-    if not _known_envelope(parsed):
+    structured = _structured_execute_envelope(parsed)
+    metadata: Dict[str, Any] = {}
+    if structured:
+        kind, envelope = structured
+        records = (
+            _normalize_jsonapi(envelope, tool, entity_type)
+            if kind == "jsonapi"
+            else _normalize_harvest(envelope, tool, entity_type)
+        )[:limit]
+        metadata = _structured_metadata(kind, envelope)
+    else:
+        records = _records(parsed)[:limit]
+    outer_status = _envelope_status(parsed)
+    selected_status = _structured_status(envelope) if structured else None
+    statuses = (outer_status, selected_status)
+    status = next(
+        (candidate for candidate in statuses if candidate in _FAILURE_STATUSES),
+        "partial" if "partial" in statuses else selected_status or outer_status,
+    )
+    if not structured and not _known_envelope(parsed):
         body = {
             "status": status if status in _PROVIDER_ERROR_STATUSES else "schema_error",
             "provider": "deepline",
@@ -1038,9 +1320,11 @@ def _execute_output(
         final_status = "ok"
     else:
         final_status = "no_results"
-    evidence = [
+    evidence = records if structured else [
         normalize_evidence(record, "deepline", tool, entity_type) for record in records
     ]
+    if structured and final_status in _FAILURE_STATUSES:
+        evidence = []
     body = {
         "status": final_status,
         "provider": "deepline",
@@ -1050,11 +1334,14 @@ def _execute_output(
         "evidence": evidence,
     }
     if final_status in _FAILURE_STATUSES:
-        error = _envelope_error(parsed)
+        error = _envelope_error(parsed) or (
+            _envelope_error(envelope) if structured else None
+        )
         if error:
             body["error"] = error
     if entity_type:
         body["entity_type"] = entity_type
+    body.update(metadata)
     return body
 
 

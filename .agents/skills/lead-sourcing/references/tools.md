@@ -27,10 +27,21 @@ search seeds, not fixed IDs; use only the tool ID returned by the current search
 - `current title roster or leadership team by company domain`
 - `ZeroBounce validate one known email address`
 
+Optional hypothesis providers are a small menu, not a mandatory fanout:
+
+| Provider | Live-catalog search seed | When useful |
+|---|---|---|
+| PredictLeads | `PredictLeads discover news funding jobs technology events` | Hypothesize current company events across news, funding, hiring, or technology. |
+| HarvestAPI | `HarvestAPI LinkedIn post search` | Test recent LinkedIn post activity; verify the post and author before using it as evidence. |
+| TheirStack | `TheirStack job description project hiring` | Explore job-description or project-hiring signals; do not assume a standalone projects endpoint. |
+| DiscoLike | `DiscoLike niche semantic company discovery` | Discover companies matching a narrow semantic or niche hypothesis. |
+
 For each selected tool, call `describe` immediately before `execute` and record
 its live input schema, connection state, and price. Prefer a title-roster tool
 for nuanced roles. If that is unavailable, use broad function and seniority with
-the full user-approved title family. Do not use a CEO as an automatic fallback.
+the full user-approved title family. Ignore non-callable or monitor-only search
+hits for this one-shot workflow; do not deploy monitors. Do not use a CEO as an
+automatic fallback.
 
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"search","query":"companies with current hiring or job postings"}'
@@ -39,8 +50,11 @@ python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"
 ```
 
 `execute` is paid. One route pilot has one paid call and at most 10 returned
-rows. Inspect the live price first; expand only when rows are relevant, diverse,
-and evidentiary. The wrapper invokes `deepline tools search`, `describe`, or
+rows. The wrapper `limit` is 10 or less and truncates normalized output only;
+set provider-native result/count and page or cursor fields from the live schema,
+then bound the cost before execution. Inspect the live price first; expand only
+when rows are relevant, diverse, and evidentiary. The wrapper invokes
+`deepline tools search`, `describe`, or
 `execute`, writes a temporary payload file, redacts secrets, and emits one JSON
 object. Catalog calls default to 30 seconds (cap 120); execute calls
 default to 240 seconds (cap 780). Never automatically retry an uncertain call.
@@ -58,6 +72,28 @@ The wrapper normalizes candidate fields to `company`, `domain`, `signal`,
 Generic labels such as `search_result`, `web_page`, `company_profile`, and
 `hiring` are discovery labels only. For web-search rows, `domain` can be the
 source host; resolve the canonical company domain before acceptance.
+
+For recognized event and post envelopes, the wrapper retains optional
+top-level `pagination`, `meta`, and `links` metadata with secrets redacted.
+HarvestAPI's known `pagination.paginationToken` is exposed separately as
+`pagination.next_cursor`. Map this opaque cursor back to the live provider
+input field only for an explicitly budgeted continuation; paging is never
+automatic. Do not advance past rows that the wrapper trimmed without reviewing
+them; request provider pages small enough for the output limit where supported.
+
+HarvestAPI post rows retain the post URL, content, `postedAt`, and author.
+Verify the author, company, and original versus reposted source; the author is
+not automatically a current employee or buyer. A person-authored post does
+not establish the author's employer, and a company-authored post does not
+establish its canonical domain.
+
+For JSON:API event responses, relationship names such as `company1` and
+`company2` are retained in `related_companies`. Related companies are
+candidates, not accepted companies: resolve the relationship and account gate
+explicitly, never pick the first company. Use a linked source `published_at`
+for `evidence_date` when available, keep any effective `event_date` separately,
+and never treat ingestion fields such as `found_at` or `updated` as event
+freshness.
 
 ### Deepline status contract
 
