@@ -50,6 +50,8 @@ The main instructions are in
 [tools.md](.agents/skills/lead-sourcing/references/tools.md). The exact input,
 JSON, and Excel workbook contracts are in
 [output-contract.md](.agents/skills/lead-sourcing/references/output-contract.md).
+The main skill uses five steps; detailed safeguards and audit procedures are
+in [workflow-rules.md](.agents/skills/lead-sourcing/references/workflow-rules.md).
 
 ## Requirements
 

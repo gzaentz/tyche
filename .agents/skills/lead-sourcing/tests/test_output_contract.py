@@ -288,7 +288,7 @@ class OutputContractExtensionTests(unittest.TestCase):
             "#/$defs/contact_role_groups",
         )
 
-        skill_text = SKILL.read_text(encoding="utf-8").lower()
+        skill_text = (ROOT / "references" / "workflow-rules.md").read_text(encoding="utf-8").lower()
         contract_text = CONTRACT.read_text(encoding="utf-8").lower()
         self.assertIn("search and rank", skill_text)
         self.assertIn("valid fallbacks", skill_text)
@@ -297,6 +297,20 @@ class OutputContractExtensionTests(unittest.TestCase):
         self.assertIn("must not be", skill_text)
         self.assertIn("rejected only because it is secondary", skill_text)
         self.assertIn('role_group: "secondary"', skill_text)
+
+    def test_main_skill_has_five_steps_and_links_required_rules(self):
+        text = SKILL.read_text(encoding="utf-8")
+        steps = re.findall(r"^\d+\. \*\*(.*?)\*\*", text, re.M)
+        self.assertEqual(steps, [
+            "Discover relevant tools and check their inputs and prices.",
+            "Run a small, budgeted search.",
+            "Verify company fit and intent from evidence.",
+            "Find the requested buyer and validate their email.",
+            "Save results; continue until the target or an honest stopping condition.",
+        ])
+        self.assertIn("These safeguards remain mandatory", text)
+        for target in re.findall(r"\]\((references/[^)]+)\)", text):
+            self.assertTrue((ROOT / target).is_file(), target)
 
     def test_completion_validator_enforces_group_union_and_role_traceability(self):
         result = shortfall_result()
