@@ -397,6 +397,79 @@ class ProviderScriptTests(unittest.TestCase):
                     [row["company"] for row in body["results"]], ["Acme", "Beta"]
                 )
 
+    def test_deepline_ai_ark_nested_company_identity_is_conservative(self):
+        rows = [
+            {
+                "summary": {"name": "Acme Systems"},
+                "link": {
+                    "domain": "acme.test",
+                    "website": "https://www.acme.test/",
+                    "linkedin": "https://www.linkedin.com/company/acme-systems",
+                },
+            },
+            {
+                "summary": {"name": "Beta Health"},
+                "link": {
+                    "domain": "beta.test",
+                    "website": "https://beta.test",
+                    "linkedin": "https://www.linkedin.com/company/beta-health",
+                },
+            },
+        ]
+
+        body = DEEPLINE._execute_output(
+            {"toolResponse": {"rawV2": {"results": rows}}},
+            "ai_ark_company_search",
+        )
+
+        self.assertEqual(
+            [
+                (row["company"], row["domain"], row["company_linkedin_url"])
+                for row in body["results"]
+            ],
+            [
+                (
+                    "Acme Systems",
+                    "acme.test",
+                    "https://www.linkedin.com/company/acme-systems",
+                ),
+                (
+                    "Beta Health",
+                    "beta.test",
+                    "https://www.linkedin.com/company/beta-health",
+                ),
+            ],
+        )
+
+        explicit = DEEPLINE.normalize_evidence(
+            {
+                "company_name": "Explicit Company",
+                "domain": "explicit.test",
+                "company_linkedin_url": "https://www.linkedin.com/company/explicit",
+                **rows[0],
+            }
+        )
+        self.assertEqual(explicit["company"], "Explicit Company")
+        self.assertEqual(explicit["domain"], "explicit.test")
+        self.assertEqual(
+            explicit["company_linkedin_url"],
+            "https://www.linkedin.com/company/explicit",
+        )
+
+        person = DEEPLINE.normalize_evidence(
+            {
+                "summary": {"name": "Jane Rivera"},
+                "link": {
+                    "domain": "acme.test",
+                    "website": "https://acme.test/team/jane",
+                    "linkedin": "https://www.linkedin.com/in/jane-rivera",
+                },
+            }
+        )
+        self.assertIsNone(person["company"])
+        self.assertIsNone(person["domain"])
+        self.assertIsNone(person["company_linkedin_url"])
+
     def test_deepline_scalar_count_envelope_is_one_normalized_result(self):
         response = {
             "status": "completed",
@@ -554,6 +627,39 @@ class ProviderScriptTests(unittest.TestCase):
         self.assertEqual(preview_code, 0)
         self.assertEqual(preview_body["status"], "ok")
         self.assertEqual(preview_body["results"][0]["value"], "Humanitarian Aid")
+        self.assertEqual(
+            preview_body["output_preview"],
+            {
+                "kind": "list",
+                "rowCount": 1,
+                "columns": ["value"],
+                "returnedRowCount": 1,
+            },
+        )
+
+        full_response = {
+            "status": "completed",
+            "output_preview": {
+                "kind": "list",
+                "rowCount": 2,
+                "columns": ["company_name"],
+                "preview": [{"company_name": "Stale Preview"}],
+            },
+            "toolResponse": {
+                "rawV2": {
+                    "results": [
+                        {"company_name": "Acme", "website": "acme.test"},
+                        {"company_name": "Beta", "website": "beta.test"},
+                    ]
+                }
+            },
+        }
+        full_body = DEEPLINE._execute_output(full_response, "company_search")
+        self.assertEqual(
+            [row["company"] for row in full_body["results"]], ["Acme", "Beta"]
+        )
+        self.assertEqual(full_body["output_preview"]["rowCount"], 2)
+        self.assertEqual(full_body["output_preview"]["returnedRowCount"], 1)
 
     def test_deepline_autocomplete_handles_nested_suggestion_preview_and_empty_lists(self):
         nested = {

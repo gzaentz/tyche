@@ -376,6 +376,19 @@ def normalize_evidence(
     is_email_validation = _is_email_validation_record(source)
     basic_info = source.get("basic_info")
     basic_info = basic_info if isinstance(basic_info, dict) else {}
+    summary = source.get("summary")
+    summary = summary if isinstance(summary, dict) else {}
+    link = source.get("link")
+    link = link if isinstance(link, dict) else {}
+    entity_label = (entity_type or "").strip().lower()
+    company_entity = entity_label in {"account", "company", "organization"}
+    contact_entity = entity_label in {"contact", "person"}
+    nested_company_identity = (
+        not contact_entity
+        and _text(summary.get("name")) is not None
+        and any(_text(link.get(key)) is not None for key in ("domain", "website"))
+        and _is_linkedin_company_url(link.get("linkedin"))
+    )
     positions = source.get("currentPositions")
     positions = positions if isinstance(positions, list) else []
     current_position = next(
@@ -390,10 +403,12 @@ def normalize_evidence(
         _first(source, "company", "company_name", "account", "organization")
     ) or _text(_first(basic_info, "name", "company", "company_name")) or _text(
         _first(current_position, "companyName", "company_name")
-    )
+    ) or (_text(summary.get("name")) if nested_company_identity else None)
     result["company_linkedin_url"] = _text(
         _first(source, "company_linkedin_url", "companyLinkedinUrl")
-    ) or _text(_first(current_position, "companyLinkedinUrl", "company_linkedin_url"))
+    ) or _text(_first(current_position, "companyLinkedinUrl", "company_linkedin_url")) or (
+        _text(link.get("linkedin")) if nested_company_identity else None
+    )
     domain_value = _first(source, "domain", "company_domain")
     if _is_linkedin_url(domain_value):
         domain_value = None
@@ -407,6 +422,8 @@ def normalize_evidence(
         domain_value = _first(
             basic_info, "primary_domain", "domain", "website", "company_url"
         )
+    if domain_value in (None, "") and nested_company_identity:
+        domain_value = _first(link, "domain", "website")
     result["domain"] = None if _is_linkedin_url(domain_value) else _domain(domain_value)
     result["signal"] = _text(_first(source, "signal", "signal_type", "intent", "type", "category"))
     result["evidence_url"] = _text(_first(source, "evidence_url", "source_url", "url", "link", "source"))
@@ -435,11 +452,6 @@ def normalize_evidence(
         first = _text(_first(source, "first_name", "firstName"))
         last = _text(_first(source, "last_name", "lastName"))
         contact = " ".join(part for part in (first, last) if part) or None
-    company_entity = bool(entity_type) and entity_type.strip().lower() in {
-        "account",
-        "company",
-        "organization",
-    }
     contact_hint = any(
         key in source
         for key in (
@@ -752,6 +764,34 @@ def _structured_metadata(kind: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(safe_pagination, dict):
                 safe_pagination["next_cursor"] = redact(cursor)
     return metadata
+
+
+def _output_preview_metadata(value: Any) -> Dict[str, Any]:
+    """Retain observed preview counts without inferring provider completeness."""
+
+    if not isinstance(value, dict):
+        return {}
+    for key in ("output_preview", "outputPreview"):
+        preview = value.get(key)
+        if not isinstance(preview, dict):
+            continue
+        metadata = {
+            field: redact(preview[field])
+            for field in ("kind", "rowCount", "columns")
+            if field in preview
+        }
+        rows = next(
+            (
+                preview.get(field)
+                for field in ("rows", "preview", "items")
+                if isinstance(preview.get(field), list)
+            ),
+            None,
+        )
+        if rows is not None:
+            metadata["returnedRowCount"] = len(rows)
+        return {"output_preview": metadata} if metadata else {}
+    return {}
 
 
 def _structured_status(envelope: Dict[str, Any]) -> Optional[str]:
@@ -1279,7 +1319,7 @@ def _execute_output(
         if validation is not None:
             return validation
     structured = _structured_execute_envelope(parsed)
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = _output_preview_metadata(parsed)
     if structured:
         kind, envelope = structured
         records = (
@@ -1287,7 +1327,7 @@ def _execute_output(
             if kind == "jsonapi"
             else _normalize_harvest(envelope, tool, entity_type)
         )[:limit]
-        metadata = _structured_metadata(kind, envelope)
+        metadata.update(_structured_metadata(kind, envelope))
     else:
         records = _records(parsed)[:limit]
     outer_status = _envelope_status(parsed)

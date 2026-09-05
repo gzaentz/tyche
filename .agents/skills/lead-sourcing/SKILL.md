@@ -123,6 +123,19 @@ exact count from external evidence before acceptance.
    pilots. Record every attempted route, including public-web queries. Expand
    productive routes within the remaining provider caps and add useful new
    query or continuation paths to the frontier as they are discovered.
+   Initialize `stop_audit.route_frontier` with the planned paths. Use
+   `scripts/record_route.py <results.json> --input '<JSON>'` before each
+   execution with `{"frontier": <route-frontier item in state untried>}`.
+   Immediately afterward, call it with the same identity fields and
+   `{"frontier": <updated item>, "receipt": <route receipt>}`. The helper
+   persists both atomically and rejects changed attempts or reused query IDs.
+   An estimated cost may settle once to a receipted actual cost within its
+   original bound; an actual charge cannot be rewritten through this helper.
+   It does not run providers, infer exhaustion, or attest audit completeness.
+   Keep reviewed counts, budget and cost summaries current separately. During
+   work, completion validation should reject actionable routes. If an old
+   receipt cannot be recovered, retain that path as blocked with the audit
+   gap stated explicitly; never invent row counts or rerun paid work silently.
 3. Verify account fit and signal evidence, then deduplicate by canonical domain.
    Keep failed candidates with a stable rejection reason and provider failures
    as unresolved; never turn either into a silent miss.
