@@ -141,8 +141,8 @@ def _validate_email_receipt(
         errors.append(
             f"{contact_path}.email_validation.status is unresolved or missing"
         )
-    elif status.casefold() == "invalid":
-        errors.append(f"{contact_path}.email_validation.status is invalid")
+    elif status.casefold() != "valid":
+        errors.append(f"{contact_path}.email_validation.status must be valid")
 
     source = receipt.get("source")
     if not isinstance(source, dict):

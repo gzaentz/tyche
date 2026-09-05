@@ -126,9 +126,9 @@ adapter preserves the provider row and exposes `email`, `email_status`, and
 receipt to a unique `email_validation` route and record actual usage.
 
 Apply TYCHE's current gate to the explicit ZeroBounce status after trimming and
-case normalization. Only `invalid` fails. Every other explicit status passes,
-including `catch-all`, `spamtrap`, `abuse`, `do_not_mail`, and `unknown`. This
-is intentionally more permissive than ZeroBounce's normal outbound guidance.
+case normalization. Only `valid` passes. Reject `invalid`, `do_not_mail`,
+`spamtrap`, and `abuse`; retain `catch-all`, `unknown`, and unfamiliar statuses
+as unresolved. Continue with another discovered address or requested buyer.
 A missing status, `no_results`, provider error, timeout, or other uncertain
 call is unresolved and cannot support an accepted email. Do not retry an
 uncertain paid validation call automatically. Deepline owns the provider

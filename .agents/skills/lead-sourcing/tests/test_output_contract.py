@@ -1137,13 +1137,15 @@ class OutputContractExtensionTests(unittest.TestCase):
         errors = VALIDATOR.validate_run(result)
         self.assertTrue(any("ZeroBounce email_validation receipt" in error for error in errors))
 
-    def test_only_explicit_zerobounce_invalid_status_fails(self):
-        for status in ("valid", "catch-all", "spamtrap", "abuse", "do_not_mail", "unknown"):
+    def test_only_explicit_zerobounce_valid_status_passes(self):
+        for status in ("valid", " VALID ", "Valid"):
             with self.subTest(status=status):
                 self.assertEqual(VALIDATOR.validate_run(accepted_email_result(status)), [])
 
-        errors = VALIDATOR.validate_run(accepted_email_result(" INVALID "))
-        self.assertTrue(any("email_validation.status is invalid" in error for error in errors))
+        for status in ("invalid", "catch-all", "spamtrap", "abuse", "do_not_mail", "unknown", " DO_NOT_MAIL ", "new_status"):
+            with self.subTest(status=status):
+                errors = VALIDATOR.validate_run(accepted_email_result(status))
+                self.assertTrue(any("email_validation.status must be valid" in error for error in errors))
 
     def test_missing_status_or_unsuccessful_validation_route_is_unresolved(self):
         missing_status = accepted_email_result()
@@ -1177,7 +1179,7 @@ class OutputContractExtensionTests(unittest.TestCase):
     def test_stored_backup_email_must_pass_the_same_gate(self):
         result = accepted_email_result()
         backup_receipt = email_validation_receipt(
-            status="invalid", route_id="email-validation-2", tool="second-live-validator"
+            status="do_not_mail", route_id="email-validation-2", tool="second-live-validator"
         )
         backup_receipt["email"] = "bea@example.org"
         result["accepted"][0]["backup_contacts"] = [
@@ -1201,7 +1203,7 @@ class OutputContractExtensionTests(unittest.TestCase):
 
         errors = VALIDATOR.validate_run(result)
         self.assertTrue(
-            any("backup_contacts[0].email_validation.status is invalid" in error for error in errors)
+            any("backup_contacts[0].email_validation.status must be valid" in error for error in errors)
         )
 
     def test_stop_audit_counts_unique_company_reviews(self):

@@ -32,8 +32,9 @@ Do not add a server, database, queue, CRM write, or outreach action.
    passes, verify the person's current role and company before contact-data
    lookup. Respect primary/secondary role groups. Email is required unless
    explicitly overridden; validate every stored address with a freshly
-   discovered Deepline ZeroBounce tool. Only explicit `invalid` fails the
-   configured status policy; a missing status or failed call is unresolved.
+   discovered Deepline ZeroBounce tool. Accept only explicit `valid`; reject
+   `invalid`, `do_not_mail`, `spamtrap`, and `abuse`. Other statuses or failed
+   calls remain unresolved. Continue with another address or requested buyer.
 5. **Save results; continue until the target or an honest stopping condition.**
    Persist evidence, attempts, costs, decisions, and remaining routes as work
    proceeds. Change route when a candidate fails. Do not claim exhaustion while

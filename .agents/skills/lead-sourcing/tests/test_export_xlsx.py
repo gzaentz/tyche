@@ -277,7 +277,7 @@ class ExportXlsxTests(unittest.TestCase):
         invalid["accepted"][0]["primary_contact"]["email_validation"]["status"] = "INVALID"
         result = self.run_rows_json(invalid)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("status is invalid", result.stderr)
+        self.assertIn("status must be valid", result.stderr)
 
         unaccounted = accepted_document()
         unaccounted["routes"][0]["paid_calls"] = 0
@@ -285,14 +285,22 @@ class ExportXlsxTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("successful paid Deepline validation route", result.stderr)
 
-    def test_every_explicit_non_invalid_zerobounce_status_exports(self):
-        for status in ("valid", "catch-all", "spamtrap", "abuse", "do_not_mail", "unknown"):
+    def test_only_explicit_valid_zerobounce_status_exports(self):
+        for status in ("valid", " VALID ", "Valid"):
             with self.subTest(status=status):
                 document = accepted_document()
                 document["accepted"][0]["primary_contact"]["email_validation"]["status"] = status
                 result = self.run_rows_json(document)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["rows"][0]["Email"], "ada@example.com")
+
+        for status in ("invalid", "catch-all", "spamtrap", "abuse", "do_not_mail", "unknown", " DO_NOT_MAIL ", "new_status"):
+            with self.subTest(status=status):
+                document = accepted_document()
+                document["accepted"][0]["primary_contact"]["email_validation"]["status"] = status
+                result = self.run_rows_json(document)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("status must be valid", result.stderr)
 
     def test_missing_optional_values_stay_blank(self):
         document = accepted_document([])

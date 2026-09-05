@@ -137,8 +137,8 @@ function validateEmailReceipt(document, contact, email, index) {
   if (!status) {
     throw new ExportError(`${path}.status is unresolved or missing`);
   }
-  if (status.toLowerCase() === "invalid") {
-    throw new ExportError(`${path}.status is invalid`);
+  if (status.toLowerCase() !== "valid") {
+    throw new ExportError(`${path}.status must be valid`);
   }
 
   const source = object(receipt.source);

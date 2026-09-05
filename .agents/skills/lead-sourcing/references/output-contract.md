@@ -42,7 +42,9 @@ The JSON Schema is draft 2020-12. A run directory is
    Every accepted primary contact must contain each requested field; otherwise
    the company remains unresolved. Every stored email must have a matching
    Deepline ZeroBounce validation receipt. Only an explicit ZeroBounce status
-   of `invalid` fails the email gate; every other explicit status passes. A
+   of `valid` passes the email gate (trimmed, case-insensitive). Reject risky
+   statuses (`invalid`, `do_not_mail`, `spamtrap`, `abuse`); other statuses
+   remain unresolved. Use `email_invalid` for rejected email outcomes. A
    missing status, missing receipt, failed call, or uncertain provider outcome
    is unresolved. In the workbook unrequested fields are blank. Do not perform
    contact-data lookup or email validation before the identity/current-role
@@ -731,9 +733,8 @@ must contain every requested field. Every stored email, including an email on
 a backup, must have an `email_validation` receipt for the same address. Its
 source must identify Deepline and ZeroBounce, link to the matching successful
 or partial `email_validation` route, use the same dynamically discovered tool,
-and record a non-empty explicit status. Only a case-insensitive status of
-`invalid` fails; all other explicit ZeroBounce statuses pass under this
-policy. Missing receipts or statuses and blocked, failed, or uncertain
+and record an explicit `valid` status after trimming and case normalization.
+Every other status fails acceptance for primary and backup contacts. Missing receipts or statuses and blocked, failed, or uncertain
 validation routes are unresolved and cannot appear on an accepted contact.
 Validate `primary_contact` and every item in `backup_contacts` with
 the same role and role-group rules. When

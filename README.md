@@ -21,7 +21,7 @@ provider adapters, budget controls, and output contract.
   rejected only because they are secondary.
 - Requires a current title and company match for every accepted contact.
 - Requires email by default and validates every stored email with ZeroBounce
-  through Deepline. Only an explicit `invalid` status is rejected.
+  through Deepline. Only an explicit `valid` status is accepted.
 - Uses live Deepline capability discovery instead of fixed Deepline tool IDs.
 - Supports bounded ScrapingDog operations through one local adapter.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
@@ -220,9 +220,9 @@ traceability. The output slot `primary_contact` is separate from this role
 group and may contain a valid secondary fallback.
 
 Email is required by default. Every exported email has a matching Deepline
-ZeroBounce receipt in `results.json`; only an explicit `invalid` status is
-blocked. All other explicit statuses pass, including statuses that may be poor
-choices for outbound email. Email and phone stay absent from JSON and blank in
+ZeroBounce receipt in `results.json`; only an explicit `valid` status passes.
+Risky statuses, including `do_not_mail`, `spamtrap`, and `abuse`, are rejected;
+catch-all, unknown, missing, and unfamiliar statuses remain unresolved. Email and phone stay absent from JSON and blank in
 the workbook when the input explicitly opts out of them. Generated reports are
 ignored by Git because evidence and contact data become stale.
 
