@@ -104,6 +104,26 @@ does not prove absence. Other statuses are unresolved provider outcomes; stop or
 change route and retain `status`, `error` when present, `provider`, `operation`,
 `tool`, and normalized `results` in the report.
 
+### BounceBan fallback
+
+Only after ZeroBounce returns `catch-all` or `unknown`, search the live catalog
+for `BounceBan verify single email` and describe the returned tool. Execute once
+with the exact email and `entity_type: email_validation`, reserving the current
+price against the existing provider, paid-call and per-next-lead caps. Do not
+pin the tool ID or price. Keep catch-all verification enabled. Default to
+regular mode: deepverify assumes the email domain matches the current company
+website, which is not safe for all verified brand/alias domains. No webhook
+or outreach is needed.
+
+Read raw `result`, not API `status`. Acceptance requires API `success` and
+`result: deliverable`; risky/unknown is unresolved, undeliverable is rejected.
+The adapter exposes the verdict as `email_status` while retaining raw fields.
+Store status/result, optional score/time and the Deepline source in the
+original receipt's `fallback` object. Never overwrite the ZeroBounce receipt.
+Do not override invalid, do_not_mail, spamtrap or abuse. An unsuccessful or
+uncertain call stays unresolved; do not retry it automatically or chain
+validators. Choose another address or requested buyer instead.
+
 ### Deepline ZeroBounce email gate
 
 When the effective contact fields include email, first find and verify the
@@ -126,9 +146,10 @@ adapter preserves the provider row and exposes `email`, `email_status`, and
 receipt to a unique `email_validation` route and record actual usage.
 
 Apply TYCHE's current gate to the explicit ZeroBounce status after trimming and
-case normalization. Only `valid` passes. Reject `invalid`, `do_not_mail`,
-`spamtrap`, and `abuse`; retain `catch-all`, `unknown`, and unfamiliar statuses
-as unresolved. Continue with another discovered address or requested buyer.
+case normalization. `valid` passes directly. Reject `invalid`, `do_not_mail`,
+`spamtrap`, and `abuse` without fallback. Only `catch-all`/`unknown` may receive
+the single BounceBan check above. Unfamiliar statuses stay unresolved.
+Continue with another discovered address or requested buyer.
 A missing status, `no_results`, provider error, timeout, or other uncertain
 call is unresolved and cannot support an accepted email. Do not retry an
 uncertain paid validation call automatically. Deepline owns the provider

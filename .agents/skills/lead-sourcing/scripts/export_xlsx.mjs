@@ -124,8 +124,7 @@ function requestedValue(contact, field, requestedFields, index) {
   return value;
 }
 
-function validateEmailReceipt(document, contact, email, index) {
-  const path = `accepted[${index}].primary_contact.email_validation`;
+function validateEmailReceipt(document, contact, email, index, validator = "zerobounce", path = `accepted[${index}].primary_contact.email_validation`) {
   const receipt = object(contact.email_validation);
   if (!Object.keys(receipt).length) {
     throw new ExportError(`${path} requires a Deepline ZeroBounce receipt`);
@@ -137,16 +136,31 @@ function validateEmailReceipt(document, contact, email, index) {
   if (!status) {
     throw new ExportError(`${path}.status is unresolved or missing`);
   }
-  if (status.toLowerCase() !== "valid") {
+  const fallback = receipt.fallback;
+  if (validator === "bounceban") {
+    if (status.toLowerCase() !== "success" || text(receipt.result).toLowerCase() !== "deliverable") {
+      throw new ExportError(`${path} requires BounceBan success and result deliverable`);
+    }
+    if ("fallback" in receipt) throw new ExportError(`${path} cannot chain fallbacks`);
+  } else if (["catch-all", "unknown"].includes(status.toLowerCase()) && Object.keys(object(fallback)).length) {
+    validateEmailReceipt(document, { email_validation: fallback }, email, index, "bounceban", `${path}.fallback`);
+    const ids = (document.routes || []).map((route) => route.route_id);
+    if (ids.indexOf(object(fallback.source).route_id) <= ids.indexOf(object(receipt.source).route_id)) {
+      throw new ExportError(`${path} fallback must use a distinct later route`);
+    }
+  } else if (status.toLowerCase() !== "valid") {
     throw new ExportError(`${path}.status must be valid`);
+  }
+  if (validator === "zerobounce" && "fallback" in receipt && !["catch-all", "unknown"].includes(status.toLowerCase())) {
+    throw new ExportError(`${path} fallback is only allowed for catch-all or unknown`);
   }
 
   const source = object(receipt.source);
   if (text(source.provider).toLowerCase() !== "deepline") {
     throw new ExportError(`${path}.source.provider must be deepline`);
   }
-  if (text(source.validator).toLowerCase() !== "zerobounce") {
-    throw new ExportError(`${path}.source.validator must be zerobounce`);
+  if (text(source.validator).toLowerCase() !== validator) {
+    throw new ExportError(`${path}.source.validator must be ${validator}`);
   }
   if (text(source.operation) !== "execute") {
     throw new ExportError(`${path}.source.operation must be execute`);
@@ -173,6 +187,7 @@ function validateEmailReceipt(document, contact, email, index) {
     || !["ok", "partial"].includes(route.provider_status)
     || !Number.isInteger(route.paid_calls)
     || route.paid_calls < 1
+    || (validator === "bounceban" && route.paid_calls !== 1)
   ) {
     throw new ExportError(`${path} does not match a successful paid Deepline validation route`);
   }
@@ -212,6 +227,10 @@ export function rowsFor(document) {
     const email = requestedValue(contact, "email", requestedFields, index);
     const phone = requestedValue(contact, "phone", requestedFields, index);
     if (email) validateEmailReceipt(document, contact, email, index);
+    for (const [backupIndex, backup] of (acceptedRow.backup_contacts || []).entries()) {
+      const backupEmail = text(object(backup).email);
+      if (backupEmail) validateEmailReceipt(document, backup, backupEmail, index, "zerobounce", `accepted[${index}].backup_contacts[${backupIndex}].email_validation`);
+    }
 
     return {
       Name: requiredValues.Name,

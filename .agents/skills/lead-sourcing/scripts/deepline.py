@@ -340,6 +340,10 @@ def _is_email_validation_record(value: Any) -> bool:
         return False
     if not isinstance(status, str) or not status.strip():
         return False
+    if isinstance(value.get("result"), str) and value["result"].strip().lower() in {
+        "deliverable", "risky", "undeliverable", "unknown",
+    }:
+        return True
     normalized = status.strip().lower().replace("-", "_")
     return normalized not in _STATUS_WORDS and normalized not in {
         "success",
@@ -529,7 +533,7 @@ def normalize_evidence(
         result["contact_email"] = contact_email
     if is_email_validation:
         result["email"] = _text(_first(source, "address", "email"))
-        result["email_status"] = _text(source.get("status"))
+        result["email_status"] = _text(source.get("result") or source.get("status"))
         result["email_sub_status"] = _text(source.get("sub_status"))
     if entity_type:
         result["entity_type"] = entity_type
@@ -1351,6 +1355,8 @@ def _execute_output(
             body["error"] = error
         if entity_type:
             body["entity_type"] = entity_type
+        if entity_type and entity_type.strip().casefold() == "email_validation":
+            body["provider_response"] = redact(parsed)
         return body
     if status in _PROVIDER_ERROR_STATUSES or status == "schema_error":
         final_status = status

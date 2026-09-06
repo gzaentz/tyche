@@ -113,8 +113,9 @@ def _validate_email_receipt(
     contact_path: str,
     routes_by_id: dict[str, list[dict[str, Any]]],
     errors: list[str],
+    validator: str = "zerobounce",
 ) -> None:
-    """Require a determinate Deepline ZeroBounce receipt for one stored email."""
+    """Validate ZeroBounce and its optional single BounceBan fallback."""
 
     email = _nonempty_text(contact.get("email"))
     receipt = contact.get("email_validation")
@@ -141,8 +142,26 @@ def _validate_email_receipt(
         errors.append(
             f"{contact_path}.email_validation.status is unresolved or missing"
         )
+    elif validator == "bounceban":
+        if status.casefold() != "success" or str(receipt.get("result", "")).strip().casefold() != "deliverable":
+            errors.append(f"{contact_path}.email_validation requires BounceBan success and result deliverable")
+        if "fallback" in receipt:
+            errors.append(f"{contact_path}.email_validation cannot chain fallbacks")
+    elif status.casefold() in {"catch-all", "unknown"} and isinstance(receipt.get("fallback"), dict):
+        fallback = receipt["fallback"]
+        _validate_email_receipt(
+            {"email": email, "email_validation": fallback},
+            f"{contact_path}.email_validation.fallback", routes_by_id, errors, "bounceban",
+        )
+        first_id = receipt.get("source", {}).get("route_id") if isinstance(receipt.get("source"), dict) else None
+        next_id = fallback.get("source", {}).get("route_id") if isinstance(fallback.get("source"), dict) else None
+        ids = list(routes_by_id)
+        if first_id in ids and next_id in ids and ids.index(next_id) <= ids.index(first_id):
+            errors.append(f"{contact_path}.email_validation fallback must use a distinct later route")
     elif status.casefold() != "valid":
         errors.append(f"{contact_path}.email_validation.status must be valid")
+    if validator == "zerobounce" and "fallback" in receipt and (status or "").casefold() not in {"catch-all", "unknown"}:
+        errors.append(f"{contact_path}.email_validation fallback is only allowed for catch-all or unknown")
 
     source = receipt.get("source")
     if not isinstance(source, dict):
@@ -152,9 +171,9 @@ def _validate_email_receipt(
         errors.append(
             f"{contact_path}.email_validation.source.provider must be deepline"
         )
-    if str(source.get("validator", "")).strip().casefold() != "zerobounce":
+    if str(source.get("validator", "")).strip().casefold() != validator:
         errors.append(
-            f"{contact_path}.email_validation.source.validator must be zerobounce"
+            f"{contact_path}.email_validation.source.validator must be {validator}"
         )
     operation = _nonempty_text(source.get("operation"))
     if operation != "execute":
@@ -191,6 +210,8 @@ def _validate_email_receipt(
             f"email validation route {route_id} is unresolved or unsuccessful"
         )
     paid_calls = route.get("paid_calls")
+    if validator == "bounceban" and paid_calls != 1:
+        errors.append(f"email validation route {route_id} must record exactly one fallback call")
     if not isinstance(paid_calls, int) or isinstance(paid_calls, bool) or paid_calls < 1:
         errors.append(
             f"email validation route {route_id} must record its paid Deepline call"

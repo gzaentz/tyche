@@ -46,7 +46,11 @@ Command paths below are relative to the skill directory, not this reference.
   Do not pin its Deepline tool ID. Only an explicit, trimmed, case-insensitive
   ZeroBounce status of `valid` passes this gate. Reject `invalid`,
   `do_not_mail`, `spamtrap`, and `abuse` with `email_invalid`; retain all other
-  statuses as `email_validation_unresolved`. A missing status, missing receipt,
+  statuses as `email_validation_unresolved`, except catch-all/unknown may
+  receive one budgeted BounceBan check through Deepline. Discover and describe
+  it first; accept only API success plus result deliverable. Preserve both
+  receipts using `email_validation.fallback`. Never override a hard rejection
+  or chain fallbacks. A missing status, missing receipt,
   `no_results`, or failed or uncertain provider call is unresolved, not valid.
   Count each validation execution against both the Deepline credit cap and the
   paid-call cap.
@@ -151,9 +155,12 @@ exact count from external evidence before acceptance.
    passes, retrieve each requested contact field. For every email, search the
    live Deepline catalog for ZeroBounce validation, describe the selected tool,
    and execute it once against the exact address. Store the status and source
-   receipt. Accept only `valid`. Reject `invalid`, `do_not_mail`, `spamtrap`,
-   and `abuse`; try another discovered address or current-role contact. If
-   validation has any other status, is missing, or is uncertain, keep the
+   receipt. Accept `valid` directly. Reject `invalid`, `do_not_mail`, `spamtrap`,
+   and `abuse`; try another discovered address or current-role contact. For
+   catch-all/unknown only, check once with a freshly discovered/described
+   BounceBan tool within budget. Accept only successful deliverable with both
+   receipts. Risky/unknown stays unresolved; undeliverable is rejected. If
+   validation has another status, is missing, or is uncertain, keep the
    contact unresolved and change route; do not accept it or retry the uncertain
    paid call automatically. Store an email on a backup only after the same
    validation gate passes.
@@ -211,8 +218,12 @@ The email gate follows the contact gate. It requires the email, a matching
 ZeroBounce status, and a source receipt linked to one successful or partial
 Deepline `email_validation` route. The receipt records `provider: "deepline"`,
 `validator: "zerobounce"`, `operation: "execute"`, the dynamically discovered
-tool, and route ID. Use the explicit provider `status` for this policy: only `valid` passes after
-trimming and case normalization. No other status can supply an accepted email.
+tool, and route ID. ZeroBounce valid passes after trimming/case normalization.
+Only catch-all/unknown may instead pass with one successful BounceBan
+result deliverable receipt nested in `email_validation.fallback`. Preserve
+both receipts for the same address and distinct ordered validation routes.
+API success alone is not a deliverability verdict. Never override invalid,
+do_not_mail, spamtrap or abuse; do not chain fallbacks.
 A missing status or a failed, blocked, timed-out, or otherwise uncertain call
 is unresolved. Preserve rejected and unresolved outcomes and continue with
 another discovered address or requested-role buyer within the budget.

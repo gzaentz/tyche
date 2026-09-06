@@ -42,7 +42,9 @@ The JSON Schema is draft 2020-12. A run directory is
    Every accepted primary contact must contain each requested field; otherwise
    the company remains unresolved. Every stored email must have a matching
    Deepline ZeroBounce validation receipt. Only an explicit ZeroBounce status
-   of `valid` passes the email gate (trimmed, case-insensitive). Reject risky
+   of `valid` passes directly (trimmed, case-insensitive). For catch-all/unknown
+   only, one successful BounceBan deliverable fallback may pass with both
+   receipts preserved. Reject risky
    statuses (`invalid`, `do_not_mail`, `spamtrap`, `abuse`); other statuses
    remain unresolved. Use `email_invalid` for rejected email outcomes. A
    missing status, missing receipt, failed call, or uncertain provider outcome
@@ -360,6 +362,30 @@ top-level result list or hide rejected/unresolved rows in a count.
         "source": {"$ref": "#/$defs/source"}
       }
     },
+    "bounceban_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email", "status", "result", "source"],
+      "properties": {
+        "email": {"type": "string", "format": "email", "minLength": 3},
+        "status": {"type": "string", "minLength": 1},
+        "result": {"type": "string", "minLength": 1},
+        "score": {"type": ["number", "null"]},
+        "processed_at": {"type": ["string", "null"]},
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "validator", "operation", "tool", "route_id"],
+          "properties": {
+            "provider": {"const": "deepline"},
+            "validator": {"const": "bounceban"},
+            "operation": {"const": "execute"},
+            "tool": {"type": "string", "minLength": 1},
+            "route_id": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
     "email_validation": {
       "type": "object",
       "additionalProperties": false,
@@ -368,6 +394,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "email": {"type": "string", "format": "email", "minLength": 3},
         "status": {"type": "string", "minLength": 1},
         "sub_status": {"type": ["string", "null"]},
+        "fallback": {"$ref": "#/$defs/bounceban_validation"},
         "processed_at": {"type": ["string", "null"]},
         "source": {
           "type": "object",
@@ -733,8 +760,16 @@ must contain every requested field. Every stored email, including an email on
 a backup, must have an `email_validation` receipt for the same address. Its
 source must identify Deepline and ZeroBounce, link to the matching successful
 or partial `email_validation` route, use the same dynamically discovered tool,
-and record an explicit `valid` status after trimming and case normalization.
-Every other status fails acceptance for primary and backup contacts. Missing receipts or statuses and blocked, failed, or uncertain
+and record explicit `valid`, or `catch-all`/`unknown` with one nested `fallback`
+receipt for the same address. The fallback requires Deepline/BounceBan, API
+`status: success` and `result: deliverable` after trimming/case normalization.
+It must link to a distinct later successful paid email-validation route with
+exactly one paid call. Preserve the original ZeroBounce status. Never allow
+fallback for invalid, do_not_mail, spamtrap, abuse, missing or unfamiliar
+statuses; never chain fallbacks. A risky/unknown fallback stays unresolved;
+an undeliverable fallback is rejected. Keep the candidate and both receipts
+in unresolved/rejected outcomes, outside the verified workbook and target
+count. Missing receipts or statuses and blocked, failed, or uncertain
 validation routes are unresolved and cannot appear on an accepted contact.
 Validate `primary_contact` and every item in `backup_contacts` with
 the same role and role-group rules. When
@@ -798,7 +833,7 @@ cost cannot prove the allowance and is invalid while the guard is active. The
 sum for each count must not exceed the configured allowance. Route changes,
 rejections, and failed lookups do not change the count; only a fully accepted
 lead advances it. Acceptance uses the requested contact fields and preserves
-explicit email opt-outs; any stored email must pass ZeroBounce. Before a paid
+explicit email opt-outs; any stored email must pass the email gate. Before a paid
 Deepline execution, the agent must add its conservative cost upper bound to
 the amount already charged to the current count and must not run the call if
 the sum would exceed the allowance. This is an agent pre-call check and a

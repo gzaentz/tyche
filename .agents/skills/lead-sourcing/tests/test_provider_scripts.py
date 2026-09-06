@@ -527,6 +527,32 @@ class ProviderScriptTests(unittest.TestCase):
         self.assertEqual(contact["current_title"], "VP Sales")
         self.assertEqual(contact["entity_type"], "contact")
 
+    def test_bounceban_preserves_verdict_separately_from_api_status(self):
+        for verdict in ("deliverable", "risky", "undeliverable", "unknown"):
+            with self.subTest(verdict=verdict):
+                response = {"toolResponse": {"raw": {
+                    "email": "ada@example.com", "status": "success",
+                    "result": verdict, "score": 42,
+                }}}
+                body = DEEPLINE._execute_output(response, "dynamic-validator", "email_validation")
+                self.assertEqual(body["status"], "ok")
+                row = body["results"][0]
+                self.assertEqual(row["status"], "success")
+                self.assertEqual(row["result"], verdict)
+                self.assertEqual(row["email_status"], verdict)
+                self.assertEqual(row["score"], 42)
+                self.assertNotIn("contact", row)
+
+    def test_email_validation_schema_error_keeps_redacted_diagnostics(self):
+        response = {"unexpected_envelope": {"verification_id": "job-123", "api_key": "secret-value"}}
+        body = DEEPLINE._execute_output(response, "dynamic-validator", "email_validation")
+        self.assertEqual(body["status"], "schema_error")
+        self.assertEqual(body["results"], [])
+        self.assertEqual(body["provider_response"]["unexpected_envelope"]["verification_id"], "job-123")
+        self.assertNotIn("secret-value", json.dumps(body))
+        ordinary = DEEPLINE._execute_output(response, "dynamic-company-tool", "company")
+        self.assertNotIn("provider_response", ordinary)
+
     def test_deepline_keeps_explicit_zerobounce_status_when_default_verdict_fails(self):
         response = json.dumps(
             {

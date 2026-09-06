@@ -21,7 +21,8 @@ provider adapters, budget controls, and output contract.
   rejected only because they are secondary.
 - Requires a current title and company match for every accepted contact.
 - Requires email by default and validates every stored email with ZeroBounce
-  through Deepline. Only an explicit `valid` status is accepted.
+  through Deepline. Accept `valid`, or resolve catch-all/unknown once with
+  BounceBan and require an explicit `deliverable` verdict with both receipts.
 - Uses live Deepline capability discovery instead of fixed Deepline tool IDs.
 - Supports bounded ScrapingDog operations through one local adapter.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
@@ -142,7 +143,7 @@ legacy `requested_roles` behavior.
 - A material route starts with one paid call and at most 10 returned rows.
 - Deepline catalog `search` and `describe` calls are read-only.
 - The agent checks the live Deepline schema and price before `execute`.
-- Each ZeroBounce validation is a Deepline execution and counts against both
+- Each ZeroBounce or BounceBan validation is a Deepline execution and counts against both
   the Deepline credit cap and the total paid-call cap.
 - An uncertain paid result is not retried automatically.
 - An uncertain or failed call does not end the run when another route, query,
@@ -157,7 +158,7 @@ Deepline route receipt. TYCHE sums actual route cost, or the conservative route
 upper bound when actual cost is unavailable, within each group. Route changes,
 rejected candidates, and failed lookups do not reset the group. The allowance
 resets only after a complete lead passes the company, signal, requested-role,
-and requested-contact-field gates. Any stored email must pass ZeroBounce;
+and requested-contact-field gates. Any stored email must pass the email gate;
 explicit email opt-outs still apply. Before each paid execution, the agent
 must check that the route's conservative upper bound plus the current group's
 prior charges does not exceed the allowance. The agent must not execute a
@@ -220,9 +221,11 @@ traceability. The output slot `primary_contact` is separate from this role
 group and may contain a valid secondary fallback.
 
 Email is required by default. Every exported email has a matching Deepline
-ZeroBounce receipt in `results.json`; only an explicit `valid` status passes.
-Risky statuses, including `do_not_mail`, `spamtrap`, and `abuse`, are rejected;
-catch-all, unknown, missing, and unfamiliar statuses remain unresolved. Email and phone stay absent from JSON and blank in
+ZeroBounce receipt in `results.json`. Accept `valid`, or for catch-all/unknown
+only, one successful BounceBan `deliverable` fallback with both receipts.
+Invalid, do_not_mail, spamtrap and abuse cannot be overridden. Unresolved
+candidates retain their addresses and evidence in the research record, not
+the verified workbook. Email and phone stay absent from JSON and blank in
 the workbook when the input explicitly opts out of them. Generated reports are
 ignored by Git because evidence and contact data become stale.
 
