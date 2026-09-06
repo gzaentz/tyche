@@ -171,7 +171,7 @@ class OutputContractExtensionTests(unittest.TestCase):
         _, result_schema = load_schemas()
         self.assertEqual(
             result_schema["properties"]["schema_version"]["enum"],
-            ["1.0", "1.1"],
+            ["1.0", "1.1", "1.2"],
         )
         route = result_schema["$defs"]["route"]
         self.assertIn("cost_upper_bound_credits", route["properties"])
@@ -1077,9 +1077,9 @@ class OutputContractExtensionTests(unittest.TestCase):
 
     def test_validator_rejects_unsupported_result_schema_version(self):
         result = shortfall_result()
-        result["schema_version"] = "1.2"
+        result["schema_version"] = "1.3"
         errors = VALIDATOR.validate_run(result)
-        self.assertIn("schema_version must be 1.0 or 1.1", errors)
+        self.assertIn("schema_version must be 1.0, 1.1 or 1.2", errors)
 
     def test_target_and_shortfall_stop_reasons_are_consistent(self):
         reached = {

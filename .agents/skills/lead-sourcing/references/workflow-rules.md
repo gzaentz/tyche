@@ -78,7 +78,7 @@ Command paths below are relative to the skill directory, not this reference.
 - Record actual provider usage only from a usage or billing receipt. If a paid
   route's actual cost is unavailable, store `null` for that route and provider
   spend and mark budget status and provider capacity `unknown`. In version
-  `1.1`, also record a route-total upper bound when the live plan provides one,
+  `1.1` and later, also record a route-total upper bound when the live plan provides one,
   with `cost_basis: "estimated"`; use `unknown` when no bound exists. Never
   present an estimate as actual spend.
 - Apply `budget.max_deepline_credits_per_next_lead` with a default of `5`.
@@ -176,7 +176,8 @@ exact count from external evidence before acceptance.
    blocked. `budget_exhausted`
    additionally requires that neither paid provider can make another bounded
    call. Never exceed a hard cap to reach the target.
-7. Write version `1.1` `results.json`. Every route must include actual,
+7. Write version `1.2` `results.json`. Follow the output contract's client-writing
+   and taxonomy rules. Every route must include actual,
    estimated, or unknown cost fields. Run
    `python3 scripts/validate_run.py <path-to-results.json> --show-cost-summary`,
    copy `calculated_cost_summary` into the top-level `cost_summary`, and use the

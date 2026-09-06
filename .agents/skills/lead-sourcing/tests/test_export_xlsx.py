@@ -135,7 +135,7 @@ def accepted_document(contact_fields: list[str] | None = None) -> dict:
     }
 
 
-def read_first_sheet_rows(workbook_path: pathlib.Path) -> list[list[str]]:
+def read_first_sheet_rows(workbook_path: pathlib.Path, sheet_number: int = 1) -> list[list[str]]:
     main_namespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
     tag = lambda name: f"{{{main_namespace}}}{name}"
 
@@ -146,7 +146,7 @@ def read_first_sheet_rows(workbook_path: pathlib.Path) -> list[list[str]]:
             for item in root.findall(tag("si")):
                 shared_strings.append("".join(node.text or "" for node in item.iter(tag("t"))))
 
-        root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+        root = ET.fromstring(archive.read(f"xl/worksheets/sheet{sheet_number}.xml"))
         rows: list[list[str]] = []
         for row in root.iter(tag("row")):
             values: list[str] = []
@@ -202,7 +202,10 @@ class ExportXlsxTests(unittest.TestCase):
             re.S,
         )
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1).split(","), EXPECTED_COLUMNS)
+        self.assertEqual(
+            match.group(1).split(","),
+            EXPECTED_COLUMNS[:16] + ["Intent Signal"] + EXPECTED_COLUMNS[16:],
+        )
 
     def test_maps_all_contact_and_company_columns(self):
         result = self.run_rows_json(accepted_document(["email", "phone"]))

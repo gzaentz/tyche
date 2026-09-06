@@ -222,7 +222,7 @@ not a substitute for a provider credit cap. Catalog search/describe calls are
 read-only, but every paid call counts against its provider cap and call guard.
 If a provider does not expose usage, set its output `spent` and route
 `cost_credits` to `null`; never use `0` to mean unknown. New runs use result
-schema version `1.1`. Version `1.0` remains valid for existing artifacts.
+schema version `1.2`. Versions `1.0` and `1.1` remain valid for existing artifacts.
 
 ## `results.json` schema
 
@@ -238,7 +238,7 @@ top-level result list or hide rejected/unresolved rows in a count.
   "additionalProperties": false,
   "required": ["schema_version", "run_id", "retrieved_at", "request", "budget", "routes", "summary", "accepted", "rejected", "unresolved", "stop_reason"],
   "properties": {
-    "schema_version": {"enum": ["1.0", "1.1"]},
+    "schema_version": {"enum": ["1.0", "1.1", "1.2"]},
     "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"},
     "retrieved_at": {"type": "string", "format": "date-time"},
     "request": {"$ref": "#/$defs/request_snapshot"},
@@ -257,7 +257,7 @@ top-level result list or hide rejected/unresolved rows in a count.
   "allOf": [
     {
       "if": {
-        "properties": {"schema_version": {"const": "1.1"}},
+        "properties": {"schema_version": {"enum": ["1.1", "1.2"]}},
         "required": ["schema_version"]
       },
       "then": {
@@ -266,6 +266,32 @@ top-level result list or hide rejected/unresolved rows in a count.
           "routes": {
             "items": {
               "required": ["cost_credits", "cost_upper_bound_credits", "cost_basis"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "1.2"}},
+        "required": ["schema_version"]
+      },
+      "then": {
+        "properties": {
+          "accepted": {
+            "items": {
+              "required": ["intent_details"],
+              "properties": {
+                "company": {
+                  "anyOf": [
+                    {"required": ["industry", "sub_industry"]},
+                    {
+                      "required": ["classification_note"],
+                      "not": {"anyOf": [{"required": ["industry"]}, {"required": ["sub_industry"]}]}
+                    }
+                  ]
+                }
+              }
             }
           }
         }
@@ -295,6 +321,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "linkedin_url": {"$ref": "#/$defs/url"},
         "industry": {"type": "string", "minLength": 1},
         "sub_industry": {"type": "string", "minLength": 1},
+        "classification_note": {"type": "string", "pattern": "\\S"},
         "hq_state": {"type": "string", "minLength": 1},
         "hq_country": {"type": "string", "minLength": 1},
         "employee_count": {"type": "integer", "minimum": 0},
@@ -445,6 +472,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "company": {"$ref": "#/$defs/company"},
         "account_fit": {"$ref": "#/$defs/account_fit"},
         "signal_evidence": {"$ref": "#/$defs/signal_evidence"},
+        "intent_details": {"type": "string", "pattern": "\\S"},
         "qualification_checks": {"type": "array", "items": {"$ref": "#/$defs/qualification_check"}},
         "primary_contact": {"$ref": "#/$defs/contact"},
         "backup_contacts": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/contact"}},
@@ -843,7 +871,7 @@ backward and cannot exceed the final number of accepted leads. The output
 limit, when present, must match the request limit. Artifacts without this
 optional field remain valid for backward compatibility.
 
-Every version `1.1` route has `cost_credits`,
+Every version `1.1` or `1.2` route has `cost_credits`,
 `cost_upper_bound_credits`, and `cost_basis`. Use these combinations:
 
 - `actual`: actual and upper-bound credits are numeric, non-negative, and
@@ -856,7 +884,7 @@ Every version `1.1` route has `cost_credits`,
 - No paid call, including a public-web route: use `actual` with both values set
   to `0`.
 
-The version `1.1` `cost_summary` is derived only from route fields. Confirmed
+The version `1.1` and `1.2` `cost_summary` is derived only from route fields. Confirmed
 credits sum `actual` routes. Maximum credits sum actual costs and estimated
 upper bounds; the maximum is `null` for a provider with any `unknown` paid
 route. The overall status is `unknown` if any paid route is unknown,
@@ -871,7 +899,7 @@ Codex model cost is not part of direct provider cost.
 Route cost values are totals, not per-call rates. When `paid_calls` is greater
 than one, both cost fields cover all paid calls represented by that route.
 A typical, midpoint, or unconfirmed price is not an upper bound; use `unknown`
-when the full route cannot be conservatively bounded. In version `1.1`, a
+when the full route cannot be conservatively bounded. In versions `1.1` and `1.2`, a
 known provider `maximum_credits` must not exceed the matching
 `budget.limits.<provider>_credits`; an unknown maximum remains allowed under
 the existing unknown-spend rules.
@@ -889,12 +917,16 @@ version `1.1` cost fields before reporting confirmed or estimated cost.
 
 ## `leads.xlsx` contract
 
-Write one valid Excel workbook with one worksheet named `Leads`. The first row
-is the fixed, ordered header:
+For version `1.2`, write a workbook with `Leads` and `Sources` worksheets.
+The first row of `Leads` is the fixed, ordered header:
 
 ```text
-Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Details,Phone
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Signal,Intent Details,Phone
 ```
+
+Versions `1.0` and `1.1` keep their original single `Leads` worksheet, 18-column
+layout (without `Intent Signal`), and labelled signal/date/details/source text
+in `Intent Details`. Do not silently migrate or overwrite historical runs.
 
 `leads.xlsx` is the clean flattened deliverable. Write exactly one row for each
 accepted primary company-contact pair and no rows for rejected, unresolved, or
@@ -918,12 +950,22 @@ route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 | `HQ Country` | `company.hq_country`, otherwise blank |
 | `Employee Count` | `company.employee_count`, otherwise blank; never turn a range into an exact count |
 | `Description` | `company.description`, otherwise blank |
-| `Intent Details` | signal name, date, evidence text, and source URL from `signal_evidence` |
+| `Intent Signal` | short signal label from `signal_evidence.signal` |
+| `Intent Details` | `intent_details`, written by the sourcing agent from verified evidence |
 | `Phone` | `primary_contact.phone`, otherwise blank |
 
-Rejected, unresolved, backup contacts, provider receipts, fit evidence, and the
-full signal-evidence structure remain in `results.json` and `report.md` instead
-of widening the sales-ready workbook. `Email` and `Phone` are blank unless the
+Rejected, unresolved, backup contacts and provider receipts remain in
+`results.json` and `report.md`. `Sources` contains the accepted company's fit,
+signal, primary-role and qualification-check evidence, preserving source text
+and URLs. Its columns are `Company,Domain,Field,Signal,Evidence Date,Date Basis,
+Observed On,Source URL,Evidence Text`. `Evidence Date` is the stored published,
+posted or updated date, not necessarily the event date. For `observed_current`,
+leave `Evidence Date` blank and put the original evidence date in `Observed On`.
+Otherwise use the run's retrieval date for `Observed On`. Export dates as typed
+Excel dates. An unresolved classification note gets an `Industry` source row
+with blank URL and dates; it is a limitation, not a verification receipt.
+
+`Email` and `Phone` are blank unless the
 input requests them and a verified value is available. Generate the file with
 `scripts/export_xlsx.mjs` so the spelling, order, types, and layout stay
 deterministic. Use the harness-provided `@oai/artifact-tool`; it is not a TYCHE
@@ -932,6 +974,39 @@ exist, format the range as an Excel table with filters, hide gridlines, and wrap
 long description and intent text.
 Preserve exact employee counts as numbers, keep ranges as text, and leave
 unverified optional values as empty cells rather than placeholder text.
+
+### Client writing and taxonomy (version `1.2`)
+
+- Write `company.description` as a factual explanation of what the company does.
+  Keep contact-validation warnings, scoring and internal diagnostics out of it.
+- Every accepted company requires non-empty `intent_details`. Usually use 2-4
+  sentences: what happened or exists, when supported, why it may matter to the
+  requested product, and any material caveat. This is writing guidance, not a
+  sentence-count gate. Keep inference conditional; a new leader is not proof of
+  layoffs, an existing service is not unmet demand, and an old opening is not
+  newly dated intent. Do not turn observation dates into event dates.
+- Keep `signal_evidence.signal` short and consistent within the request, such as
+  `New HR leader`, `Announced layoffs` or `Housing expansion`. Preserve detailed
+  claims in evidence and prose. Every factual clause in the narrative must be
+  supported by the saved signal or qualification evidence for that company.
+  Save additional supporting sources as existing qualification-check evidence;
+  do not combine unsupported events into a more persuasive story.
+- Use `assets/leadpoet_industry_taxonomy.json`, a versioned PP snapshot with
+  pinned provenance. Select the company's business activity from evidence, not
+  the customer's industry or the technology merely mentioned in a job posting.
+  Every populated `industry`/`sub_industry` pair must use exact canonical labels
+  and a permitted parent-child relationship. Some children have multiple parents;
+  choose the evidence-supported one. Membership alone does not prove accuracy.
+- When classification cannot be supported, omit both fields and supply
+  `company.classification_note` explaining the gap. Leave the workbook cells
+  blank. Do not invent a default pair or reject an otherwise qualified account
+  merely for this metadata gap. Required ICP industry evidence still applies.
+  Raw provider classifications stay in the saved receipts. Do not import PP's
+  heuristic fallback rules or add another AI call to format the output.
+
+The semantic validator enforces these new required fields and taxonomy pairs
+only for version `1.2`; billing and all existing eligibility checks still apply.
+The exporter does not write narratives, classify companies, or infer dates.
 
 ## `report.md` minimum contents
 

@@ -28,6 +28,8 @@ Do not add a server, database, queue, CRM write, or outreach action.
    for the same company. Read the actual source: a keyword match, search snippet,
    ingestion date, or empty provider response does not prove qualification or
    disqualification. Keep rejected, unresolved, and provider failures separate.
+   Use the output contract's taxonomy and client-writing rules to classify the
+   company and explain the signal from the same evidence.
 4. **Find the requested buyer and validate their email.** Only after the account
    passes, verify the person's current role and company before contact-data
    lookup. Respect primary/secondary role groups. Email is required unless

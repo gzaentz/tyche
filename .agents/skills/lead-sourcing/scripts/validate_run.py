@@ -16,7 +16,7 @@ from typing import Any, Optional
 ACTIONABLE_FRONTIER_STATES = {"untried", "continuable"}
 FINAL_FRONTIER_STATES = {"exhausted", "blocked"}
 PAID_PROVIDERS = {"deepline", "scrapingdog"}
-SUPPORTED_RESULT_SCHEMA_VERSIONS = {"1.0", "1.1"}
+SUPPORTED_RESULT_SCHEMA_VERSIONS = {"1.0", "1.1", "1.2"}
 DETERMINATE_PROVIDER_STATUSES = {"ok", "partial", "no_results"}
 BLOCKING_PROVIDER_STATUSES = {
     "rate_limited",
@@ -362,9 +362,9 @@ def calculate_cost_summary(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_cost_accounting(document: dict[str, Any], errors: list[str]) -> None:
-    """Enforce the version 1.1 route-cost and summary contract."""
+    """Enforce the route-cost contract introduced in version 1.1."""
 
-    if document.get("schema_version") != "1.1":
+    if document.get("schema_version") not in {"1.1", "1.2"}:
         return
 
     summary = document.get("summary", {})
@@ -675,6 +675,35 @@ def _validate_next_lead_budget(document: dict[str, Any], errors: list[str]) -> N
             )
 
 
+def _validate_client_output(accepted: list, errors: list[str]) -> None:
+    taxonomy_path = pathlib.Path(__file__).resolve().parents[1] / "assets" / "leadpoet_industry_taxonomy.json"
+    taxonomy = json.loads(taxonomy_path.read_text(encoding="utf-8"))
+    for index, row in enumerate(accepted):
+        if not isinstance(row, dict):
+            continue
+        path = f"accepted[{index}]"
+        narrative = row.get("intent_details")
+        if not isinstance(narrative, str) or not narrative.strip():
+            errors.append(f"{path}.intent_details must be a non-empty string")
+        company = row.get("company")
+        if not isinstance(company, dict):
+            continue
+        note = company.get("classification_note")
+        if "classification_note" in company and (not isinstance(note, str) or not note.strip()):
+            errors.append(f"{path}.company.classification_note must be a non-empty string")
+        industry, subindustry = company.get("industry"), company.get("sub_industry")
+        if "industry" not in company and "sub_industry" not in company:
+            if not isinstance(note, str) or not note.strip():
+                errors.append(f"{path}.company.classification_note is required for unresolved classification")
+        elif (
+            not isinstance(industry, str)
+            or not isinstance(subindustry, str)
+            or industry not in taxonomy["parent_industries"]
+            or industry not in taxonomy["subindustry_parents"].get(subindustry, [])
+        ):
+            errors.append(f"{path}.company requires an exact canonical industry/sub_industry pair")
+
+
 def validate_run(document: Any) -> list[str]:
     errors: list[str] = []
     if not isinstance(document, dict):
@@ -684,7 +713,7 @@ def validate_run(document: Any) -> list[str]:
         not isinstance(schema_version, str)
         or schema_version not in SUPPORTED_RESULT_SCHEMA_VERSIONS
     ):
-        errors.append("schema_version must be 1.0 or 1.1")
+        errors.append("schema_version must be 1.0, 1.1 or 1.2")
 
     request = document.get("request", {})
     summary = document.get("summary", {})
@@ -693,6 +722,8 @@ def validate_run(document: Any) -> list[str]:
         return ["request and summary must be objects"]
     if not isinstance(accepted, list):
         return ["accepted must be an array"]
+    if schema_version == "1.2":
+        _validate_client_output(accepted, errors)
 
     target = request.get("target_count")
     if not isinstance(target, int) or isinstance(target, bool) or target < 1:

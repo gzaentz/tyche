@@ -171,7 +171,7 @@ field remain valid.
 
 Prices in the provider catalog are planning estimates. Check the current
 provider plan before a live run. New `results.json` files use schema version
-`1.1`. Each route labels its cost as `actual`, `estimated`, or `unknown`, and a
+`1.2`. Each route labels its cost as `actual`, `estimated`, or `unknown`, and a
 derived `cost_summary` gives confirmed and maximum credits. Deepline dollars
 use the configured rate of $0.10 per credit. ScrapingDog remains credit-only
 because no dollar rate is configured. OpenRouter is not used, and Codex model
@@ -196,10 +196,16 @@ reports/<run-id>/
   contact. Its fixed columns are:
 
 ```text
-Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Details,Phone
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Signal,Intent Details,Phone
 ```
 
 Generate it from the structured result instead of assembling rows by hand. The
+agent writes readable `intent_details` from saved evidence and selects exact
+industry/sub-industry labels from the bundled PP taxonomy. Uncertain
+classifications stay blank with a `classification_note`. A `Sources` worksheet
+preserves supporting evidence and separates evidence dates from observations.
+Version `1.0`/`1.1` exports retain their original 18-column, one-sheet layout.
+See the output contract for the writing and taxonomy rules. The
 Codex agent first loads the bundled workspace dependencies, then passes the
 returned Node and node_modules paths to the exporter:
 
@@ -283,7 +289,7 @@ python3 .agents/skills/lead-sourcing/scripts/validate_run.py \
   reports/<run-id>/results.json
 ```
 
-While drafting a version `1.1` result, add `--show-cost-summary` to print the
+While drafting a version `1.2` result, add `--show-cost-summary` to print the
 route-derived block. Copy `calculated_cost_summary` into the top-level
 `cost_summary`, then run the validator again without the flag. Old version
 `1.0` run files remain valid.
