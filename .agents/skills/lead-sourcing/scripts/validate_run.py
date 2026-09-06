@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import pathlib
+import re
 import sys
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional
@@ -123,6 +124,8 @@ def _validate_email_receipt(
         if receipt is not None:
             errors.append(f"{contact_path}.email_validation requires a stored email")
         return
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        errors.append(f"{contact_path}.email is invalid")
     if not isinstance(receipt, dict):
         errors.append(
             f"{contact_path}.email requires a Deepline ZeroBounce email_validation receipt"
@@ -153,8 +156,8 @@ def _validate_email_receipt(
             {"email": email, "email_validation": fallback},
             f"{contact_path}.email_validation.fallback", routes_by_id, errors, "bounceban",
         )
-        first_id = receipt.get("source", {}).get("route_id") if isinstance(receipt.get("source"), dict) else None
-        next_id = fallback.get("source", {}).get("route_id") if isinstance(fallback.get("source"), dict) else None
+        first_id = _nonempty_text(receipt.get("source", {}).get("route_id")) if isinstance(receipt.get("source"), dict) else None
+        next_id = _nonempty_text(fallback.get("source", {}).get("route_id")) if isinstance(fallback.get("source"), dict) else None
         ids = list(routes_by_id)
         if first_id in ids and next_id in ids and ids.index(next_id) <= ids.index(first_id):
             errors.append(f"{contact_path}.email_validation fallback must use a distinct later route")

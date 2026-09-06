@@ -927,7 +927,7 @@ def _records(value: Any) -> List[Any]:
 
 
 def _email_validation_output(
-    parsed: Any, tool: str, limit: int
+    parsed: Any, tool: str, limit: int, command_failed: bool = False
 ) -> Optional[Dict[str, Any]]:
     """Preserve explicit validator results even when its default verdict drops them."""
 
@@ -936,21 +936,77 @@ def _email_validation_output(
         for record in _records(parsed)[:limit]
         if _is_email_validation_record(record)
     ]
-    if not records:
+    containers = [parsed] if isinstance(parsed, dict) else []
+    containers += [parsed[key] for key in ("toolResponse", "tool_response")
+                   if isinstance(parsed, dict) and isinstance(parsed.get(key), dict)]
+    pending = None
+    for container in containers:
+        for candidate in [container] + [container.get(key) for key in ("rawV2", "raw_v2", "raw")]:
+            if (isinstance(candidate, dict) and candidate.get("status") in ("queue", "verifying")
+                    and isinstance(candidate.get("id"), str) and candidate["id"].strip()):
+                pending = redact({key: candidate[key] for key in ("id", "status", "email", "try_again_at") if key in candidate})
+                break
+        if pending:
+            break
+    if not records and not pending:
         return None
+    statuses = [_envelope_status(container) for container in containers]
+    error = _envelope_error(parsed)
+    failure = next((status for status in statuses if status in _FAILURE_STATUSES), None)
+    # Only the observed default-policy rejection can preserve a non-positive
+    # verdict across CLI failure. Transport/auth failures never become success.
+    policy_rejection = (
+        failure in {None, "provider_error"} and error is not None
+        and all(status not in _FAILURE_STATUSES - {"provider_error"} for status in statuses)
+        and error["message"].strip().casefold() == "default send policy rejected the address"
+        and bool(records) and not pending
+        and all(record.get("result") is None and str(record.get("status", "")).strip().casefold()
+                in {"invalid", "do_not_mail", "spamtrap", "abuse", "catch-all", "unknown"}
+                for record in records)
+    )
+    if (failure or error or command_failed) and not policy_rejection:
+        body = {
+            "status": failure or (_classify_error(error["message"]) if error else "provider_error"),
+            "provider": "deepline", "operation": "execute", "tool": tool,
+            "entity_type": "email_validation", "results": [], "evidence": [],
+            "provider_response": redact(parsed), **_execution_metadata(parsed),
+        }
+        if error:
+            body["error"] = error
+        return body
+    if pending:
+        return {
+            "status": "partial", "provider": "deepline", "operation": "execute", "tool": tool,
+            "entity_type": "email_validation", "results": [], "evidence": [],
+            "pending_verification": pending, "provider_response": redact(parsed),
+            **_execution_metadata(parsed),
+        }
     evidence = [
         normalize_evidence(record, "deepline", tool, "email_validation")
         for record in records
     ]
     return {
-        "status": "ok",
+        "status": "partial" if "partial" in statuses else "ok",
         "provider": "deepline",
         "operation": "execute",
         "tool": tool,
         "entity_type": "email_validation",
         "results": evidence,
         "evidence": evidence,
+        **_execution_metadata(parsed),
     }
+
+
+def _execution_metadata(parsed: Any) -> Dict[str, Any]:
+    metadata = _output_preview_metadata(parsed)
+    billing = parsed.get("billing") if isinstance(parsed, dict) else None
+    if isinstance(billing, dict):
+        amounts = {key: value for key in ("credits_charged", "cost_usd")
+                   if isinstance((value := billing.get(key)), (int, float))
+                   and not isinstance(value, bool) and 0 <= value <= sys.float_info.max and math.isfinite(value)}
+        if amounts:
+            metadata["billing"] = amounts
+    return metadata
 
 
 def _envelope_status(value: Any) -> Optional[str]:
@@ -1323,7 +1379,7 @@ def _execute_output(
         if validation is not None:
             return validation
     structured = _structured_execute_envelope(parsed)
-    metadata: Dict[str, Any] = _output_preview_metadata(parsed)
+    metadata: Dict[str, Any] = _execution_metadata(parsed)
     if structured:
         kind, envelope = structured
         records = (
@@ -1357,6 +1413,7 @@ def _execute_output(
             body["entity_type"] = entity_type
         if entity_type and entity_type.strip().casefold() == "email_validation":
             body["provider_response"] = redact(parsed)
+        body.update(metadata)
         return body
     if status in _PROVIDER_ERROR_STATUSES or status == "schema_error":
         final_status = status
@@ -1459,7 +1516,7 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
             == "email_validation"
         ):
             validation = _email_validation_output(
-                parsed, request["tool"], request["limit"]
+                parsed, request["tool"], request["limit"], command_failed=True
             )
             if validation is not None:
                 return validation, 0
@@ -1484,6 +1541,7 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
             "provider": "deepline",
             "operation": request["operation"],
             "error": error,
+            **_execution_metadata(parsed),
         }
         if request.get("tool"):
             body["tool"] = request["tool"]

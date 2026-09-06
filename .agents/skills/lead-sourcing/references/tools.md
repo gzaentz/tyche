@@ -67,6 +67,11 @@ both values `null` only when neither value is available.
 A typical or midpoint price is not a conservative bound. Use `unknown` when
 unresolved pricing inputs can make the route cost higher.
 
+When Deepline supplies billing, the adapter preserves finite, non-negative
+`billing.credits_charged` and `billing.cost_usd`. These are observed amounts,
+not estimates inferred from row counts. Missing billing stays missing; keep
+the conservative bound until an actual charge is available.
+
 The wrapper normalizes candidate fields to `company`, `domain`, `signal`,
 `evidence_url`, `evidence_date`, `evidence_text`, `provider`, and `tool`.
 Generic labels such as `search_result`, `web_page`, `company_profile`, and
@@ -123,6 +128,23 @@ original receipt's `fallback` object. Never overwrite the ZeroBounce receipt.
 Do not override invalid, do_not_mail, spamtrap or abuse. An unsuccessful or
 uncertain call stays unresolved; do not retry it automatically or chain
 validators. Choose another address or requested buyer instead.
+
+An asynchronous `queue`/`verifying` response is `partial` with empty results
+and `pending_verification` containing the existing job ID. It is not an empty
+search or a deliverability verdict. Preserve this receipt. The model may
+discover and describe the single-status retrieval tool and, only after
+confirming it is free, retrieve that same job ID. Match the returned ID and
+email before using a successful final verdict; save the completion receipt
+separately and record the retrieval as a zero-paid-call route. The fallback
+source still references the original paid verification route and tool.
+Respect `try_again_at`, allow at most three status reads with at least 30
+seconds between reads, and leave a still-pending job unresolved. Never create
+another paid verification to recover a pending job. The adapter itself does
+not poll or retry.
+
+An outer transport/auth/provider failure must not be promoted by a nested
+positive validator row. Only the explicitly recognized default send-policy
+rejection may retain a non-positive ZeroBounce verdict for the normal gate.
 
 ### Deepline ZeroBounce email gate
 

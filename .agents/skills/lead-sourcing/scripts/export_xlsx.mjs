@@ -125,6 +125,9 @@ function requestedValue(contact, field, requestedFields, index) {
 }
 
 function validateEmailReceipt(document, contact, email, index, validator = "zerobounce", path = `accepted[${index}].primary_contact.email_validation`) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new ExportError(`${path} requires a valid email address`);
+  }
   const receipt = object(contact.email_validation);
   if (!Object.keys(receipt).length) {
     throw new ExportError(`${path} requires a Deepline ZeroBounce receipt`);
@@ -144,8 +147,8 @@ function validateEmailReceipt(document, contact, email, index, validator = "zero
     if ("fallback" in receipt) throw new ExportError(`${path} cannot chain fallbacks`);
   } else if (["catch-all", "unknown"].includes(status.toLowerCase()) && Object.keys(object(fallback)).length) {
     validateEmailReceipt(document, { email_validation: fallback }, email, index, "bounceban", `${path}.fallback`);
-    const ids = (document.routes || []).map((route) => route.route_id);
-    if (ids.indexOf(object(fallback.source).route_id) <= ids.indexOf(object(receipt.source).route_id)) {
+    const ids = (document.routes || []).map((route) => text(object(route).route_id));
+    if (ids.indexOf(text(object(fallback.source).route_id)) <= ids.indexOf(text(object(receipt.source).route_id))) {
       throw new ExportError(`${path} fallback must use a distinct later route`);
     }
   } else if (status.toLowerCase() !== "valid") {
@@ -226,7 +229,8 @@ export function rowsFor(document) {
 
     const email = requestedValue(contact, "email", requestedFields, index);
     const phone = requestedValue(contact, "phone", requestedFields, index);
-    if (email) validateEmailReceipt(document, contact, email, index);
+    const storedEmail = text(contact.email);
+    if (storedEmail) validateEmailReceipt(document, contact, storedEmail, index);
     for (const [backupIndex, backup] of (acceptedRow.backup_contacts || []).entries()) {
       const backupEmail = text(object(backup).email);
       if (backupEmail) validateEmailReceipt(document, backup, backupEmail, index, "zerobounce", `accepted[${index}].backup_contacts[${backupIndex}].email_validation`);
