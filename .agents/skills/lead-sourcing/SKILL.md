@@ -20,10 +20,12 @@ Do not add a server, database, queue, CRM write, or outreach action.
    Use [tools.md](references/tools.md) for wrapper inputs and provider choices.
 2. **Run a small, budgeted search.** Start each material route with one paid
    call and at most ten rows, using provider-native limits. Reserve a
-   conservative cost bound before dispatch; keep separate provider/call caps
-   and the default five-credit Deepline allowance per next complete lead.
-   Save the full redacted wrapper output before displaying a compact summary.
-   Never automatically retry an uncertain paid call.
+   conservative cost bound before dispatch; keep separate provider/call caps.
+   `budget.max_deepline_credits_per_next_lead` is optional and is a hard cap
+   only when the user explicitly requests it. Otherwise, 5 credits triggers a
+   nonblocking strategy review. Use the adapters' `--output-file` option to
+   save the full redacted response before displaying a compact summary. Never
+   automatically retry an uncertain paid call.
 3. **Verify company fit and intent from evidence.** Resolve and deduplicate
    canonical domains. Require separate company-fit and current-signal evidence
    for the same company. Read the actual source: a keyword match, search snippet,
@@ -43,10 +45,13 @@ Do not add a server, database, queue, CRM write, or outreach action.
    candidate as unresolved and continue with another address or requested buyer.
 5. **Save results; continue until the target or an honest stopping condition.**
    Persist evidence, attempts, costs, decisions, and remaining routes as work
-   proceeds. Change route when a candidate fails. Do not claim exhaustion while
-   actionable routes remain, exceed a budget, or present a partial run as
-   complete. Write `report.md`, `results.json`, and `leads.xlsx`; validate the
-   full output contract and run `scripts/validate_run.py` before delivery.
+   proceeds. Change route when a candidate fails. Link each later continuation
+   to its successor route ID and do not claim exhaustion while actionable or
+   promising unresolved paths remain. Require a concrete next action or blocker
+   for every unresolved company. Write `report.md`, `results.json`, and
+   `leads.xlsx`; validate the full output contract and run
+   `scripts/validate_run.py` with `--show-progress` before delivery. Use its
+   account/contact groups in the report and keep route failures separate.
    Before sending the final chat response, check all four items in the
    [final-response checklist](references/output-contract.md#final-response-checklist).
 

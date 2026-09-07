@@ -55,7 +55,14 @@ Command paths below are relative to the skill directory, not this reference.
   Count each validation execution against both the Deepline credit cap and the
   paid-call cap.
 - Keep accepted, rejected, and unresolved output states separate from provider
-  statuses. `no_results` is not proof that a signal or contact is absent.
+  statuses. Reuse the existing `stage`, `reason_code`, and
+  `qualification_checks` fields. Every unresolved company must state a
+  concrete next action or blocker in `reason_text`; a contact-stage unresolved
+  result keeps the account evidence that already passed. Provider failures are not
+  companies and must not be counted in reviewed or accepted company totals.
+  `no_results` is valid only when the provider actually returned no results;
+  an input error, response error, timeout, or uncertain response is not
+  `no_results` and remains unresolved or blocked as appropriate.
 - Treat `target_count` as the completion condition. While accepted companies
   remain below it, refill one company or contact candidate at a time from a
   changed route, query, page, tool, or provider. Do not use a fixed 5x
@@ -74,36 +81,49 @@ Command paths below are relative to the skill directory, not this reference.
   frontier append-only: add paths and update states, but never remove a path.
 - Give each concrete attempt or continuation a unique route ID. A failed
   attempt receipt may share its ID only with the outcome for that same failure;
-  a later continuation always needs a new ID.
+  a later continuation always needs a new ID. Store
+  `continuation_route_ids` on a route to cross-link future searches to the
+  route that produced them. Do not mark a route exhausted while a promised
+  continuation is unresolved; `continuation_exhausted` must reference
+  successors that were actually resolved. Before stopping, review promising
+  unresolved paths and record why each is no longer actionable.
 - Record actual provider usage only from a usage or billing receipt. If a paid
   route's actual cost is unavailable, store `null` for that route and provider
   spend and mark budget status and provider capacity `unknown`. In version
   `1.1` and later, also record a route-total upper bound when the live plan provides one,
   with `cost_basis: "estimated"`; use `unknown` when no bound exists. Never
   present an estimate as actual spend.
-- Apply `budget.max_deepline_credits_per_next_lead` with a default of `5`.
-  Record `accepted_leads_before_call` on every paid Deepline route receipt.
-  Group each route's actual cost, or its conservative upper bound when actual
-  cost is unavailable, by that accepted-lead count. Route changes, rejected
-  candidates, and failed lookups do not reset the group. Reset the allowance
-  only after a complete accepted lead (company, signal, requested contact,
-  and requested contact fields) is stored. Any stored email must pass the
-  ZeroBounce gate; preserve explicit email opt-outs. Before every paid Deepline
-  execution, add the route's conservative cost upper bound to the amount
-  already charged to the current group. Do not run the call if that sum would
-  exceed the allowance, or when the route cost has no conservative upper
-  bound. Keep the overall provider and paid-call caps as independent
-  backstops. The agent performs this pre-call check; the result validator
-  checks recorded costs after the run. The provider wrapper does not enforce
-  this allowance. Legacy artifacts without this optional field remain valid.
+- Treat `budget.max_deepline_credits_per_next_lead` as an optional hard cap,
+  applied only when the user explicitly requests it. Do not add it to new
+  normalized requests when omitted, and preserve historic caps and runs. Use
+  5 credits as a nonblocking strategy-review warning when the field is absent;
+  it is not a free allowance and does not authorize spending. When the hard
+  cap is present, enforce it. Record `accepted_leads_before_call` on every paid
+  Deepline route receipt, including uncapped runs, and group each route's actual
+  cost, or its conservative upper bound when actual cost is unavailable, by
+  that accepted-lead count. Route
+  changes, rejected candidates, and failed lookups do not reset the group.
+  Reset the allowance only after a complete accepted lead (company, signal,
+  requested contact, and requested contact fields) is stored. Any stored email
+  must pass the ZeroBounce gate; preserve explicit email opt-outs. Before every
+  paid Deepline execution, add the route's conservative cost upper bound to
+  the amount already charged to the current group. Do not run the call if that
+  sum would exceed the requested allowance, or when the requested-cap route
+  has no conservative cost bound. Keep the overall provider and paid-call caps
+  as independent hard backstops. Actual cost that is unavailable remains
+  bounded or `unknown`, never zero or free. The agent performs this pre-call
+  check; the result validator checks recorded costs after the run. The
+  provider wrapper does not enforce this allowance. Omitting this field does
+  not invalidate legacy budget records.
 
 ## Inputs and workflow
 
 The normalized request must state the target count, ICP and exclusions,
 geography, buying-signal kinds and freshness window, requested roles, contact
-fields, and per-provider budget caps. Set
-`budget.max_deepline_credits_per_next_lead` to `5` when it is omitted. Email is
-required by default; apply `["email"]` when the field is omitted, while
+fields, and per-provider budget caps.
+Do not add `budget.max_deepline_credits_per_next_lead` when it is omitted; carry
+it through only when the user explicitly requests a per-next-lead hard cap.
+Email is required by default; apply `["email"]` when the field is omitted, while
 preserving an explicit empty or phone-only override. It may set a one-to-three contact
 target per company, `signal_match_mode` (`any` or `all`, default `any`),
 per-signal `min_age_days`/`max_age_days`, run ID, and as-of date. Validate that
@@ -133,10 +153,16 @@ exact count from external evidence before acceptance.
    Immediately afterward, call it with the same identity fields and
    `{"frontier": <updated item>, "receipt": <route receipt>}`. The helper
    persists both atomically and rejects changed attempts or reused query IDs.
+   It checks continuation links before saving and detects intervening file
+   edits. Reopen an exhausted parent before reopening its child; close the
+   child before closing the parent. All writers should use this helper's lock.
    An estimated cost may settle once to a receipted actual cost within its
    original bound; an actual charge cannot be rewritten through this helper.
    It does not run providers, infer exhaustion, or attest audit completeness.
-   Keep reviewed counts, budget and cost summaries current separately. During
+   Check the live descriptor immediately before execution so input errors can
+   be distinguished from provider response errors; do not add a redundant
+   framework around the existing wrappers. Keep reviewed counts, budget and
+   cost summaries current separately. During
    work, completion validation should reject actionable routes. If an old
    receipt cannot be recovered, retain that path as blocked with the audit
    gap stated explicitly; never invent row counts or rerun paid work silently.
@@ -175,7 +201,8 @@ exact count from external evidence before acceptance.
    attempted route to be exhausted; use `provider_stop` when all routes are
    blocked. `budget_exhausted`
    additionally requires that neither paid provider can make another bounded
-   call. Never exceed a hard cap to reach the target.
+   call. Provider failures do not end public-web research while a public route
+   remains available. Never exceed a hard cap to reach the target.
 7. Write version `1.2` `results.json`. Follow the output contract's client-writing
    and taxonomy rules. Every route must include actual,
    estimated, or unknown cost fields. Run

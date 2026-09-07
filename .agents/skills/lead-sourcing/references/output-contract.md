@@ -200,7 +200,7 @@ the schema and must be applied before provider work.
         "deepline_credits": {"type": "number", "minimum": 0},
         "scrapingdog_credits": {"type": "number", "minimum": 0},
         "max_paid_calls": {"type": "integer", "minimum": 0},
-        "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0, "default": 5},
+        "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0},
         "hard_stop": {"const": true}
       },
       "anyOf": [
@@ -551,6 +551,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "request_summary": {"type": "string", "minLength": 1},
         "state": {"enum": ["untried", "continuable", "exhausted", "blocked"]},
         "exhaustion_basis": {"enum": ["no_results", "continuation_exhausted", "no_new_unique_candidates", "query_family_exhausted"]},
+        "continuation_route_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
         "reason": {"type": "string", "minLength": 1}
       },
       "allOf": [
@@ -654,7 +655,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "deepline_credits": {"type": "number", "minimum": 0},
         "scrapingdog_credits": {"type": "number", "minimum": 0},
         "max_paid_calls": {"type": "integer", "minimum": 0},
-        "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0, "default": 5},
+        "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0},
         "hard_stop": {"const": true}
       },
       "anyOf": [
@@ -843,6 +844,14 @@ completed `results.json` to enforce these completion rules. This completion
 validator supplements rather than replaces validation against the JSON Schema
 and the other semantic checks above.
 
+Use `continuation_route_ids` to link an attempt to separately planned follow-ups.
+`continuation_exhausted` and `query_family_exhausted` require nonempty links to
+terminal routes; references must exist, be unique and contain no cycles.
+An exhausted parent cannot have an actionable follow-up. `no_results` requires
+an actual empty `no_results` receipt, not a generic review note. These checks
+establish consistency, not market exhaustion. Review the evidence and remaining
+promising companies before declaring the frontier complete.
+
 Budget accounting uses actual provider usage, not planning estimates. Output
 `paid_calls` must equal the sum of route `paid_calls`. For each provider, a
 numeric `spent` value must equal the sum of its numeric route `cost_credits`.
@@ -852,8 +861,8 @@ true when a conservative upper bound is available. `within_budget` requires
 known actual spend for both providers. Known spend or paid calls above a hard
 limit are invalid.
 
-The optional `max_deepline_credits_per_next_lead` budget field defaults to `5`
-for new normalized requests. When it is active, every paid Deepline route must
+The optional `max_deepline_credits_per_next_lead` is a hard cap only when explicitly
+requested. Do not insert it by default or change saved caps. When active, every paid Deepline route must
 record the non-negative `accepted_leads_before_call` count. Sum each route's
 actual `cost_credits`, or its `cost_upper_bound_credits` when
 `cost_basis` is `estimated`, by that count. A paid Deepline route with unknown
@@ -870,6 +879,21 @@ Recorded counts must not move
 backward and cannot exceed the final number of accepted leads. The output
 limit, when present, must match the request limit. Artifacts without this
 optional field remain valid for backward compatibility.
+
+For new runs, record `accepted_leads_before_call` on every paid Deepline route
+even without that cap. At 5 credits spent or conservatively reserved since the
+last complete lead, review the strategy; this is a nonblocking warning. Total
+provider budgets and the paid-call limit remain hard. `--show-progress` on
+`validate_run.py` derives this warning without modifying the run or its verdict.
+Unmarked or unbounded costs are reported as incomplete, never zero.
+
+The same progress output separates unresolved account evidence, contact
+completion, and provider/route failures using the existing stage and reason
+fields. It deduplicates companies and excludes accepted-company backup shortfalls.
+Contact-stage rows must retain their passing account `qualification_checks`;
+their `reason_text` must say what contact evidence is missing and the next action
+or concrete blocker. Do the same for account-stage evidence gaps. The agent uses
+these groups in the report; only complete accepted contacts enter `leads.xlsx`.
 
 Every version `1.1` or `1.2` route has `cost_credits`,
 `cost_upper_bound_credits`, and `cost_basis`. Use these combinations:

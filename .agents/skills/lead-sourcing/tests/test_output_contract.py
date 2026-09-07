@@ -310,7 +310,7 @@ class OutputContractExtensionTests(unittest.TestCase):
         ])
         self.assertIn("These safeguards remain mandatory", text)
         for target in re.findall(r"\]\((references/[^)]+)\)", text):
-            self.assertTrue((ROOT / target).is_file(), target)
+            self.assertTrue((ROOT / target.split("#", 1)[0]).is_file(), target)
 
     def test_completion_validator_enforces_group_union_and_role_traceability(self):
         result = shortfall_result()
@@ -386,15 +386,15 @@ class OutputContractExtensionTests(unittest.TestCase):
         self.assertIn(
             "explicit_exclusion", result_schema["$defs"]["reason_code"]["enum"]
         )
-        self.assertEqual(
+        self.assertNotIn(
+            "default",
             input_schema["$defs"]["input_budget"]["properties"]
-            ["max_deepline_credits_per_next_lead"]["default"],
-            5,
+            ["max_deepline_credits_per_next_lead"],
         )
-        self.assertEqual(
+        self.assertNotIn(
+            "default",
             result_schema["$defs"]["input_budget"]["properties"]
-            ["max_deepline_credits_per_next_lead"]["default"],
-            5,
+            ["max_deepline_credits_per_next_lead"],
         )
         self.assertIn(
             "max_deepline_credits_per_next_lead",

@@ -6,7 +6,10 @@ import copy
 import json
 import os
 from pathlib import Path
+import stat
 import tempfile
+
+from validate_run import validate_continuations
 
 
 IDENTITY = ("route_id", "phase", "provider", "operation", "request_summary")
@@ -63,6 +66,10 @@ def record(document, frontier, receipt=None):
             raise ValueError("exhaustion requires a determinate attempt receipt")
         if not frontier.get("exhaustion_basis"):
             raise ValueError("exhaustion requires an explicit basis")
+        if frontier["exhaustion_basis"] == "no_results" and (
+            known.get("provider_status") != "no_results" or known.get("rows_returned", 0) != 0
+        ):
+            raise ValueError("no_results exhaustion requires an empty no-results receipt")
     if matches:
         matches[0].clear()
         matches[0].update(copy.deepcopy(frontier))
@@ -70,6 +77,10 @@ def record(document, frontier, receipt=None):
         if receipt is None and frontier["state"] != "untried":
             raise ValueError("new routes must start untried")
         audit["route_frontier"].append(copy.deepcopy(frontier))
+    errors = []
+    validate_continuations({row["route_id"]: row for row in audit["route_frontier"]}, errors)
+    if errors:
+        raise ValueError("; ".join(errors))
     return result
 
 
@@ -80,6 +91,9 @@ def persist(path, update):
     temporary = None
     try:
         os.close(fd)
+        original = path.lstat()
+        if not stat.S_ISREG(original.st_mode):
+            raise OSError("results must be a regular file, not a symlink")
         document = json.loads(path.read_text(encoding="utf-8"))
         result = record(document, update["frontier"], update.get("receipt"))
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=str(path.parent), delete=False) as stream:
@@ -88,7 +102,11 @@ def persist(path, update):
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(str(temporary), path.stat().st_mode & 0o777)
+        os.chmod(str(temporary), original.st_mode & 0o777)
+        current = path.lstat()
+        if any(getattr(current, field) != getattr(original, field) for field in
+               ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")):
+            raise OSError("results changed during the update; reread before recording")
         os.replace(str(temporary), str(path))
     finally:
         if temporary is not None and temporary.exists():

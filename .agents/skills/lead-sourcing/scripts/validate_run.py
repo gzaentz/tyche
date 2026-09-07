@@ -37,6 +37,7 @@ CONTACT_FIELD_NAMES = {"email", "phone"}
 COST_BASES = {"actual", "estimated", "unknown"}
 DEEPLINE_USD_PER_CREDIT = Decimal("0.10")
 COST_OUTPUT_QUANTUM = Decimal("0.0001")
+NEXT_LEAD_REVIEW_CREDITS = Decimal("5")
 
 
 def _company_key(row: Any) -> Optional[str]:
@@ -583,8 +584,8 @@ def _validate_next_lead_budget(document: dict[str, Any], errors: list[str]) -> N
 
     The allowance is grouped by the number of accepted leads before a call.
     This makes route changes and rejected candidates part of the same budget
-    window. It is opt-in in the validator so legacy artifacts without the new
-    field remain valid; new normalized requests apply the documented default.
+    window. This is an explicitly requested hard limit, never a default.
+    The default strategy-review warning is reported separately in progress.
     """
 
     request = document.get("request")
@@ -673,6 +674,117 @@ def _validate_next_lead_budget(document: dict[str, Any], errors: list[str]) -> N
                 "Deepline next-lead allowance exceeded for "
                 f"accepted_leads_before_call={accepted_before}: {total} > {limit} credits"
             )
+
+
+def calculate_progress(document: dict[str, Any]) -> dict[str, Any]:
+    """Derive a read-only work summary; warnings do not change completion rules."""
+    accepted = document.get("accepted", [])
+    accepted = accepted if isinstance(accepted, list) else []
+    accepted_keys = {_company_key(row) for row in accepted} - {None}
+    buckets: dict[str, dict[str, dict[str, Any]]] = {"account": {}, "contact": {}}
+    failures: set[str] = set()
+    rows = document.get("unresolved", [])
+    for index, row in enumerate(rows if isinstance(rows, list) else []):
+        if not isinstance(row, dict):
+            continue
+        stage = row.get("stage")
+        if stage == "route":
+            failures.add(_nonempty_text(row.get("route_id")) or f"outcome:{index}")
+            continue
+        key = _company_key(row)
+        if stage not in buckets or key is None or key in accepted_keys:
+            continue
+        entry = buckets[stage].setdefault(key, {
+            "candidate": row.get("candidate", {}), "reasons": [],
+            "qualification_checks": [],
+        })
+        entry["reasons"].append({"code": row.get("reason_code"), "detail": row.get("reason_text")})
+        entry["qualification_checks"].extend(row.get("qualification_checks", []) or [])
+
+    # Conflicting account evidence takes precedence over a contact-stage label.
+    for key in buckets["account"]:
+        buckets["contact"].pop(key, None)
+    confirmed = Decimal("0")
+    maximum = Decimal("0")
+    unknown = False
+    routes = document.get("routes", [])
+    for index, route in enumerate(routes if isinstance(routes, list) else []):
+        if not isinstance(route, dict):
+            continue
+        if route.get("provider_status") in BLOCKING_PROVIDER_STATUSES:
+            failures.add(_nonempty_text(route.get("route_id")) or f"receipt:{index}")
+        if route.get("provider") != "deepline" or not isinstance(route.get("paid_calls"), int) or route["paid_calls"] < 1:
+            continue
+        group = route.get("accepted_leads_before_call")
+        if type(group) is not int or group < 0 or group > len(accepted):
+            unknown = True
+            continue
+        if group != len(accepted):
+            continue
+        basis = route.get("cost_basis")
+        amount = _decimal(route.get("cost_credits") if basis == "actual" else route.get("cost_upper_bound_credits"))
+        if basis not in {"actual", "estimated"} or amount is None or amount < 0:
+            unknown = True
+            continue
+        maximum += amount
+        if basis == "actual":
+            confirmed += amount
+    warnings = []
+    review_due = maximum >= NEXT_LEAD_REVIEW_CREDITS
+    if review_due:
+        warnings.append("Review the sourcing strategy: at least 5 Deepline credits are charged or reserved since the last completed lead. This warning is not a spending cap or a stop reason.")
+    if unknown:
+        warnings.append("Next-lead cost is incomplete because some paid routes lack a usable cost or accepted-lead count. Unknown charges are not free.")
+    return {
+        "accepted_companies": len(accepted_keys),
+        "account_evidence_missing": len(buckets["account"]),
+        "contact_completion_missing": len(buckets["contact"]),
+        "provider_or_route_failures": len(failures),
+        "unresolved_accounts": list(buckets["account"].values()),
+        "unresolved_contacts": list(buckets["contact"].values()),
+        "deepline_since_last_lead": {
+            "confirmed_credits": _json_decimal(confirmed),
+            "maximum_credits": None if unknown else _json_decimal(maximum),
+            "strategy_review_due": True if review_due else (None if unknown else False),
+        },
+        "warnings": warnings,
+    }
+
+
+def validate_continuations(frontier: dict[str, dict[str, Any]], errors: list[str]) -> None:
+    graph: dict[str, list[str]] = {}
+    for route_id, item in frontier.items():
+        refs = item.get("continuation_route_ids", [])
+        if not isinstance(refs, list) or any(not isinstance(ref, str) or not ref.strip() for ref in refs):
+            errors.append(f"route {route_id} continuation_route_ids must be an array of route IDs")
+            continue
+        if len(refs) != len(set(refs)):
+            errors.append(f"route {route_id} has duplicate continuation_route_ids")
+        graph[route_id] = refs
+        if item.get("state") == "exhausted" and item.get("exhaustion_basis") in {"continuation_exhausted", "query_family_exhausted"} and not refs:
+            errors.append(f"exhausted route {route_id} must reference its continuation attempts")
+        for ref in refs:
+            if ref not in frontier:
+                errors.append(f"route {route_id} references missing continuation {ref}")
+            elif item.get("state") == "exhausted" and frontier[ref].get("state") not in FINAL_FRONTIER_STATES:
+                errors.append(f"exhausted route {route_id} has actionable continuation {ref}")
+    # Iterative traversal also catches mutually exhausted routes supporting each other.
+    finished: set[str] = set()
+    for start in graph:
+        active: set[str] = set()
+        stack = [(start, False)]
+        while stack:
+            route_id, leaving = stack.pop()
+            if leaving:
+                active.discard(route_id)
+                finished.add(route_id)
+            elif route_id in active:
+                errors.append(f"continuation cycle includes route {route_id}")
+                break
+            elif route_id not in finished:
+                active.add(route_id)
+                stack.append((route_id, True))
+                stack.extend((ref, False) for ref in graph.get(route_id, []) if ref in graph)
 
 
 def _validate_client_output(accepted: list, errors: list[str]) -> None:
@@ -1060,6 +1172,11 @@ def validate_run(document: Any) -> list[str]:
             basis = item.get("exhaustion_basis")
             if not isinstance(basis, str) or not basis.strip():
                 errors.append(f"exhausted route {route_id} requires exhaustion_basis")
+            if basis == "no_results" and any(
+                receipt.get("provider_status") != "no_results" or receipt.get("rows_returned", 0) != 0
+                for receipt in receipts_by_id.get(route_id, [])
+            ):
+                errors.append(f"exhausted route {route_id} claims no_results despite a nonempty or different outcome")
         elif (
             item.get("state") == "blocked"
             and statuses
@@ -1069,6 +1186,8 @@ def validate_run(document: Any) -> list[str]:
                 errors.append(
                     f"blocked route {route_id} requires a blocking provider status"
                 )
+
+    validate_continuations(frontier_by_id, errors)
 
     if shortfall:
         if not frontier:
@@ -1173,6 +1292,7 @@ def main() -> int:
         action="store_true",
         help="include the route-derived cost summary in validator output",
     )
+    parser.add_argument("--show-progress", action="store_true", help="include unresolved-company groups and nonblocking strategy warnings")
     args = parser.parse_args()
     try:
         document = json.loads(args.results.read_text(encoding="utf-8"))
@@ -1184,6 +1304,8 @@ def main() -> int:
     output: dict[str, Any] = {"valid": not errors, "errors": errors}
     if args.show_cost_summary:
         output["calculated_cost_summary"] = calculate_cost_summary(document)
+    if args.show_progress and isinstance(document, dict):
+        output["progress"] = calculate_progress(document)
     print(json.dumps(output, sort_keys=True))
     return 0 if not errors else 2
 

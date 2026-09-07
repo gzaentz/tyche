@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def load_script(name: str):

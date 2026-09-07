@@ -5,6 +5,42 @@ hypotheses, pilot materially different routes one at a time, inspect the rows
 and receipts, and keep only companies that pass the final account gate. The
 local adapters are the only supported runtime boundary for this skill.
 
+## Response files
+
+Both adapters accept `--output-file <new-path>`. Use a distinct path per route
+in the run's receipt directory. The parent directory must already exist.
+The adapter checks the destination before dispatch and refuses existing files.
+It atomically saves the full redacted provider body before normalization, then
+adds the normalized result. Stdout remains the existing single JSON response.
+The saved `provider_response` includes Deepline exit code/body/stderr or
+ScrapingDog HTTP status/body; candidate output limits do not truncate this copy.
+Existing transport size and timeout bounds still apply.
+Non-finite or malformed JSON is retained as redacted diagnostic text, never
+promoted to results. Non-finite input is rejected before dispatch. Available
+partial Deepline stdout/stderr is also retained after a timeout; it is not a
+successful provider result and must not promote an email or trigger a retry.
+Interrupted ScrapingDog responses retain available bytes with `incomplete: true`;
+neither broken chunks nor a short declared body is a successful empty result.
+
+`receipt_status` is `pending`, `response_received`, or `complete`; these describe
+file processing, not provider success or billing. A local input failure has
+`error_stage: request`; an unrecognized response has `error_stage: response`.
+An explicit remote schema error may have `error_stage: provider`. Do not assume
+every schema error means the request payload was wrong. Before a paid execute,
+compare required fields, types, native limits and cost inputs with the freshly
+discovered descriptor; the adapter does not implement every provider's schema.
+
+A failed final save returns a nonzero exit code and `receipt_error` while
+preserving the normalized stdout and any previously saved raw response. Check
+those artifacts and billing before recovery; never rerun a possibly paid call
+merely to recreate a file. File output does not spend credits or retry providers.
+
+```bash
+python3 .agents/skills/lead-sourcing/scripts/deepline.py \
+  --input '{"operation":"search","query":"small textile wholesalers"}' \
+  --output-file 'reports/<run-id>/receipts/catalog-1.json'
+```
+
 ## Deepline wrapper
 
 `scripts/deepline.py` adapts the installed Deepline CLI. It discovers tools,
@@ -114,7 +150,8 @@ change route and retain `status`, `error` when present, `provider`, `operation`,
 Only after ZeroBounce returns `catch-all` or `unknown`, search the live catalog
 for `BounceBan verify single email` and describe the returned tool. Execute once
 with the exact email and `entity_type: email_validation`, reserving the current
-price against the existing provider, paid-call and per-next-lead caps. Do not
+price against the existing provider and paid-call caps, plus any explicitly
+requested per-next-lead cap. Do not
 pin the tool ID or price. Keep catch-all verification enabled. Default to
 regular mode: deepverify assumes the email domain matches the current company
 website, which is not safe for all verified brand/alias domains. No webhook

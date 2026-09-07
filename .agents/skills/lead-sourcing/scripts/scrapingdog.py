@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from http.client import IncompleteRead
 from html.parser import HTMLParser
 import json
 import math
@@ -16,6 +17,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
+
+from provider_output import ResponseFile, load_json, response_body
 
 
 STATUSES = {
@@ -79,8 +82,9 @@ _URL_SECRET = re.compile(
     r"(?i)([?&](?:api[_-]?key|access[_-]?key|token|secret|password|signature)=[^&#\s]+)"
 )
 _INLINE_SECRET = re.compile(
-    r"(?i)((?:api[_-]?key|access[_-]?key|token|secret|password|signature)\s*[=:]\s*)[^,;\s]+"
+    r'''(?i)((?:["']?(?:api[_-]?key|access[_-]?key|private[_-]?key|credentials?|token|secret|password|signature|authorization|cookie)["']?)\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:Basic|Bearer)\s+[^,;\s]+|[^,;\s}]+)'''
 )
+_SECRET_HEADER = re.compile(r"(?im)^(\s*(?:authorization|(?:set-)?cookie)\s*:\s*)[^\r\n]*")
 _DATE_HINT = re.compile(
     r"(?i)(?:\b(?:today|yesterday)\b|\b\d+\+?\s+(?:minute|hour|day|week|month|year)s?\s+ago\b|"
     r"\b\d{4}-\d{2}-\d{2}\b|\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
@@ -100,9 +104,10 @@ class ConfigError(RuntimeError):
 
 
 class ProviderResponseError(RuntimeError):
-    def __init__(self, status: str, message: str = "provider request failed") -> None:
+    def __init__(self, status: str, message: str = "provider request failed", response=None) -> None:
         super().__init__(message)
         self.status = status
+        self.response = response
 
 
 def redact(value: Any) -> Any:
@@ -116,6 +121,7 @@ def redact(value: Any) -> Any:
     if isinstance(value, tuple):
         return [redact(item) for item in value]
     if isinstance(value, str):
+        value = _SECRET_HEADER.sub(r"\1[REDACTED]", value)
         value = _BEARER.sub(r"\1[REDACTED]", value)
         value = _URL_SECRET.sub(lambda match: match.group(1).split("=", 1)[0] + "=[REDACTED]", value)
         return _INLINE_SECRET.sub(r"\1[REDACTED]", value)
@@ -1380,7 +1386,17 @@ def _classify_status(status_code: int, body: str = "") -> str:
 
 
 def _response_bytes(response: Any) -> bytes:
-    data = response.read(4 * 1024 * 1024 + 1)
+    try:
+        data = response.read(4 * 1024 * 1024 + 1)
+        remaining = getattr(response, "length", None)
+        if type(remaining) is int and remaining > 0 and len(data) <= 4 * 1024 * 1024:
+            raise IncompleteRead(data, remaining)
+    except IncompleteRead as exc:
+        raise ProviderResponseError("provider_error", "incomplete provider response", response={
+            "http_status": getattr(response, "status", getattr(response, "code", None)),
+            "incomplete": True,
+            "body": exc.partial[:4 * 1024 * 1024].decode("utf-8", errors="replace"),
+        }) from exc
     if len(data) > 4 * 1024 * 1024:
         raise ProviderResponseError("provider_error", "provider response is too large")
     return data
@@ -1396,10 +1412,13 @@ def _http_get(url: str, timeout_seconds: float) -> Tuple[int, str, Any]:
         return status_code, raw.decode("utf-8", errors="replace"), response
     except HTTPError as exc:
         try:
-            body = exc.read(4096).decode("utf-8", errors="replace")
-        except Exception:
-            body = ""
-        raise ProviderResponseError(_classify_status(exc.code, body)) from exc
+            raw = _response_bytes(exc)
+            return exc.code, raw.decode("utf-8", errors="replace"), exc
+        except (ProviderResponseError, OSError, UnicodeError) as read_error:
+            raise ProviderResponseError(_classify_status(exc.code, ""),
+                                        response=getattr(read_error, "response", None)) from read_error
+        finally:
+            exc.close()
     except (socket.timeout, TimeoutError) as exc:
         raise ProviderResponseError("timeout") from exc
     except URLError as exc:
@@ -1418,8 +1437,8 @@ def _http_get(url: str, timeout_seconds: float) -> Tuple[int, str, Any]:
 
 def _json_payload(body: str) -> Any:
     try:
-        return json.loads(body)
-    except json.JSONDecodeError as exc:
+        return load_json(body)
+    except ValueError as exc:
         raise ProviderResponseError("schema_error") from exc
 
 
@@ -1824,7 +1843,7 @@ def _continuation_cursor(payload: Any) -> Optional[str]:
     return None
 
 
-def run(request: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+def run(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any], int]:
     request = validate_request(request)
     operation = request["operation"]
     operation_kind = request["operation_kind"]
@@ -1834,6 +1853,12 @@ def run(request: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     body = ""
     try:
         status_code, body, _ = _http_get(url, request["timeout_seconds"])
+        if capture is not None:
+            try:
+                original = load_json(body)
+            except ValueError:
+                original = body
+            capture({"http_status": status_code, "body": response_body(original, body)})
         if status_code < 200 or status_code >= 300:
             return {"status": _classify_status(status_code, body), "provider": "scrapingdog", "operation": request["operation"]}, 0
         if status_code == 202:
@@ -1847,8 +1872,13 @@ def run(request: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
             }, 0
         payload: Any = body if operation_kind == "scrape" and not body.lstrip().startswith(("{", "[")) else _json_payload(body)
     except ProviderResponseError as exc:
+        if capture is not None and exc.response is not None:
+            capture(exc.response)
         status = _classify_status(status_code, body) if exc.status == "provider_error" and body else exc.status
-        return {"status": status, "provider": "scrapingdog", "operation": operation}, 0
+        output = {"status": status, "provider": "scrapingdog", "operation": operation}
+        if status == "schema_error":
+            output["error_stage"] = "response"
+        return output, 0
     if isinstance(payload, dict) and payload.get("success") is False:
         message = json.dumps(redact(payload), ensure_ascii=False)
         return {"status": _classify_status(status_code, message), "provider": "scrapingdog", "operation": operation}, 0
@@ -1858,7 +1888,7 @@ def run(request: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         message = json.dumps(redact(payload), ensure_ascii=False)
         return {"status": _classify_status(status_code, message), "provider": "scrapingdog", "operation": operation}, 0
     if not _known_schema(payload, operation_kind):
-        return {"status": "schema_error", "provider": "scrapingdog", "operation": operation}, 0
+        return {"status": "schema_error", "error_stage": "response", "provider": "scrapingdog", "operation": operation}, 0
     records = _records(payload, operation_kind)
     status = "partial" if isinstance(payload, dict) and payload.get("partial") else ("ok" if records else "no_results")
     if operation_kind == "scrape":
@@ -1882,25 +1912,35 @@ def _read_cli_input(argv: Optional[Sequence[str]] = None) -> Any:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--input", help="JSON request object")
     group.add_argument("--input-file", help="Path to a JSON request object")
+    parser.add_argument("--output-file", help="New file for the full redacted response; never overwritten")
     args = parser.parse_args(argv)
     try:
         raw = args.input
         if args.input_file:
             with open(args.input_file, "r", encoding="utf-8") as handle:
                 raw = handle.read()
-        return json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
+        return load_json(raw), args.output_file
+    except (OSError, ValueError) as exc:
         raise InputError("input must contain valid JSON") from exc
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    receipt = None
     try:
-        request = _read_cli_input(argv)
-        body, code = run(request)
+        request, output_file = _read_cli_input(argv)
+        if output_file:
+            try:
+                receipt = ResponseFile(output_file, redact)
+            except OSError:
+                raise ConfigError("response output must be a new writable file; request was not sent")
+        body, code = run(request, capture=receipt.capture) if receipt else run(request)
     except InputError as exc:
-        body, code = {"status": "schema_error", "error": {"message": str(exc)}}, 2
+        body, code = {"status": "schema_error", "error_stage": "request", "error": {"message": str(exc)}}, 2
     except ConfigError as exc:
         body, code = {"status": "config_error", "error": {"message": str(exc)}}, 2
+    if receipt is not None and not receipt.finish(body):
+        body = dict(body, receipt_error="Response file could not be finalized. Preserve this output; do not repeat a possibly billed request.")
+        code = 2
     sys.stdout.write(json.dumps(redact(body), ensure_ascii=False, separators=(",", ":")) + "\n")
     return code
 

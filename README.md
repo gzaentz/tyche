@@ -26,8 +26,9 @@ provider adapters, budget controls, and output contract.
 - Uses live Deepline capability discovery instead of fixed Deepline tool IDs.
 - Supports bounded ScrapingDog operations through one local adapter.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
-- Keeps an auditable paid and public-web route frontier, and continues refilling
-  until the target is met or every remaining route is exhausted or blocked.
+- Keeps an auditable paid and public-web route frontier, links continuations
+  with `continuation_route_ids`, and continues refilling until the target is met
+  or every remaining route is resolved as exhausted or blocked.
 - Reports confirmed and maximum provider credits, Deepline cost at $0.10 per
   credit, and Deepline cost per accepted lead.
 - Produces an audit report, structured JSON, and a clean Excel workbook.
@@ -119,7 +120,10 @@ Hard caps: 5 Deepline credits, 10 ScrapingDog credits, and 4 paid calls.
 
 The agent normalizes the request, discovers current provider capabilities,
 runs small pilots, checks evidence, and writes the three output files under a
-new `reports/<run-id>/` directory.
+new `reports/<run-id>/` directory. Every unresolved company retains its
+`stage`, `reason_code`, and `qualification_checks`, plus a concrete next action
+or blocker; contact-stage unresolved results retain passing account evidence.
+Provider failures are not companies.
 
 Email is the default contact field. If a request does not mention contact
 fields, TYCHE requires one email for each accepted primary contact and validates
@@ -138,8 +142,9 @@ legacy `requested_roles` behavior.
 ## Budget behavior
 
 - Every provider has its own hard credit cap.
-- New normalized requests apply a default Deepline allowance of 5 credits per
-  next complete lead (`budget.max_deepline_credits_per_next_lead`).
+- `budget.max_deepline_credits_per_next_lead` is optional and is a hard cap only
+  when the user explicitly requests it. When absent, 5 credits is a
+  nonblocking strategy-review warning, not a default allowance or free spend.
 - A material route starts with one paid call and at most 10 returned rows.
 - Deepline catalog `search` and `describe` calls are read-only.
 - The agent checks the live Deepline schema and price before `execute`.
@@ -149,25 +154,23 @@ legacy `requested_roles` behavior.
 - An uncertain or failed call does not end the run when another route, query,
   page, tool, or provider remains available.
 - If a provider does not report invoice usage, TYCHE records actual spend as
-  unknown instead of zero. It records a separate upper bound when the live plan
-  can conservatively price every call in the route.
+  unknown instead of zero or free. It records a separate upper bound when the
+  live plan can conservatively price every call in the route.
 - A cap of zero disables that provider.
 
-The next-lead allowance is grouped by `accepted_leads_before_call` on each paid
-Deepline route receipt. TYCHE sums actual route cost, or the conservative route
-upper bound when actual cost is unavailable, within each group. Route changes,
-rejected candidates, and failed lookups do not reset the group. The allowance
-resets only after a complete lead passes the company, signal, requested-role,
-and requested-contact-field gates. Any stored email must pass the email gate;
-explicit email opt-outs still apply. Before each paid execution, the agent
-must check that the route's conservative upper bound plus the current group's
-prior charges does not exceed the allowance. The agent must not execute a
-route without a conservative cost bound. The result validator checks recorded
-costs after the run; the provider wrapper does not enforce this allowance.
-Recorded accepted-lead counts cannot move backward
-or exceed the final accepted total. The overall provider credit and paid-call
-caps stay as independent backstops. Older artifacts without this optional
-field remain valid.
+When explicitly requested, the next-lead hard cap is grouped by
+`accepted_leads_before_call` on each paid Deepline route receipt. TYCHE sums
+actual route cost, or the conservative route upper bound when actual cost is
+unavailable, within each group. Route changes, rejected candidates, and failed
+lookups do not reset the group. The cap resets only after a complete lead
+passes the company, signal, requested-role, and requested-contact-field gates.
+Any stored email must pass the email gate; explicit email opt-outs still apply.
+Record the count even without a per-lead cap so strategy warnings can be
+calculated. The agent must not execute a route without a conservative cost
+bound or when it would exceed a requested cap. The result validator checks
+recorded costs after the run; the provider wrapper does not enforce this allowance.
+Historic budgets are not reinterpreted. The overall provider
+credit and paid-call caps remain independent hard backstops.
 
 Prices in the provider catalog are planning estimates. Check the current
 provider plan before a live run. New `results.json` files use schema version
@@ -249,10 +252,14 @@ python3 .agents/skills/lead-sourcing/scripts/deepline.py \
   --input '{"operation":"search","query":"companies with current hiring"}'
 ```
 
-Use `search`, then `describe`, then a bounded `execute`. An `execute` call can
-spend provider credits. For email validation, search for a current ZeroBounce
-validator and keep its returned tool ID as runtime data. Do not fix that ID in
-the project.
+Use `search`, then `describe`, then a bounded `execute`. Check the live
+descriptor immediately before execution so input errors remain distinct from
+provider response errors. An `execute` call can spend provider credits. For
+both adapters, `--output-file <path>` refuses an existing or unwritable path
+before dispatch and preserves the full redacted response before compact stdout;
+a failure after dispatch does not authorize a retry. For email validation,
+search for a current ZeroBounce validator and keep its returned tool ID as
+runtime data. Do not fix that ID in the project.
 
 ### ScrapingDog
 
@@ -290,12 +297,19 @@ python3 .agents/skills/lead-sourcing/scripts/validate_run.py \
 ```
 
 While drafting a version `1.2` result, add `--show-cost-summary` to print the
-route-derived block. Copy `calculated_cost_summary` into the top-level
-`cost_summary`, then run the validator again without the flag. Old version
-`1.0` run files remain valid.
+route-derived block. Add `--show-progress` for derived incomplete-account,
+incomplete-contact, and provider-failure counts plus advisory warnings; it does
+not create a new state machine. Copy `calculated_cost_summary` into the
+top-level `cost_summary`, then run the validator again without diagnostic flags.
+Version `1.0` remains supported. Stronger stop checks may flag unsupported
+exhaustion claims in old runs; validation never modifies the saved files.
 
 A short run fails validation while any recorded route is untried or
-continuable. This check does not relax provider credit or paid-call caps.
+continuable. Referenced follow-ups must exist and be terminal before an attempt
+can claim continuation exhaustion. The agent must separately review each
+promising unresolved company and its next action or blocker; the validator
+checks recorded consistency, not real-world search completeness. Provider and
+paid-call caps and client workbook columns remain unchanged.
 
 ## Project boundaries
 

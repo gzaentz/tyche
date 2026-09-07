@@ -19,6 +19,8 @@ import tempfile
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
+from provider_output import ResponseFile, load_json, response_body
+
 
 STATUSES = {
     "ok",
@@ -42,8 +44,9 @@ _URL_SECRET = re.compile(
     r"(?i)([?&](?:api[_-]?key|access[_-]?key|token|secret|password|signature)=[^&#\s]+)"
 )
 _INLINE_SECRET = re.compile(
-    r"(?i)((?:api[_-]?key|access[_-]?key|token|secret|password|signature)\s*[=:]\s*)[^,;\s]+"
+    r'''(?i)((?:["']?(?:api[_-]?key|access[_-]?key|private[_-]?key|credentials?|token|secret|password|signature|authorization|cookie)["']?)\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:Basic|Bearer)\s+[^,;\s]+|[^,;\s}]+)'''
 )
+_SECRET_HEADER = re.compile(r"(?im)^(\s*(?:authorization|(?:set-)?cookie)\s*:\s*)[^\r\n]*")
 _STATUS_WORDS = {status: status for status in STATUSES}
 _DEEPLINE_BIN = "DEEPLINE_BIN"
 _EMPTY_CONTAINER_KEYS = {
@@ -173,6 +176,11 @@ class ConfigError(RuntimeError):
 class CallTimeout(RuntimeError):
     """The bounded Deepline process timeout elapsed."""
 
+    def __init__(self, message, stdout="", stderr=""):
+        super().__init__(message)
+        self.stdout = stdout.decode("utf-8", errors="replace") if isinstance(stdout, bytes) else (stdout or "")
+        self.stderr = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else (stderr or "")
+
 
 def redact(value: Any) -> Any:
     """Remove likely credentials from arbitrary provider data before output."""
@@ -190,6 +198,7 @@ def redact(value: Any) -> Any:
     if isinstance(value, tuple):
         return [redact(item) for item in value]
     if isinstance(value, str):
+        value = _SECRET_HEADER.sub(r"\1[REDACTED]", value)
         value = _BEARER.sub(r"\1[REDACTED]", value)
         value = _URL_SECRET.sub(lambda match: match.group(1).split("=", 1)[0] + "=[REDACTED]", value)
         return _INLINE_SECRET.sub(r"\1[REDACTED]", value)
@@ -223,24 +232,15 @@ def _json_from_text(text: str) -> Any:
 
     if not isinstance(text, str) or not text.strip():
         raise ValueError("empty provider response")
-    decoder = json.JSONDecoder()
-    stripped = text.lstrip()
     try:
-        value, _ = decoder.raw_decode(stripped)
-        return value
+        return load_json(text)
     except json.JSONDecodeError:
-        pass
-
-    # Current Deepline versions can print an update notice before JSON.  Find
-    # the first object/array that can be decoded and ignore the notice.
-    for index, character in enumerate(text):
-        if character not in "[{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(text[index:])
-            return value
-        except json.JSONDecodeError:
-            continue
+        if text.lstrip().startswith(("{", "[")):
+            raise
+    # Skip a leading CLI notice, never a malformed enclosing JSON document.
+    start = re.search(r"(?m)^[ \t]*[\[{]", text)
+    if start:
+        return load_json(text[start.start():])
     raise ValueError("provider response was not JSON")
 
 
@@ -1236,7 +1236,7 @@ def _result_limit(value: Any, default: int = 10, maximum: int = 10) -> int:
         raise InputError("limit must be an integer")
     try:
         number = int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise InputError("limit must be an integer") from exc
     if number != value or number <= 0:
         raise InputError("limit must be a positive integer")
@@ -1313,7 +1313,7 @@ def _invoke(command: Sequence[str], timeout_seconds: float) -> Tuple[int, str, s
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise CallTimeout("provider command timed out") from exc
+        raise CallTimeout("provider command timed out", exc.stdout, exc.stderr) from exc
     except (FileNotFoundError, PermissionError, OSError) as exc:
         raise ConfigError("deepline CLI could not be started") from exc
     return int(completed.returncode), completed.stdout or "", completed.stderr or ""
@@ -1448,7 +1448,7 @@ def _execute_output(
     return body
 
 
-def run(request: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+def run(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any], int]:
     """Run one validated request and return (JSON body, process exit code)."""
 
     request = _validate_request(request)
@@ -1475,7 +1475,7 @@ def run(request: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
                 "--json",
             ]
             try:
-                return _run_command(request, command, timeout_seconds)
+                return _run_command(request, command, timeout_seconds, capture)
             finally:
                 if payload_file:
                     try:
@@ -1484,13 +1484,19 @@ def run(request: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
                         pass
         except OSError as exc:
             raise ConfigError("could not create Deepline payload file") from exc
-    return _run_command(request, command, timeout_seconds)
+    return _run_command(request, command, timeout_seconds, capture)
 
 
-def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_seconds: float) -> Tuple[Dict[str, Any], int]:
+def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_seconds: float, capture=None) -> Tuple[Dict[str, Any], int]:
     try:
         returncode, stdout, stderr = _invoke(command, timeout_seconds)
-    except CallTimeout:
+    except CallTimeout as exc:
+        if capture is not None and (exc.stdout or exc.stderr):
+            try:
+                partial = _json_from_text(exc.stdout)
+            except ValueError:
+                partial = None
+            capture({"timed_out": True, "body": response_body(partial, exc.stdout), "stderr": exc.stderr})
         body = {
             "status": "timeout",
             "provider": "deepline",
@@ -1509,6 +1515,8 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
             parsed = _json_from_text(stdout)
         except ValueError:
             parsed = None
+    if capture is not None:
+        capture({"exit_code": returncode, "body": response_body(parsed, stdout), "stderr": stderr})
     if returncode != 0:
         if (
             parsed is not None
@@ -1543,6 +1551,8 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
             "error": error,
             **_execution_metadata(parsed),
         }
+        if status == "schema_error":
+            body["error_stage"] = "provider"
         if request.get("tool"):
             body["tool"] = request["tool"]
         if request.get("entity_type"):
@@ -1551,6 +1561,7 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
     if parsed is None:
         body = {
             "status": "schema_error",
+            "error_stage": "response",
             "provider": "deepline",
             "operation": request["operation"],
         }
@@ -1560,15 +1571,17 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
             body["entity_type"] = request["entity_type"]
         return body, 0
     if request["operation"] == "execute":
-        return _execute_output(
+        body = _execute_output(
             parsed,
             request["tool"],
             request.get("entity_type"),
             request["limit"],
-        ), 0
-    return _catalog_output(
-        request["operation"], parsed, request.get("tool"), request.get("entity_type")
-    ), 0
+        )
+    else:
+        body = _catalog_output(request["operation"], parsed, request.get("tool"), request.get("entity_type"))
+    if body.get("status") == "schema_error":
+        body["error_stage"] = "provider" if _envelope_status(parsed) == "schema_error" else "response"
+    return body, 0
 
 
 def _read_cli_input(argv: Optional[Sequence[str]] = None) -> Any:
@@ -1576,25 +1589,35 @@ def _read_cli_input(argv: Optional[Sequence[str]] = None) -> Any:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--input", help="JSON request object")
     group.add_argument("--input-file", help="Path to a JSON request object")
+    parser.add_argument("--output-file", help="New file for the full redacted response; never overwritten")
     args = parser.parse_args(argv)
     try:
         raw = args.input
         if args.input_file:
             with open(args.input_file, "r", encoding="utf-8") as handle:
                 raw = handle.read()
-        return json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
+        return load_json(raw), args.output_file
+    except (OSError, ValueError) as exc:
         raise InputError("input must contain valid JSON") from exc
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    receipt = None
     try:
-        request = _read_cli_input(argv)
-        body, code = run(request)
+        request, output_file = _read_cli_input(argv)
+        if output_file:
+            try:
+                receipt = ResponseFile(output_file, redact)
+            except OSError:
+                raise ConfigError("response output must be a new writable file; request was not sent")
+        body, code = run(request, capture=receipt.capture) if receipt else run(request)
     except InputError as exc:
-        body, code = {"status": "schema_error", "error": _safe_error(str(exc))}, 2
+        body, code = {"status": "schema_error", "error_stage": "request", "error": _safe_error(str(exc))}, 2
     except ConfigError as exc:
         body, code = {"status": "config_error", "error": _safe_error(str(exc))}, 2
+    if receipt is not None and not receipt.finish(body):
+        body = dict(body, receipt_error="Response file could not be finalized. Preserve this output; do not repeat a possibly billed request.")
+        code = 2
     # One compact JSON object is the only stdout output.  Operational detail is
     # intentionally omitted to keep credentials from appearing in logs.
     sys.stdout.write(json.dumps(redact(body), ensure_ascii=False, separators=(",", ":")) + "\n")

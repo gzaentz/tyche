@@ -4,11 +4,13 @@ import importlib.util
 import io
 import json
 import pathlib
+import sys
 import unittest
 from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location("deepline_discovery", ROOT / "scripts" / "deepline.py")
 assert SPEC and SPEC.loader
 DEEPLINE = importlib.util.module_from_spec(SPEC)

@@ -1,10 +1,13 @@
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
-SPEC = importlib.util.spec_from_file_location("record_route", Path(__file__).resolve().parents[1] / "scripts" / "record_route.py")
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+SPEC = importlib.util.spec_from_file_location("record_route", SCRIPTS / "record_route.py")
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
