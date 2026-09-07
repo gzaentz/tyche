@@ -1941,7 +1941,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if receipt is not None and not receipt.finish(body):
         body = dict(body, receipt_error="Response file could not be finalized. Preserve this output; do not repeat a possibly billed request.")
         code = 2
-    sys.stdout.write(json.dumps(redact(body), ensure_ascii=False, separators=(",", ":")) + "\n")
+    sys.stdout.write(json.dumps(redact(body), ensure_ascii=True, separators=(",", ":")) + "\n")
     return code
 
 

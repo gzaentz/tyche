@@ -826,14 +826,17 @@ def validate_run(document: Any) -> list[str]:
         or schema_version not in SUPPORTED_RESULT_SCHEMA_VERSIONS
     ):
         errors.append("schema_version must be 1.0, 1.1 or 1.2")
+    for collection in ("accepted", "rejected", "unresolved", "routes"):
+        if not isinstance(document.get(collection, []), list):
+            errors.append(f"{collection} must be an array")
+    if errors:
+        return errors
 
     request = document.get("request", {})
     summary = document.get("summary", {})
     accepted = document.get("accepted", [])
     if not isinstance(request, dict) or not isinstance(summary, dict):
         return ["request and summary must be objects"]
-    if not isinstance(accepted, list):
-        return ["accepted must be an array"]
     if schema_version == "1.2":
         _validate_client_output(accepted, errors)
 
@@ -1296,13 +1299,13 @@ def main() -> int:
     args = parser.parse_args()
     try:
         document = json.loads(args.results.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         print(json.dumps({"valid": False, "errors": [str(exc)]}))
         return 2
 
     errors = validate_run(document)
     output: dict[str, Any] = {"valid": not errors, "errors": errors}
-    if args.show_cost_summary:
+    if args.show_cost_summary and isinstance(document, dict):
         output["calculated_cost_summary"] = calculate_cost_summary(document)
     if args.show_progress and isinstance(document, dict):
         output["progress"] = calculate_progress(document)

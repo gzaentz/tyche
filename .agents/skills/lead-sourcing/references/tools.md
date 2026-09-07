@@ -21,6 +21,9 @@ partial Deepline stdout/stderr is also retained after a timeout; it is not a
 successful provider result and must not promote an email or trigger a retry.
 Interrupted ScrapingDog responses retain available bytes with `incomplete: true`;
 neither broken chunks nor a short declared body is a successful empty result.
+JSON output escapes non-ASCII text so receipts and stdout also work with narrow
+terminal encodings. Invalid UTF-8 CLI bytes are preserved as escaped diagnostic
+text and yield a response error, not candidates.
 
 `receipt_status` is `pending`, `response_received`, or `complete`; these describe
 file processing, not provider success or billing. A local input failure has
