@@ -236,7 +236,11 @@ confirmed and maximum credits, Deepline dollars and cost per accepted lead,
 statuses, accepted rows, rejected rows, unresolved rows, contact selection, and stop
 reason. For a target shortfall it must also show the full route frontier,
 continuation decisions, remaining call capacity, reviewed-company counts, and
-the reason each remaining route is exhausted or blocked. Do not store
+the reason each remaining route is exhausted or blocked. Record timing and
+accepted-lead provenance as specified in the output contract's
+[`report.md` and final response section](output-contract.md#reportmd-and-final-response).
+Maintain these as work proceeds; do not reconstruct discovery attribution from
+the final evidence URL or treat a validator as the email finder. Do not store
 credentials or raw secrets.
 
 The workbook is the sales-ready primary-contact view. Its `Leads` worksheet

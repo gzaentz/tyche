@@ -915,6 +915,59 @@ keeps any paid cost unclassified and unknown. It does not promote a numeric
 legacy `cost_credits` value to confirmed actual usage. Migrate the route to
 version `1.1` cost fields before reporting confirmed or estimated cost.
 
+## `report.md` and final response
+
+For every new run, include the following in `report.md`. These are reporting
+requirements, not new `results.json` fields or workbook columns.
+
+### Timing
+
+- Persist `started_at` from the system clock before the first discovery or
+  provider call. Use an ISO 8601 timestamp with a timezone. Preserve it across
+  resumptions; do not infer it from file creation/modification or `retrieved_at`.
+- Record `leads_ready_at` when the target's final fully qualified lead is saved,
+  including requested contact fields and validation. Leave it unavailable for
+  a shortfall. This is distinct from total run completion.
+- Record `completed_at` after result validation, workbook export and checks.
+  Calculate `elapsed_seconds = completed_at - started_at` and display total
+  elapsed time in minutes/seconds. Also show time to `leads_ready_at` when known.
+  Elapsed time is wall-clock time, including waits and pauses, not CPU time.
+- A resumed run keeps its original start. If the start was not recorded, say
+  runtime is unavailable or explicitly label a known-interval estimate with its
+  boundaries. Never present a reconstructed interval as full runtime.
+
+### Accepted-lead sources
+
+Maintain one report row per final accepted company, keyed by canonical domain:
+
+| Company / domain | Company discovery | Fit evidence | Intent evidence | Buyer role | Email lookup | Email validation |
+| --- | --- | --- | --- | --- | --- | --- |
+
+For each stage, identify the provider, underlying tool when returned, and route
+ID linking to the saved receipt. Include the original evidence URL for public
+sources. Distinguish the discovery channel (for example ScrapingDog Google
+search) from the publisher that proves intent (for example a company release).
+Deepline is the gateway; name the actual finder or validator when known. A
+publicly published email is sourced to that page, not to ZeroBounce. Preserve
+both validation tools when fallback was used. Mark missing attribution unknown;
+do not invent it or make another paid call solely to label it.
+
+Summarize the number of accepted companies first discovered by each channel/tool
+and accepted emails supplied by each finder or public source, plus validation
+counts. Assign one original discovery source and one selected email source per
+lead so these two totals each reconcile to the accepted count (use unknown or
+not requested where needed). Evidence and validation counts may overlap and
+must be labeled accordingly. Keep failed/unused routes and their costs separate
+from accepted-lead contribution. Counts alone do not establish provider accuracy
+or comparative yield without the corresponding attempted-candidate denominator.
+
+The final response must include total elapsed time, provider cost with its
+actual/estimated/unknown basis, a compact accepted-lead source summary and a
+link to the report for per-company attribution. Keep model cost separate.
+Retain the existing workbook delivery and honest shortfall rules. Do not claim
+the JSON validator enforces these report-only requirements; check timing
+arithmetic, source links and count reconciliation before delivery.
+
 ## `leads.xlsx` contract
 
 For version `1.2`, write a workbook with `Leads` and `Sources` worksheets.

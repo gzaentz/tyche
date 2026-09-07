@@ -12,7 +12,8 @@ Do not add a server, database, queue, CRM write, or outreach action.
 ## Workflow
 
 1. **Discover relevant tools and check their inputs and prices.** Normalize the
-   ICP, target, signal window, roles, contact fields, and hard budgets. Check
+   ICP, target, signal window, roles, contact fields, and hard budgets. Record
+   the run start before discovery, preserving it across resumptions. Check
    credentials in the process; an unloaded `.env` is not a missing key. Follow
    the repository's setup instructions without printing secrets. Search the
    live Deepline catalog and describe the selected tool before each execution.
@@ -46,6 +47,8 @@ Do not add a server, database, queue, CRM write, or outreach action.
    actionable routes remain, exceed a budget, or present a partial run as
    complete. Write `report.md`, `results.json`, and `leads.xlsx`; validate the
    full output contract and run `scripts/validate_run.py` before delivery.
+   Return elapsed time, provider cost and an accepted-lead source breakdown,
+   following the reporting contract below.
 
 ## References
 
@@ -55,5 +58,6 @@ and shortfall rules. These safeguards remain mandatory; this shorter entry
 point does not change them.
 
 Use [output-contract.md](references/output-contract.md) for request/result
-schemas, fixed workbook columns, and validation. Use the bundled workspace
-dependencies for workbook generation; do not add a project dependency.
+schemas, run timing and source reporting, fixed workbook columns, and validation.
+Use the bundled workspace dependencies for workbook generation; do not add a
+project dependency.
