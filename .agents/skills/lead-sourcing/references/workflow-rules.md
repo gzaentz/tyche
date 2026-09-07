@@ -3,9 +3,10 @@
 Use this skill for a company-first request: a target count, ICP, current buying
 signal, and one or more requested contact roles. The run produces unique,
 evidence-backed companies and, for each accepted company, one primary contact
-plus zero to two backups. Read [tools.md](tools.md) for
-live provider operations and [output-contract.md](output-contract.md)
-for the exact input, output, and Excel workbook contracts.
+plus zero to two backups. Use [tools.md](tools.md) to select a route and load
+only that adapter's required sections. Read the exact input, output, and Excel
+contracts by the phases in [output-contract.md](output-contract.md#read-by-phase),
+not as an upfront bundle.
 
 The main workflow is the five steps in [SKILL.md](../SKILL.md). This reference
 preserves the detailed qualification, spending, receipt, and completion rules.
@@ -195,7 +196,13 @@ exact count from external evidence before acceptance.
    frontier contains an `untried` or `continuable` route. Do not infer route
    exhaustion from one failed provider, one empty query, or an unchanged page.
 6. Stop only at the target or at an auditable terminal condition. For a
-   shortfall, every frontier item must be `exhausted` or `blocked`, and the stop
+   shortfall, first reassess the frontier using gap-specific live tool discovery
+   and alternative public sources. Record newly useful routes and their next
+   bounded tests; a closed initial route list does not prove exhaustion.
+   Continue with promising affordable routes before stopping. Missing fields,
+   inaccessible pages, or absent catalog matches remain evidence gaps, not
+   proof that a company fails the ICP. Every frontier item must then be
+   `exhausted` or `blocked`, and the stop
    audit must attest that the seeded frontier is complete and state why each
    blocked item cannot run. `no_productive_route` requires at least one
    attempted route to be exhausted; use `provider_stop` when all routes are

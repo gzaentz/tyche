@@ -1,438 +1,77 @@
-# TYCHE provider capability catalog
+# Tool selection
 
-This is a live capability catalog, not a routing table. Build several signal
-hypotheses, pilot materially different routes one at a time, inspect the rows
-and receipts, and keep only companies that pass the final account gate. The
-local adapters are the only supported runtime boundary for this skill.
+This is a decision index, not a fixed waterfall or exhaustive allowlist.
+Choose by the missing evidence, available identifiers, geography, and budget.
+Reuse verified evidence unless stale or untrusted; do not reread every linked
+reference or repeat completed research.
 
-## Response files
+## Read only what this step needs
 
-Both adapters accept `--output-file <new-path>`. Use a distinct path per route
-in the run's receipt directory. The parent directory must already exist.
-The adapter checks the destination before dispatch and refuses existing files.
-It atomically saves the full redacted provider body before normalization, then
-adds the normalized result. Stdout remains the existing single JSON response.
-The saved `provider_response` includes Deepline exit code/body/stderr or
-ScrapingDog HTTP status/body; candidate output limits do not truncate this copy.
-Existing transport size and timeout bounds still apply.
-Non-finite or malformed JSON is retained as redacted diagnostic text, never
-promoted to results. Non-finite input is rejected before dispatch. Available
-partial Deepline stdout/stderr is also retained after a timeout; it is not a
-successful provider result and must not promote an email or trigger a retry.
-Interrupted ScrapingDog responses retain available bytes with `incomplete: true`;
-neither broken chunks nor a short declared body is a successful empty result.
-JSON output escapes non-ASCII text so receipts and stdout also work with narrow
-terminal encodings. Invalid UTF-8 CLI bytes are preserved as escaped diagnostic
-text and yield a response error, not candidates.
+| When | Reference |
+|---|---|
+| Before the first provider call | [Shared adapter I/O](adapter-io.md): credentials, saved responses, uncertain outcomes. Read once. |
+| Deepline discovery or execution | [Deepline adapter](deepline-adapter.md): discovery first, core contract before execution, email sections only at validation. |
+| ScrapingDog execution | [ScrapingDog adapter](scrapingdog-adapter.md): common bounds/status handling plus the chosen operation row. |
+| A route needs more options | The relevant section of [provider capabilities](provider-capabilities.md), not its entire catalog. |
 
-`receipt_status` is `pending`, `response_received`, or `complete`; these describe
-file processing, not provider success or billing. A local input failure has
-`error_stage: request`; an unrecognized response has `error_stage: response`.
-An explicit remote schema error may have `error_stage: provider`. Do not assume
-every schema error means the request payload was wrong. Before a paid execute,
-compare required fields, types, native limits and cost inputs with the freshly
-discovered descriptor; the adapter does not implement every provider's schema.
+The workflow's qualification, spending, receipt and stopping rules remain
+mandatory. The detailed references define exact contracts; this index does
+not replace them. Locate named headings with `rg -n` and read bounded sections
+when a reference is long. Keep already loaded rules in context instead of
+reloading them for every call.
 
-A failed final save returns a nonzero exit code and `receipt_error` while
-preserving the normalized stdout and any previously saved raw response. Check
-those artifacts and billing before recovery; never rerun a possibly paid call
-merely to recreate a file. File output does not spend credits or retry providers.
+## Choose by evidence gap
 
-```bash
-python3 .agents/skills/lead-sourcing/scripts/deepline.py \
-  --input '{"operation":"search","query":"small textile wholesalers"}' \
-  --output-file 'reports/<run-id>/receipts/catalog-1.json'
-```
+These are discovery seeds, not executable Deepline IDs. Search the live
+catalog, then describe the selected tool immediately before execution.
+Connection state, schema, native result limits, and conservative cost bounds
+must be checked live. Catalog categories are not permissions: useful reads
+can be labeled `admin`, and research jobs can have side effects or unknown costs.
 
-## Deepline wrapper
-
-`scripts/deepline.py` adapts the installed Deepline CLI. It discovers tools,
-schemas, prices, and bounded company, signal, or contact candidates. A catalog
-hit is not company or contact evidence. A disconnected tool is not an empty
-result.
-
-### Capability discovery
-
-Search the live catalog with narrow seeds that match the hypothesis. These are
-search seeds, not fixed IDs; use only the tool ID returned by the current search:
-
-- `companies with current hiring or job postings`
-- `companies with recent funding, press, or product news`
-- `companies with paid advertising or campaign activity`
-- `companies with recent patents, facilities, openings, or expansion`
-- `companies with official video or event activity`
-- `company firmographic search by industry geography and size`
-- `people by company domain and requested job title`
-- `current title roster or leadership team by company domain`
-- `ZeroBounce validate one known email address`
-
-Optional hypothesis providers are a small menu, not a mandatory fanout:
-
-| Provider | Live-catalog search seed | When useful |
+| Missing fact or route | Provider/tool choices | Capability section |
 |---|---|---|
-| PredictLeads | `PredictLeads discover news funding jobs technology events` | Hypothesize current company events across news, funding, hiring, or technology. |
-| HarvestAPI | `HarvestAPI LinkedIn post search` | Test recent LinkedIn post activity; verify the post and author before using it as evidence. |
-| TheirStack | `TheirStack job description project hiring` | Explore job-description or project-hiring signals; do not assume a standalone projects endpoint. |
-| DiscoLike | `DiscoLike niche semantic company discovery` | Discover companies matching a narrow semantic or niche hypothesis. |
+| Niche companies missed by industry filters | DiscoLike website discovery, Exa company search, Crustdata/Prospeo filters, Forager, Aviato lookalikes | [Companies](provider-capabilities.md#company-discovery-and-identity) |
+| Local operators, branches, franchises | Openmart businesses vs brands; ScrapingDog Maps/Local; Serper/OpenWebNinja Maps | [Companies](provider-capabilities.md#company-discovery-and-identity) |
+| Headcount or company LinkedIn page | HarvestAPI company lookup; Crustdata identify/enrich; Prospeo; Limadata domain-to-LinkedIn; ScrapingDog company profile | [Identity](provider-capabilities.md#company-discovery-and-identity) |
+| Ownership or legal identity | GovFiles, OpenSOSData, SEC EDGAR, official registries through public search/extraction | [Registries](provider-capabilities.md#registries-vertical-sources-and-source-retrieval) |
+| Exact products, materials, services, certification | BuiltWith product search, DataForSEO homepage terms, PredictLeads products, exact catalog/configurator pages | [Products](provider-capabilities.md#products-technology-and-operations) |
+| Hiring or operational projects | TheirStack descriptions, Crustdata jobs, PredictLeads occupations, HarvestAPI jobs, ScrapingDog jobs | [Hiring](provider-capabilities.md#hiring-events-and-capital) |
+| Funding, expansion, partnerships, acquisitions | PredictLeads events/connections, SEC filings, ScrapingDog News, official announcements | [Events](provider-capabilities.md#hiring-events-and-capital) |
+| Technology adoption/removal or vendor customers | Bloomberry changes, BuiltWith lists/history, PredictLeads detections, TheirStack technographics | [Technology](provider-capabilities.md#products-technology-and-operations) |
+| Ads and channel investment | Adyntel keyword/domain ads, HarvestAPI LinkedIn ads, ScrapingDog Google/TikTok ads | [Advertising](provider-capabilities.md#advertising-public-statements-and-reviews) |
+| Public pain, launches, supplier requests | HarvestAPI posts/comments, ScrapeCreators Reddit/Instagram, TwitterAPI, Hacker News, Bluesky | [Statements](provider-capabilities.md#advertising-public-statements-and-reviews) |
+| Local changes or customer/employer pain | OpenWebNinja business posts/reviews and Glassdoor; official business pages | [Reviews](provider-capabilities.md#advertising-public-statements-and-reviews) |
+| Executive interviews and long-form evidence | Podscan transcripts; ScrapingDog YouTube search/video/transcript; ScrapeCreators fallback | [Statements](provider-capabilities.md#advertising-public-statements-and-reviews) |
+| Research, manufacturing, specialized datasets | ScrapingDog patents; DataForSEO dataset/event/app search; public procurement and vertical registries | [Vertical sources](provider-capabilities.md#registries-vertical-sources-and-source-retrieval) |
+| Inaccessible or incomplete source | ScrapingDog rendered scrape, Firecrawl map then exact scrape, Exa contents, approved public API via Deepline generic HTTP | [Retrieval](provider-capabilities.md#registries-vertical-sources-and-source-retrieval) |
+| Requested buyer or current role | HarvestAPI leads, Crustdata people, Forager roles, Datagma titles, Leadmagic roles, Aviato founders, Exa people | [Buyers](provider-capabilities.md#buyers-and-contact-data) |
+| Work email | Hunter domain/name lookup, Datagma, ContactOut work-email reveal, other live-catalog finders | [Contacts](provider-capabilities.md#buyers-and-contact-data) |
 
-For each selected tool, call `describe` immediately before `execute` and record
-its live input schema, connection state, and price. Prefer a title-roster tool
-for nuanced roles. If that is unavailable, use broad function and seniority with
-the full user-approved title family. Ignore non-callable or monitor-only search
-hits for this one-shot workflow; do not deploy monitors. Do not use a CEO as an
-automatic fallback.
+## Decide whether to continue
 
-```bash
-python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"search","query":"companies with current hiring or job postings"}'
-python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"describe","tool":"<id returned by search>"}'
-python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"execute","tool":"<id returned by search>","payload":{"query":"<bounded query>","limit":10}}'
-```
+Choose the next bounded test that can resolve the missing gate. Change the
+source family or evidence type when useful, not only the provider name.
+While below target, add promising affordable alternatives before claiming
+exhaustion. Unused budget does not justify repeating unproductive calls.
 
-`execute` is paid. One route pilot has one paid call and at most 10 returned
-rows. The wrapper `limit` is 10 or less and truncates normalized output only;
-set provider-native result/count and page or cursor fields from the live schema,
-then bound the cost before execution. Inspect the live price first; expand only
-when rows are relevant, diverse, and evidentiary. The wrapper invokes
-`deepline tools search`, `describe`, or
-`execute`, writes a temporary payload file, redacts secrets, and emits one JSON
-object. Catalog calls default to 30 seconds (cap 120); execute calls
-default to 240 seconds (cap 780). Never automatically retry an uncertain call.
-After each execute, use billed usage as `cost_credits` with
-`cost_basis: "actual"`. If billed usage is unavailable but the live description
-gives a conservative bound for all calls recorded by the route, use
-`cost_credits: null`, that total bound as
-`cost_upper_bound_credits`, and `cost_basis: "estimated"`. Use `unknown` with
-both values `null` only when neither value is available.
-A typical or midpoint price is not a conservative bound. Use `unknown` when
-unresolved pricing inputs can make the route cost higher.
+Keep these distinctions when comparing routes: a branch is not a company;
+linked profiles and revenue are not total headcount; discovery/update dates
+are not event dates; installed software, ads, patents and reviews are not
+confirmed purchasing projects. A registry agent is not automatically an owner,
+and a social author is not automatically a current employee. Verify the actual
+source and requested criteria; missing evidence is unresolved, not failed fit.
 
-When Deepline supplies billing, the adapter preserves finite, non-negative
-`billing.credits_charged` and `billing.cost_usd`. These are observed amounts,
-not estimates inferred from row counts. Missing billing stays missing; keep
-the conservative bound until an actual charge is available.
+## Access and support
 
-The wrapper normalizes candidate fields to `company`, `domain`, `signal`,
-`evidence_url`, `evidence_date`, `evidence_text`, `provider`, and `tool`.
-Generic labels such as `search_result`, `web_page`, `company_profile`, and
-`hiring` are discovery labels only. For web-search rows, `domain` can be the
-source host; resolve the canonical company domain before acceptance.
+Deepline tools are schema-checked or catalog-only hints in the capability
+reference, not guaranteed live coverage. ScrapingDog has 25 local operations;
+[vendor-only endpoints](provider-capabilities.md#documented-only-not-local-operations)
+are not callable through its adapter. Use a supported alternative or record
+the specific gap. A disconnected or unknown-price route does not block all
+other research. Never bypass access controls, introduce new authenticated
+actions, deploy monitors, start outreach, or relax the ICP to fill a shortfall.
 
-For recognized event and post envelopes, the wrapper retains optional
-top-level `pagination`, `meta`, and `links` metadata with secrets redacted.
-HarvestAPI's known `pagination.paginationToken` is exposed separately as
-`pagination.next_cursor`. Map this opaque cursor back to the live provider
-input field only for an explicitly budgeted continuation; paging is never
-automatic. Do not advance past rows that the wrapper trimmed without reviewing
-them; request provider pages small enough for the output limit where supported.
-
-HarvestAPI post rows retain the post URL, content, `postedAt`, and author.
-Verify the author, company, and original versus reposted source; the author is
-not automatically a current employee or buyer. A person-authored post does
-not establish the author's employer, and a company-authored post does not
-establish its canonical domain.
-
-For JSON:API event responses, relationship names such as `company1` and
-`company2` are retained in `related_companies`. Related companies are
-candidates, not accepted companies: resolve the relationship and account gate
-explicitly, never pick the first company. Use a linked source `published_at`
-for `evidence_date` when available, keep any effective `event_date` separately,
-and never treat ingestion fields such as `found_at` or `updated` as event
-freshness.
-
-### Deepline status contract
-
-The wrapper emits exactly: `ok`, `no_results`, `partial`, `rate_limited`,
-`auth_failed`, `quota_exceeded`, `timeout`, `schema_error`, `provider_error`,
-or `config_error`. Only `ok` and `partial` can supply candidates. `no_results`
-does not prove absence. Other statuses are unresolved provider outcomes; stop or
-change route and retain `status`, `error` when present, `provider`, `operation`,
-`tool`, and normalized `results` in the report.
-
-### BounceBan fallback
-
-Only after ZeroBounce returns `catch-all` or `unknown`, search the live catalog
-for `BounceBan verify single email` and describe the returned tool. Execute once
-with the exact email and `entity_type: email_validation`, reserving the current
-price against the existing provider and paid-call caps, plus any explicitly
-requested per-next-lead cap. Do not
-pin the tool ID or price. Keep catch-all verification enabled. Default to
-regular mode: deepverify assumes the email domain matches the current company
-website, which is not safe for all verified brand/alias domains. No webhook
-or outreach is needed.
-
-Read raw `result`, not API `status`. Acceptance requires API `success` and
-`result: deliverable`; risky/unknown is unresolved, undeliverable is rejected.
-The adapter exposes the verdict as `email_status` while retaining raw fields.
-Store status/result, optional score/time and the Deepline source in the
-original receipt's `fallback` object. Never overwrite the ZeroBounce receipt.
-Do not override invalid, do_not_mail, spamtrap or abuse. An unsuccessful or
-uncertain call stays unresolved; do not retry it automatically or chain
-validators. Choose another address or requested buyer instead.
-
-An asynchronous `queue`/`verifying` response is `partial` with empty results
-and `pending_verification` containing the existing job ID. It is not an empty
-search or a deliverability verdict. Preserve this receipt. The model may
-discover and describe the single-status retrieval tool and, only after
-confirming it is free, retrieve that same job ID. Match the returned ID and
-email before using a successful final verdict; save the completion receipt
-separately and record the retrieval as a zero-paid-call route. The fallback
-source still references the original paid verification route and tool.
-Respect `try_again_at`, allow at most three status reads with at least 30
-seconds between reads, and leave a still-pending job unresolved. Never create
-another paid verification to recover a pending job. The adapter itself does
-not poll or retry.
-
-An outer transport/auth/provider failure must not be promoted by a nested
-positive validator row. Only the explicitly recognized default send-policy
-rejection may retain a non-positive ZeroBounce verdict for the normal gate.
-
-### Deepline ZeroBounce email gate
-
-When the effective contact fields include email, first find and verify the
-person and current role. Then search the live Deepline catalog for a ZeroBounce
-single-address validation capability. Select only a result whose current
-description identifies ZeroBounce email validation, and call `describe` to
-confirm its input, output, connection, and price. The catalog tool ID is runtime
-data; do not copy a fixed ID into this skill.
-
-```bash
-python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"search","query":"ZeroBounce validate one known email address"}'
-python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"describe","tool":"<current ZeroBounce validation tool from search>"}'
-python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"execute","tool":"<same described tool>","entity_type":"email_validation","payload":{"email":"person@example.com"},"limit":1}'
-```
-
-Use the exact payload names returned by the live description; the example
-shows the current scalar shape but does not override the live schema. The
-adapter preserves the provider row and exposes `email`, `email_status`, and
-`email_sub_status` for a recognized scalar validation result. Link the final
-receipt to a unique `email_validation` route and record actual usage.
-
-Apply TYCHE's current gate to the explicit ZeroBounce status after trimming and
-case normalization. `valid` passes directly. Reject `invalid`, `do_not_mail`,
-`spamtrap`, and `abuse` without fallback. Only `catch-all`/`unknown` may receive
-the single BounceBan check above. Unfamiliar statuses stay unresolved.
-Continue with another discovered address or requested buyer.
-A missing status, `no_results`, provider error, timeout, or other uncertain
-call is unresolved and cannot support an accepted email. Do not retry an
-uncertain paid validation call automatically. Deepline owns the provider
-credential; do not require or read a direct ZeroBounce key.
-
-## ScrapingDog wrapper
-
-`scripts/scrapingdog.py` is the only supported local ScrapingDog adapter here.
-It makes one bounded GET request, redacts secrets, and returns normalized rows.
-Its current supported canonical operation set is 25 operations. Aliases are
-accepted for compatibility, but use canonical names in new requests and
-receipts. Do not call an endpoint directly from this skill.
-
-### Request envelope and bounds
-
-- The request key is `operation` or the compatibility key `op`. The value is
-  case-insensitive and must be a canonical operation or an alias listed below.
-- The API key is read only from `SCRAPINGDOG_API_KEY`. `api_key` in the JSON
-  request and a `base_url` override are rejected.
-- `limit` is optional, defaults to `10`, and is capped at `20`. It caps returned
-  normalized rows and bounds provider `results` or `num` where those inputs
-  exist. Single-object operations still accept this common control.
-- `timeout_seconds` is optional, defaults to `30`, and is capped at `60`.
-- The tables list operation-specific keys. Every operation also accepts the
-  common `limit` and `timeout_seconds` keys. An omitted optional key is not sent
-  to the provider, except where the adapter always sends a bounded `results` or
-  `num` value as noted.
-
-| Canonical operation (aliases) | Exact endpoint | Required request keys | Optional forwarded keys | Planning credits and conservative output note |
-|---|---|---|---|---|
-| `google_search` | `GET https://api.scrapingdog.com/google` | `query` or compatibility `q` | `results`, `page`, `country`, `language`, `domain`, `advance_search`, `mob_search` | 5 standard; 10 with advanced or mobile search. Search URLs need exact-page verification. |
-| `universal_search` | `GET https://api.scrapingdog.com/search` | `query` or `q` | `country`, `language` | 20. A search result is not evidence until its source is verified. |
-| `scrape` | `GET https://api.scrapingdog.com/scrape` | `url` or compatibility `target_url` (HTTP(S)) | `dynamic`, `premium`, `wait`, `country` | 1 base; public estimates are 5 for JS rendering, 10 for premium proxy, 25 for both, and 10 with country (confirm combinations/current plan). Returns bounded normalized evidence, not a full raw payload. |
-| `linkedin_company` | `GET https://api.scrapingdog.com/profile` (`type=company`, `id`) | `id` or `company_id`, or `url`/`company_url` with a LinkedIn company URL | none | Profile API is plan/field dependent (plan for 10–100). Profile facts can support identity or fit, not a buying signal. |
-| `linkedin_person` (`linkedin_profile`, `linkedin_person_profile`) | `GET https://api.scrapingdog.com/profile` (`type=profile`, `id`) | `id`, `profile_id`, or `public_identifier`, or `url`, `profile_url`, `person_url`, or `linkedin_url` with a LinkedIn person URL | `premium`, `webhook` | Plan for 50 credits normally or 100 for a protected profile, then confirm the current plan. This is exact-profile current-role verification, not broad contact discovery. A `webhook=202` response is unsupported polling and remains unresolved. |
-| `linkedin_job` (`linkedin_job_details`, `linkedin_job_overview`) | `GET https://api.scrapingdog.com/jobs` (`job_id`) | `job_id` or `id`, or `url`, `job_url`, `job_link`, or `linkedin_url` with a LinkedIn job URL | none | 5. One exact job detail; normalizes hiring URL/text/date when present. |
-| `google_jobs` | `GET https://api.scrapingdog.com/google_jobs` | `query` or `q` | `country`, `language`, `uule`, `domain`, `next_page_token`, `chips`, `lrad`, `ltype`, `uds` | 5. Normalized job/company/link/date fields may be null; relative provider dates stay as returned. |
-| `linkedin_jobs` | `GET https://api.scrapingdog.com/jobs` (`field`) | `field`, or compatibility `query`/`q` (copied to `field`) | `geoid`, `location`, `page`, `sort_by`, `job_type`, `exp_level`, `work_type`, `filter_by_company` | 5. One bounded page; only recognized response shapes become rows. |
-| `google_maps` (`google_maps_search`, `google_maps_lookup`) | `GET https://api.scrapingdog.com/google_maps` | `query` or `q` | `ll`, `domain`, `language`, `country`, `data`, `place_id`, `type`, `page`; `page` requires `ll` | 5. Place IDs and listing facts are metadata, not proof without source verification. |
-| `google_maps_place` (`google_place`, `google_places`, `google_maps_places`) | `GET https://api.scrapingdog.com/google_maps/places` | one of `data_id`, `place_id`, `ludocid` | `country` | 5. One place detail; a place ID is not a fabricated source URL. |
-| `google_local` | `GET https://api.scrapingdog.com/google_local` | `query` or `q` | `location`, `uule`, `country`, `language`, `domain`, `ludocid`, `tbs`, `page` | 5. Local listing fields are candidates and need identity/source verification. |
-
-```bash
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_search","query":"<company> funding announcement","limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"universal_search","query":"<company> hiring","limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"scrape","url":"https://example.com/news/<article>","dynamic":false,"limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"linkedin_company","url":"https://www.linkedin.com/company/<slug>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"linkedin_person","url":"https://www.linkedin.com/in/<public-id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"linkedin_job","job_id":"<linkedin-job-id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_jobs","query":"<company> engineer","country":"us","limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"linkedin_jobs","field":"<company> engineer","geoid":"90000084","page":1,"limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_maps","query":"<company> offices","country":"us","limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_maps_place","data_id":"<maps-data-id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_local","query":"<industry> in <city>","country":"us","limit":10}'
-```
-
-The wrapper reads only `SCRAPINGDOG_API_KEY` from the environment. Never put a
-key in JSON, shell history, or an artifact. Paid calls are one-call pilots with
-no automatic retry. Treat listed prices as planning estimates: confirm the
-current plan before spending, and record the live estimate in the route receipt.
-The wrapper does not report invoice usage. Record the confirmed current-plan
-conservative estimate for every call recorded by the route as
-`cost_upper_bound_credits` with
-`cost_basis: "estimated"`; keep `cost_credits` and actual provider spend
-`null`. If the plan cannot bound the call, record both cost values as `null`
-with `cost_basis: "unknown"`.
-
-When a response includes a provider page token, the wrapper returns it as
-`continuation_cursor`. It searches the top level and nested `pagination`,
-`scrapingdog_pagination`, `data`, `result`, or `response` objects. Pass a cursor
-as `next_page_token` only after current rows justify another explicitly budgeted
-paid call; this is expansion, not retry.
-
-### Implemented conditional operations
-
-These operations are implemented by the local adapter and use the same response
-shape, evidence, budget, and no-retry rules as the core routes.
-
-| Canonical operation (aliases) | Exact endpoint | Required request keys | Optional forwarded keys and constraints | Planning credits and conservative output note |
-|---|---|---|---|---|
-| `google_ai_mode` | `GET https://api.scrapingdog.com/google/ai_mode` | `query` or `q` | `country`, `language`, `uule`, `location`, `safe`, `html`; `uule` and `location` cannot both be set | 10. Normalizes answer/text blocks and references into common evidence fields when recognized; text without a source URL is not accepted account evidence. |
-| `google_news` | `GET https://api.scrapingdog.com/google_news` | `query` or `q` | `results`, `country`, `page`, `domain`, `language`, `lr`, `uule`, `tbs`, `safe`, `nfpr`, `html`; `results` is always bounded by `limit` | 5. Normalizes headline/snippet/link/date fields; relative provider dates stay as returned. |
-| `linkedin_post` | `GET https://api.scrapingdog.com/profile/post` (`id`) | `id` or `post_id` | none | 5. The public post schema is not fixed. Only recognized content/identity shapes become rows; unknown successful shapes are `schema_error`. |
-| `x_profile` | `GET https://api.scrapingdog.com/x/profile` (`profileId`) | `profileId`, `profile_id`, or `id` | none | 5. Normalizes profile text and source URL when present; it does not establish a company or current contact role by itself. |
-| `x_post` | `GET https://api.scrapingdog.com/x/post` (`tweetId`) | `tweetId`, `tweet_id`, or `id` | none | 5. Normalizes post text and source URL when present; post identity is not company identity without corroboration. |
-| `youtube_search` | `GET https://api.scrapingdog.com/youtube/search` | `search_query` | `country`, `language`, `sp` (filters or provider next-page token) | 5. Combines recognized `channel_results`, `video_results`, `shorts_results`, and `movie_results` arrays before applying `limit`; common title/link/date/text fields may be null. |
-| `youtube_video` | `GET https://api.scrapingdog.com/youtube/video` | `v` or `video_id`, or a supported YouTube `url` | `country`, `language` | 5. Normalizes video title/description/link and selected metadata; a video is not a company signal without dated, company-linked evidence. |
-| `youtube_transcript` (`youtube_transcripts`) | `GET https://api.scrapingdog.com/youtube/transcripts` | `v` or `video_id`, or a supported YouTube `url` | `country`, `language` | 1. Normalizes transcript text from a recognized transcript shape; text alone may lack a date or company URL. |
-| `google_ads_transparency` | `GET https://api.scrapingdog.com/google/ads_transparency` | at least one of `advertiser_id` or `text` | `platform` only `PLAY`, `MAPS`, `SEARCH`, `SHOPPING`, `YOUTUBE`; `political_ads`, `region`, `start_date`, `end_date`, `creative_format`, `next_page_token`, `html`, `num`; truthy `political_ads` requires `region`; `num` is always sent bounded by `limit` | 5. Reads the official `ad_creatives` envelope; converts `last_shown` or `first_shown` Unix time to an ISO UTC date and retains the creative ID and format. |
-| `google_patents` | `GET https://api.scrapingdog.com/google_patents` | `query` or `q` | `num`, `page`, `sort`, `clustered`, `dups`, `patents`, `scholar`, `before`, `after`, `inventor`, `assignee`, `country`, `language`, `status`, `type`, `litigation`; `num` is always sent bounded by `limit` | 5. Normalizes patent title, abstract, assignee, identifier, URL, and date when present; a patent result is not a buying signal without current company-linked evidence. |
-| `google_patent_details` | `GET https://api.scrapingdog.com/google_patents/details` | `patent_id` | `language`, `html` | 5. One exact patent detail; unknown or empty detail envelopes remain `no_results` or `schema_error`, not inferred facts. |
-| `tiktok_profile` | `GET https://api.scrapingdog.com/tiktok/profile` | `username` | none | 5. Normalizes profile text and URL when present; profile data does not prove a company buying signal. |
-| `tiktok_post` | `GET https://api.scrapingdog.com/tiktok/post` | `url`, or both `username` and `post_id` | none | 5. A URL request sends only `url`; the ID form sends `username` and `post_id`. Normalizes post text and URL, and converts a Unix `created_at` value to an ISO UTC date. |
-| `tiktok_ads` | `GET https://api.scrapingdog.com/tiktok/ads` | at least one of `query` or `advertiser_id` | `query_type` only `1` or `2`, `country`, `time_period`, `sort_by`, `next_page_token`; type 1 requires `query`, type 2 requires `advertiser_id`; advertiser-only input defaults to type 2 | 5. Normalizes the official ad name, first/last shown dates, ID, type, audience/spend/impression metadata, and first supplied video or image URL. Empty ad envelopes are `no_results`. |
-
-```bash
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_ai_mode","query":"<company> expansion","limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_news","query":"<company> funding","limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"linkedin_post","post_id":"<post-id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"x_profile","profile_id":"<profile-id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"x_post","tweet_id":"<tweet-id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"youtube_search","search_query":"<company> launch","limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"youtube_video","video_id":"<video-id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"youtube_transcript","video_id":"<video-id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_ads_transparency","advertiser_id":"<advertiser-id>","limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_patents","query":"<company>","limit":10}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"google_patent_details","patent_id":"<patent-id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"tiktok_profile","username":"<username>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"tiktok_post","url":"https://www.tiktok.com/@<user>/video/<id>","limit":1}'
-python3 .agents/skills/lead-sourcing/scripts/scrapingdog.py --input '{"operation":"tiktok_ads","query":"<company>","limit":10}'
-```
-
-The accepted operation aliases are: `linkedin_profile` and
-`linkedin_person_profile` → `linkedin_person`; `linkedin_job_details` and
-`linkedin_job_overview` → `linkedin_job`; `google_maps_search` and
-`google_maps_lookup` → `google_maps`; `google_place`, `google_places`, and
-`google_maps_places` → `google_maps_place`; and `youtube_transcripts` →
-`youtube_transcript`. The output `operation` echoes the normalized request key;
-use canonical names in new receipts.
-
-`instagram_*` operations are not in the adapter's operation set and are
-rejected. The dedicated Instagram contract is incomplete, so do not call an
-Instagram endpoint directly or claim Instagram support. If no supported
-operation or live Deepline capability exists for a route, record
-`route_not_connected` as unresolved. Use search-index results to discover URLs
-only; scrape the exact source page before using its text as evidence. A public
-profile can support identity/current role only when it names the person, role,
-and company; it does not prove a buying signal by itself. A CEO is not an
-automatic contact fallback.
-
-Official references: [Documentation overview](https://www.scrapingdog.com/documentation/),
-[Google Search](https://www.scrapingdog.com/documentation/google-search-api/),
-[Universal Search](https://www.scrapingdog.com/documentation/universal-search-api/),
-[web scraping options](https://www.scrapingdog.com/documentation/request-customization/),
-[LinkedIn company profile](https://www.scrapingdog.com/documentation/company-profile-scraper/),
-[LinkedIn person profile](https://www.scrapingdog.com/documentation/person-profile-scraper/),
-[LinkedIn post](https://www.scrapingdog.com/documentation/post-scraper/),
-[LinkedIn Jobs](https://www.scrapingdog.com/documentation/scrape-jobs-search-results/),
-[LinkedIn job details](https://www.scrapingdog.com/documentation/scrape-job-overview/),
-[Google Jobs](https://www.scrapingdog.com/documentation/google-jobs-api/),
-[Google Maps search](https://www.scrapingdog.com/documentation/google-maps-search-api/),
-[Google Maps place details](https://www.scrapingdog.com/documentation/google-maps-places-api/),
-[Google Local](https://www.scrapingdog.com/documentation/google-local-api/),
-[Google AI Mode](https://www.scrapingdog.com/documentation/google-ai-mode-api/),
-[Google News](https://www.scrapingdog.com/documentation/google-news-search-api/),
-[X profile](https://www.scrapingdog.com/documentation/x-profile-scraper-api/),
-[X post](https://www.scrapingdog.com/documentation/x-post-scraper-api/),
-[YouTube Search](https://www.scrapingdog.com/documentation/youtube-search-api/),
-[YouTube Video](https://www.scrapingdog.com/documentation/youtube-video-api/),
-[YouTube Transcripts](https://www.scrapingdog.com/documentation/youtube-transcripts-api/),
-[Google Ads Transparency](https://www.scrapingdog.com/documentation/google-ads-transparency-api/),
-[Google Patents](https://www.scrapingdog.com/documentation/google-patents-api/),
-[Google Patent Details](https://www.scrapingdog.com/documentation/google-patent-details-api/),
-[TikTok profile](https://www.scrapingdog.com/documentation/tiktok-profile-api/),
-[TikTok post](https://www.scrapingdog.com/documentation/tiktok-post-scraper-api/), and
-[TikTok Ads](https://www.scrapingdog.com/documentation/tiktok-ads-scraper-api/).
-
-### Normalized output and conservative parsing
-
-Every successful row contains these normalized keys, which may be `null`:
-`company`, `domain`, `signal`, `evidence_url`, `evidence_date`,
-`evidence_text`, `provider`, `operation`, and `provider_metadata`. The wrapper
-does not promise provider fields that it does not normalize. The allowlisted
-metadata keys are `rank`, `job_id`, `linkedin_id`, `profile_id`, `profileId`,
-`tweet_id`, `video_id`, `patent_id`, `advertiser_id`, `ad_id`, `ad_format`,
-`first_shown`, `last_shown`, `estimated_audience`, `spend`, `impressions`,
-`username`, `post_id`,
-`company_url`, `place_id`, `data_id`, `ludocid`, `title`, `location`, `industry`,
-`company_size`, `address`, `phone`, `rating`, `reviews`, and
-`gps_coordinates`, when supplied by the provider. `linkedin_person` can also
-normalize `contact`, `contact_name`, `full_name`, `contact_url`,
-`contact_title`, `current_title`, and `contact_email`; this remains role
-verification, not contact discovery. Missing fields are not inferred.
-
-For YouTube search, recognized `channel_results`, `video_results`,
-`shorts_results`, and `movie_results` arrays are combined before `limit` is
-applied. A recognized response may expose `continuation_cursor` from
-`next_page_token`, `nextPageToken`, or `next_token` at the top level or inside
-`pagination`, `scrapingdog_pagination`, `data`, `result`, or `response`. Use a
-cursor only for a new, explicitly budgeted paid call after inspecting current
-rows; this is expansion, not retry.
-
-### ScrapingDog wrapper status contract
-
-The wrapper emits the same status set as the Deepline adapter: `ok`,
-`no_results`, `partial`, `rate_limited`, `auth_failed`, `quota_exceeded`,
-`timeout`, `schema_error`, `provider_error`, and `config_error`. `ok` means
-recognized normalized rows were returned; `no_results` means a valid response had none;
-`partial` means the provider marked the response partial. HTTP 429 maps to
-`rate_limited`, and 401/403 maps to `auth_failed`. Explicit quota or credit text
-maps to `quota_exceeded`. An unexplained HTTP 402 stays `provider_error` because
-the public ScrapingDog error documentation does not list it. Invalid input and
-malformed or unknown successful response
-shapes are `schema_error`; missing credentials are `config_error`; HTTP 202 is
-an unresolved `provider_error` because this adapter does not poll queued work.
-Other transport or HTTP failures, including HTTP 410, are also
-`provider_error`. Only `ok` and `partial` may supply candidates; `no_results` is
-not proof of absence, and no non-`ok` status is final evidence.
-
-The adapter redacts API keys and other secret-like values from emitted JSON and
-does not return a full raw provider response. Never put a key in JSON, shell
-history, or an artifact. Each paid call is a bounded pilot or explicitly
-budgeted expansion; do not automatically retry a timeout, 202, provider error,
-or uncertain paid outcome. Keep Deepline and ScrapingDog credit caps separate.
-Treat the estimates above as planning values and confirm the current plan.
-Record each exact-call bound and provider status in the route receipt. Set
-unknown usage and unknown bounds to `null` rather than `0`.
-
-## Credentials and artifacts
-
-Use the environment or connected credential store. Record only availability,
-never a value:
-
-- `DEEPLINE_API_KEY` and optional `DEEPLINE_HOST_URL`.
-- `DEEPLINE_BIN` (optional path to the Deepline CLI binary).
-- `SCRAPINGDOG_API_KEY`.
-
-For each run, write exactly `reports/<run-id>/report.md`,
-`reports/<run-id>/results.json`, and `reports/<run-id>/leads.xlsx`. Include the
-request, hypotheses, route commands and filters, pilot observations, statuses,
-route cost bases, confirmed and maximum credits, Deepline dollar cost and cost
-per accepted lead, accepted evidence, contact selection, and rejected or
-unresolved rows with stable reasons. Keep provider receipts separate from output state. Never
-infer evidence from memory or present an unverified company or contact as final.
+Contact identity and current role must pass before contact-data lookup.
+Finder confidence never replaces the existing ZeroBounce gate or its single
+conditional BounceBan fallback. Preserve all budget caps and uncertain-call
+handling in the workflow and adapter references.

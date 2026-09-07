@@ -17,7 +17,8 @@ Do not add a server, database, queue, CRM write, or outreach action.
    credentials in the process; an unloaded `.env` is not a missing key. Follow
    the repository's setup instructions without printing secrets. Search the
    live Deepline catalog and describe the selected tool before each execution.
-   Use [tools.md](references/tools.md) for wrapper inputs and provider choices.
+   Use [tools.md](references/tools.md) to choose a route, then load only its
+   required adapter sections before calling it.
 2. **Run a small, budgeted search.** Start each material route with one paid
    call and at most ten rows, using provider-native limits. Reserve a
    conservative cost bound before dispatch; keep separate provider/call caps.
@@ -31,8 +32,8 @@ Do not add a server, database, queue, CRM write, or outreach action.
    for the same company. Read the actual source: a keyword match, search snippet,
    ingestion date, or empty provider response does not prove qualification or
    disqualification. Keep rejected, unresolved, and provider failures separate.
-   Use the output contract's taxonomy and client-writing rules to classify the
-   company and explain the signal from the same evidence.
+   Use the output contract's [taxonomy and client-writing rules](references/output-contract.md#client-writing-and-taxonomy-version-12)
+   to classify the company and explain the signal from the same evidence.
 4. **Find the requested buyer and validate their email.** Only after the account
    passes, verify the person's current role and company before contact-data
    lookup. Respect primary/secondary role groups. Email is required unless
@@ -48,7 +49,11 @@ Do not add a server, database, queue, CRM write, or outreach action.
    proceeds. Change route when a candidate fails. Link each later continuation
    to its successor route ID and do not claim exhaustion while actionable or
    promising unresolved paths remain. Require a concrete next action or blocker
-   for every unresolved company. Write `report.md`, `results.json`, and
+   for every unresolved company. Before a shortfall stop, search the live catalog
+   for unresolved evidence gaps and new discovery routes, not just the initial
+   provider list. Add and test promising affordable routes while below target;
+   unused budget alone does not justify repeating unproductive calls.
+   Write `report.md`, `results.json`, and
    `leads.xlsx`; validate the full output contract and run
    `scripts/validate_run.py` with `--show-progress` before delivery. Use its
    account/contact groups in the report and keep route failures separate.
@@ -72,7 +77,19 @@ the exact evidence gates, role fallbacks, budget accounting, receipt helper,
 and shortfall rules. These safeguards remain mandatory; this shorter entry
 point does not change them.
 
-Use [output-contract.md](references/output-contract.md) for request/result
-schemas, run timing and source reporting, fixed workbook columns, and validation.
-Use the bundled workspace dependencies for workbook generation; do not add a
-project dependency.
+Load the remaining references by phase, not recursively or all at startup.
+For a long file, locate the linked heading with `rg -n` and read that section;
+reuse previously loaded rules. A link to a section is not a request to read
+the entire file.
+
+| Phase | Required reading |
+|---|---|
+| Normalize the request, before discovery | [Lifecycle invariants](references/output-contract.md#lifecycle-invariants), [input contract](references/output-contract.md#input-contract), and [timing](references/output-contract.md#timing). |
+| Choose or change a route | [Tool index](references/tools.md); only the relevant capability section and selected adapter contract it links. |
+| Before recording the first route; when adding record fields | [Result semantics](references/output-contract.md#semantic-checks), [source attribution](references/output-contract.md#accepted-lead-sources), and the relevant [schema definitions](references/output-contract.md#resultsjson-schema). |
+| Qualify companies and write accepted rows | [Client writing and taxonomy](references/output-contract.md#client-writing-and-taxonomy-version-12). |
+| Export, validate, and deliver | [Workbook contract](references/output-contract.md#leadsxlsx-contract), [report requirements](references/output-contract.md#reportmd-minimum-contents), and [final-response checklist](references/output-contract.md#final-response-checklist). |
+
+Phase loading never skips full artifact validation or an applicable safety
+check. Use the bundled workspace dependencies for workbook generation;
+do not add a project dependency.

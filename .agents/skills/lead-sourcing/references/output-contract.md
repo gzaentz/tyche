@@ -5,6 +5,20 @@ The JSON Schema is draft 2020-12. A run directory is
 `reports/<run-id>/` and contains exactly `report.md`, `results.json`, and
 `leads.xlsx`.
 
+## Read by phase
+
+This file stays the single normative contract. Do not load it all upfront:
+locate the relevant heading and read its section. Schemas are unchanged;
+inspect the definitions needed for the record being written, then validate the
+complete artifact. All applicable semantic rules still apply.
+
+| When | Sections |
+|---|---|
+| Before discovery | [Lifecycle invariants](#lifecycle-invariants), [Input contract](#input-contract), [Timing](#timing). |
+| Before the first route receipt | [Semantic checks](#semantic-checks), [Accepted-lead sources](#accepted-lead-sources), relevant [result schema](#resultsjson-schema) fields. |
+| Before accepting and describing a company | [Client writing and taxonomy](#client-writing-and-taxonomy-version-12). |
+| Before export and final delivery | [Workbook](#leadsxlsx-contract), [Report minimum contents](#reportmd-minimum-contents), [Final-response checklist](#final-response-checklist); finish [Timing](#timing). |
+
 ## Lifecycle invariants
 
 1. Account processing comes first. As soon as a company passes its account
@@ -769,6 +783,8 @@ top-level result list or hide rejected/unresolved rows in a count.
   }
 }
 ```
+
+### Semantic checks
 
 The following semantic checks supplement JSON Schema: every signal's
 `min_age_days` must be no greater than its `max_age_days` when both are

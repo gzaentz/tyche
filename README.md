@@ -48,12 +48,15 @@ Codex
 ```
 
 The main instructions are in
-[SKILL.md](.agents/skills/lead-sourcing/SKILL.md). Provider operations are in
-[tools.md](.agents/skills/lead-sourcing/references/tools.md). The exact input,
+[SKILL.md](.agents/skills/lead-sourcing/SKILL.md). The short provider-selection
+index is [tools.md](.agents/skills/lead-sourcing/references/tools.md); it links
+shared I/O and provider-specific contracts for reading only when needed. The exact input,
 JSON, and Excel workbook contracts are in
 [output-contract.md](.agents/skills/lead-sourcing/references/output-contract.md).
 The main skill uses five steps; detailed safeguards and audit procedures are
 in [workflow-rules.md](.agents/skills/lead-sourcing/references/workflow-rules.md).
+Follow the skill's phase-specific reading links rather than loading every
+reference upfront. Full artifact validation remains required.
 
 ## Requirements
 
