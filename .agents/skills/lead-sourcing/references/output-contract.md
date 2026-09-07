@@ -71,7 +71,9 @@ complete artifact. All applicable semantic rules still apply.
    refill by a fixed multiplier such as 5x.
 9. The route frontier contains paid-provider and public-web paths. Each path is
    `untried`, `continuable`, `exhausted`, or `blocked`. A final shortfall is
-   invalid while any path is untried or continuable. A failed or uncertain paid
+   invalid while any path is actionable unless the strict stop check verifies
+   an explicit time limit or that no next action fits the budget. Keep unfinished
+   routes actionable in those cases; do not relabel them exhausted. A failed or uncertain paid
    call is not retried automatically, but it does not exhaust other paths. The
    frontier is append-only: paths may be added and states updated, but a planned
    or discovered path must not be removed.
@@ -93,6 +95,11 @@ complete artifact. All applicable semantic rules still apply.
 
 The normalized request must validate against this schema. Defaults are noted in
 the schema and must be applied before provider work.
+Before schema validation, apply the [default run budget](workflow-rules.md#default-run-budget)
+when the user omits a spending budget: USD 0.50 times the requested lead count,
+shared across providers. Convert a conservative allocation to the existing
+credit-cap fields; record its USD basis in the report. Explicit budgets override
+this default. No new JSON fields are required.
 
 ```json
 {
@@ -104,6 +111,7 @@ the schema and must be applied before provider work.
   "required": ["target_count", "icp", "buying_signals", "requested_roles", "time_window", "budget"],
   "properties": {
     "target_count": {"type": "integer", "minimum": 1},
+    "max_duration_seconds": {"type": ["integer", "null"], "minimum": 1},
     "icp": {"$ref": "#/$defs/icp"},
     "buying_signals": {
       "type": "array",
@@ -264,8 +272,9 @@ top-level result list or hide rejected/unresolved rows in a count.
     "rejected": {"type": "array", "items": {"$ref": "#/$defs/outcome_row"}},
     "unresolved": {"type": "array", "items": {"$ref": "#/$defs/outcome_row"}},
     "stop_audit": {"$ref": "#/$defs/stop_audit"},
+    "stop_check": {"$ref": "#/$defs/stop_check"},
     "stop_reason": {
-      "enum": ["target_met", "budget_exhausted", "no_productive_route", "provider_stop", "input_or_configuration_stop"]
+      "enum": ["target_met", "budget_exhausted", "time_limit_reached", "no_productive_route", "provider_stop", "input_or_configuration_stop"]
     }
   },
   "allOf": [
@@ -553,6 +562,38 @@ top-level result list or hide rejected/unresolved rows in a count.
         "error": {"type": "string", "minLength": 1}
       }
     },
+    "stop_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "next_actions"],
+      "properties": {
+        "started_at": {"type": "string", "format": "date-time"},
+        "next_actions": {"type": "array", "items": {"$ref": "#/$defs/next_action"}}
+      }
+    },
+    "next_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope", "description", "provider", "paid_calls", "cost_upper_bound_credits"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "scope": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "provider": {"enum": ["deepline", "scrapingdog", "public_web"]},
+        "paid_calls": {"type": "integer", "minimum": 0},
+        "cost_upper_bound_credits": {"type": ["number", "null"], "minimum": 0},
+        "blocker": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reason", "evidence_route_id"],
+          "properties": {
+            "kind": {"enum": ["approval_required", "access_unavailable", "required_input"]},
+            "reason": {"type": "string", "minLength": 1},
+            "evidence_route_id": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
     "route_frontier_item": {
       "type": "object",
       "additionalProperties": false,
@@ -683,6 +724,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "required": ["target_count", "icp", "buying_signals", "requested_roles", "contacts_per_company", "time_window", "contact_fields", "budget"],
       "properties": {
         "target_count": {"type": "integer", "minimum": 1},
+        "max_duration_seconds": {"type": ["integer", "null"], "minimum": 1},
         "icp": {"$ref": "#/$defs/icp"},
         "buying_signals": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/signal"}},
         "signal_match_mode": {"enum": ["any", "all"], "default": "any"},
@@ -786,6 +828,69 @@ top-level result list or hide rejected/unresolved rows in a count.
 
 ### Semantic checks
 
+### Stopping check
+
+For every current run, persist `stop_check.started_at` before discovery and keep
+it unchanged on resume. Set `request.max_duration_seconds` only from an explicit
+user time limit; absent/null means no time limit. The limit includes discovery,
+retries and verification, not just paid tool execution. At expiry, stop sourcing
+and finish the necessary persistence and delivery checks. Never promise that an
+already dispatched provider call can be cancelled; retain its reservation/result.
+
+Maintain `stop_check.next_actions` separately from historical attempt receipts.
+Each entry names a concrete, useful next test, with a unique `id`, `description`,
+`scope`, `provider`, `paid_calls` and conservative `cost_upper_bound_credits`.
+Use `scope: "discovery"` for finding additional companies and the canonical
+domain for each unresolved account/contact (or its normalized `name:` key when
+no domain exists). Cover both new discovery and every unresolved company.
+Retire completed actions and add the next useful action; completing a batch or
+marking all attempt routes exhausted is not proof that no next action exists.
+
+Before a shortfall, refresh live tool discovery for both new companies and
+missing evidence. Include public/free alternatives, not only paid providers.
+Do not repeat a failed identical lookup, spend solely to consume the cap, or
+invent a blocker from a missing headcount, rejected company, or failed email.
+Try another relevant identifier, source family, buyer, or company as appropriate.
+
+An action that cannot run may carry `blocker` with `kind` (`approval_required`,
+`access_unavailable`, or `required_input`), the concrete `reason`, and an
+`evidence_route_id` referencing a blocking attempt or route-outcome receipt.
+That blocks only that action. A whole-run blocker requires coverage of all
+remaining discovery/recovery scopes after alternative-source review. Unknown
+prices require a free price-discovery action, not an invented budget failure.
+Provider budget allocations may be changed only under the existing shared-cap
+rules; lack of allocation to an otherwise useful provider is not tool exhaustion.
+
+Run `python3 scripts/validate_run.py <results.json> --check-stop` before the next
+action. Draft results are allowed; budget/cost receipts must reconcile. The
+decision uses qualified accepted rows, the actual current UTC time, confirmed
+charges plus uncertain reservations, and each next action's maximum cost/calls:
+
+- `target_met`: requested qualified company-contact count reached.
+- `time_limit_reached`: the user's explicit duration expired. Target takes
+  precedence if already reached. Report any shortfall and unfinished routes.
+- `continue`: at least one action fits, discovery/recovery coverage is missing,
+  or pricing needs resolution. Dispatch only an `eligible_actions` entry. With
+  missing coverage/prices, add the concrete free planning/research action first.
+- `budget_exhausted`: all covered, unblocked next actions exceed an applicable
+  cap. Never exceed a cap first. A free available action prevents this stop.
+- `provider_stop` or `input_or_configuration_stop`: all covered next actions
+  have evidenced concrete blockers; request only what is needed to unblock them.
+- `repair_state`: invalid/missing state. Repair it; this is not a sourcing outcome.
+
+After choosing an eligible paid action, persist its reservation before dispatch.
+Evaluate again after its result and on resume. Do not reset caps or start times.
+Final `validate_run.py` is strict by default: it requires `stop_check` and a
+matching `stop_reason`, in addition to all evidence and budget validation.
+The schema keeps `stop_check` optional solely for old reports;
+`--legacy-stop-policy` is for read-only historical audits, never current delivery.
+`no_productive_route` is a legacy label, not an allowed current stopping decision.
+Checks validate recorded actions and receipts; they cannot prove completeness of
+an open-ended market search. The agent must still honestly discover alternatives
+and substantiate blockers, rather than manipulate labels to obtain a passing result.
+
+### Result semantics
+
 The following semantic checks supplement JSON Schema: every signal's
 `min_age_days` must be no greater than its `max_age_days` when both are
 present; every accepted contact's
@@ -831,8 +936,9 @@ checks do not reject an account. A check with `unknown` must not be rewritten
 as `fail` merely because no source was found.
 `provider_status` belongs to a route or outcome receipt, never in place of
 `state`. When accepted companies are below `target_count`, `stop_audit` is
-required and every route-frontier item must be `exhausted` or `blocked` before
-the run may end, and `frontier_complete` must be true. Every `exhausted`
+required and `frontier_complete` must be true. The strict stopping check must
+permit the stop; a time/budget limit may leave unfinished routes actionable.
+Every `exhausted`
 frontier item must have a determinate `ok`, `partial`, or `no_results` attempt
 receipt in `routes` and an `exhaustion_basis`. A rate limit, authentication,
 quota, timeout, schema, provider, or configuration error makes a route
@@ -850,13 +956,10 @@ new route ID. Reuse for separate attempts is invalid. `target_shortfall`
 equals
 `max(0, target_count - accepted_companies)`. Reviewed-company counts use unique
 canonical domains, or normalized company names when a domain is not yet known;
-`explicit_exclusion` is the only exclusion-only reason. `budget_exhausted` is
-valid only when both paid providers have `unavailable` call capacity and no
-public-web route remains actionable. `provider_stop` requires at least one
-blocked route and is invalid while either paid provider can make another
-bounded call. `no_productive_route` requires at least one exhausted route; use
-`provider_stop` when every route is blocked. Run `scripts/validate_run.py` against the
-completed `results.json` to enforce these completion rules. This completion
+`explicit_exclusion` is the only exclusion-only reason. Budget availability
+alone is not authority to call a blocked tool; one tool's blocker is not a reason
+to end other research. Run `scripts/validate_run.py` against the completed
+`results.json` to enforce the stopping check and completion rules. This completion
 validator supplements rather than replaces validation against the JSON Schema
 and the other semantic checks above.
 

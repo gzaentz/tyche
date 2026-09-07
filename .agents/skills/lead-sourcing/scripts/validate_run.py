@@ -10,6 +10,7 @@ import pathlib
 import re
 import sys
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 
@@ -816,7 +817,160 @@ def _validate_client_output(accepted: list, errors: list[str]) -> None:
             errors.append(f"{path}.company requires an exact canonical industry/sub_industry pair")
 
 
-def validate_run(document: Any) -> list[str]:
+def evaluate_stop(document: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
+    """Check next actions independently of self-declared exhausted route labels."""
+    errors: list[str] = []
+    result: dict[str, Any] = {"decision": "repair_state", "eligible_actions": [], "errors": errors}
+    if not isinstance(document, dict):
+        errors.append("results must be an object")
+        return result
+    check = document.get("stop_check")
+    request = document.get("request", {})
+    if not isinstance(check, dict) or not isinstance(request, dict):
+        errors.append("stop_check and request objects are required")
+        return result
+    target = request.get("target_count")
+    accepted = document.get("accepted")
+    if type(target) is not int or target < 1 or not isinstance(accepted, list):
+        errors.append("positive target_count and accepted array are required")
+        return result
+    try:
+        started = datetime.fromisoformat(check["started_at"].replace("Z", "+00:00"))
+        current = now or datetime.now(timezone.utc)
+        if started.utcoffset() is None or current.utcoffset() is None or started > current:
+            raise ValueError("timestamp must be timezone-aware and not in the future")
+    except (KeyError, TypeError, AttributeError, ValueError) as exc:
+        errors.append(f"stop_check.started_at: {exc}")
+        return result
+    duration = request.get("max_duration_seconds")
+    if duration is not None and (type(duration) is not int or duration <= 0):
+        errors.append("max_duration_seconds must be a positive integer or null")
+        return result
+    result.update(checked_at=current.isoformat(), elapsed_seconds=(current - started).total_seconds())
+    if len(accepted) >= target:
+        result["decision"] = "target_met"
+        return result
+    if duration is not None and result["elapsed_seconds"] >= duration:
+        result["decision"] = "time_limit_reached"
+        return result
+
+    actions = check.get("next_actions")
+    if not isinstance(actions, list):
+        errors.append("stop_check.next_actions must be an array")
+        return result
+    for field in ("routes", "unresolved", "rejected"):
+        if not isinstance(document.get(field, []), list):
+            errors.append(f"{field} must be an array")
+    request_budget = request.get("budget", {})
+    if not isinstance(request_budget, dict):
+        errors.append("request.budget must be an object")
+    if errors:
+        return result
+    scopes = {"discovery"}
+    for row in document.get("unresolved", []):
+        if isinstance(row, dict) and row.get("stage") in {"account", "contact"}:
+            key = _company_key(row)
+            if key:
+                scopes.add(key)
+    covered: set[str] = set()
+    ids: set[str] = set()
+    budget = document.get("budget", {})
+    limits = budget.get("limits", {}) if isinstance(budget, dict) else {}
+    if not isinstance(limits, dict):
+        errors.append("budget.limits must be an object")
+        return result
+    _validate_budget_accounting(document, errors)
+    _validate_cost_accounting(document, errors)
+    _validate_next_lead_budget(document, errors)
+    if errors:
+        return result
+    costs = calculate_cost_summary(document)
+    receipts = document.get("routes", [])
+    paid_calls = sum(r.get("paid_calls", 0) for r in receipts if isinstance(r, dict) and type(r.get("paid_calls", 0)) is int)
+    call_limit = limits.get("max_paid_calls")
+    if call_limit is not None and (type(call_limit) is not int or call_limit < 0):
+        errors.append("max_paid_calls must be a nonnegative integer")
+        return result
+    next_lead_limit = limits.get("max_deepline_credits_per_next_lead", request_budget.get("max_deepline_credits_per_next_lead"))
+    blocked_kinds: list[str] = []
+    needs_pricing = False
+    for action in actions:
+        if not isinstance(action, dict):
+            errors.append("each next action must be an object")
+            continue
+        aid, scope = action.get("id"), action.get("scope")
+        if not isinstance(aid, str) or not aid.strip() or aid in ids:
+            errors.append("next action IDs must be nonempty and unique")
+            continue
+        ids.add(aid)
+        if not isinstance(scope, str) or not scope.strip() or not _nonempty_text(action.get("description")):
+            errors.append(f"{aid}: scope and concrete action description are required")
+            continue
+        covered.add(scope)
+        blocker = action.get("blocker")
+        if blocker is not None:
+            if not isinstance(blocker, dict) or not isinstance(blocker.get("kind"), str) or blocker["kind"] not in {"approval_required", "access_unavailable", "required_input"}:
+                errors.append(f"{aid}: invalid concrete blocker")
+                continue
+            evidence_id = blocker.get("evidence_route_id")
+            evidence = [r for r in receipts if isinstance(r, dict) and r.get("route_id") == evidence_id]
+            evidence += [r for r in document.get("unresolved", []) if isinstance(r, dict) and r.get("stage") == "route" and r.get("route_id") == evidence_id]
+            if not _nonempty_text(blocker.get("reason")) or not evidence or not any(isinstance(r.get("provider_status"), str) and r["provider_status"] in BLOCKING_PROVIDER_STATUSES for r in evidence):
+                errors.append(f"{aid}: blocker needs a reason and blocking receipt/outcome evidence_route_id")
+            blocked_kinds.append(blocker["kind"])
+            continue
+        provider = action.get("provider")
+        bound = action.get("cost_upper_bound_credits")
+        calls = action.get("paid_calls")
+        if not isinstance(provider, str) or provider not in PAID_PROVIDERS | {"public_web"} or type(calls) is not int or calls < 0:
+            errors.append(f"{aid}: valid provider and nonnegative paid_calls are required")
+            continue
+        if bound is not None and (isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(bound) or bound < 0):
+            errors.append(f"{aid}: cost bound must be finite and nonnegative or null")
+            continue
+        if provider == "public_web" and (bound != 0 or calls != 0):
+            errors.append(f"{aid}: public_web actions must have zero provider cost and paid calls")
+            continue
+        if bound == 0 and calls == 0:
+            result["eligible_actions"].append(aid)
+            continue
+        if bound is None:
+            needs_pricing = True
+            continue
+        maximum = costs.get(provider, {}).get("maximum_credits")
+        cap = limits.get(f"{provider}_credits")
+        if cap is None or _decimal(cap) is None or _decimal(cap) < 0:
+            errors.append(f"{aid}: a finite nonnegative provider credit cap is required")
+            continue
+        if maximum is None:
+            needs_pricing = True
+            continue
+        if cap is not None and Decimal(str(maximum)) + Decimal(str(bound)) > Decimal(str(cap)):
+            continue
+        if call_limit is not None and paid_calls + calls > call_limit:
+            continue
+        if provider == "deepline" and next_lead_limit is not None:
+            since_last = calculate_progress(document)["deepline_since_last_lead"]["maximum_credits"]
+            if since_last is None:
+                needs_pricing = True
+                continue
+            if Decimal(str(since_last)) + Decimal(str(bound)) > Decimal(str(next_lead_limit)):
+                continue
+        result["eligible_actions"].append(aid)
+    if errors:
+        result["eligible_actions"] = []
+        return result
+    missing = sorted(scopes - covered)
+    if result["eligible_actions"] or missing or needs_pricing:
+        result.update(decision="continue", missing_scopes=missing, pricing_required=needs_pricing)
+    elif actions and len(blocked_kinds) == len(actions):
+        result["decision"] = "input_or_configuration_stop" if any(k != "access_unavailable" for k in blocked_kinds) else "provider_stop"
+    else:
+        result["decision"] = "budget_exhausted"
+    return result
+
+
+def validate_run(document: Any, *, require_stop_check: bool = False, now: Optional[datetime] = None) -> list[str]:
     errors: list[str] = []
     if not isinstance(document, dict):
         return ["results.json must contain one JSON object"]
@@ -997,6 +1151,17 @@ def validate_run(document: Any) -> list[str]:
     _validate_next_lead_budget(document, errors)
 
     stop_reason = document.get("stop_reason")
+    stop_check = None
+    if require_stop_check or "stop_check" in document:
+        stop_check = evaluate_stop(document, now=now)
+        errors.extend(stop_check["errors"])
+        decision = stop_check["decision"]
+        if decision == "continue":
+            errors.append("stop check requires continuation: affordable actions, missing recovery/discovery actions, or unresolved pricing remain")
+        elif decision != "repair_state" and decision != stop_reason:
+            errors.append(f"stop_reason must match stop check decision: {decision}")
+    elif stop_reason == "time_limit_reached":
+        errors.append("time_limit_reached requires stop_check and an explicit max_duration_seconds")
     shortfall = max(0, target - accepted_count)
     if shortfall == 0:
         if stop_reason != "target_met":
@@ -1205,7 +1370,8 @@ def validate_run(document: Any) -> list[str]:
             for route_id, item in frontier_by_id.items()
             if item.get("state") not in FINAL_FRONTIER_STATES | ACTIONABLE_FRONTIER_STATES
         )
-        if actionable:
+        limit_reached = stop_check is not None and not stop_check["errors"] and stop_check["decision"] in {"time_limit_reached", "budget_exhausted"}
+        if actionable and not limit_reached:
             errors.append(
                 "run must continue while route_frontier is actionable: "
                 + ", ".join(actionable)
@@ -1236,7 +1402,7 @@ def validate_run(document: Any) -> list[str]:
                     errors.append(
                         f"stop_audit.provider_call_capacity.{provider} must be unknown when actual spend is unknown"
                     )
-    if isinstance(capacity, dict) and shortfall and stop_reason == "budget_exhausted":
+    if stop_check is None and isinstance(capacity, dict) and shortfall and stop_reason == "budget_exhausted":
         available = sorted(
             provider
             for provider in PAID_PROVIDERS
@@ -1258,7 +1424,7 @@ def validate_run(document: Any) -> list[str]:
                 + ", ".join(unknown)
             )
 
-    if shortfall and stop_reason == "provider_stop":
+    if stop_check is None and shortfall and stop_reason == "provider_stop":
         blocked_routes = [
             item for item in frontier_by_id.values() if item.get("state") == "blocked"
         ]
@@ -1290,6 +1456,10 @@ def main() -> int:
         description="Validate TYCHE run-completion and route-exhaustion invariants."
     )
     parser.add_argument("results", type=pathlib.Path)
+    parser.add_argument("--check-stop", action="store_true", help="evaluate continuation before the next action; draft results are allowed")
+    policy = parser.add_mutually_exclusive_group()
+    policy.add_argument("--require-stop-check", action="store_true", help="require the current stopping policy (default)")
+    policy.add_argument("--legacy-stop-policy", action="store_true", help="read-only validation of historical reports without the new stop check; never use for a current run")
     parser.add_argument(
         "--show-cost-summary",
         action="store_true",
@@ -1303,8 +1473,12 @@ def main() -> int:
         print(json.dumps({"valid": False, "errors": [str(exc)]}))
         return 2
 
-    errors = validate_run(document)
-    output: dict[str, Any] = {"valid": not errors, "errors": errors}
+    if args.check_stop:
+        output = evaluate_stop(document)
+        print(json.dumps(output, sort_keys=True))
+        return 2 if output["errors"] else 0
+    errors = validate_run(document, require_stop_check=not args.legacy_stop_policy)
+    output: dict[str, Any] = {"valid": not errors, "errors": errors, "stop_policy": "legacy" if args.legacy_stop_policy else "strict"}
     if args.show_cost_summary and isinstance(document, dict):
         output["calculated_cost_summary"] = calculate_cost_summary(document)
     if args.show_progress and isinstance(document, dict):

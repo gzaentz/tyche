@@ -119,6 +119,39 @@ Command paths below are relative to the skill directory, not this reference.
 
 ## Inputs and workflow
 
+### Default run budget
+
+When the user supplies no spending budget, the total paid-provider allowance
+is USD 0.50 multiplied by `target_count` (10 requested leads means USD 5.00).
+Apply this default without asking for approval of the missing budget. An
+explicit user spending budget overrides the default, including a zero budget;
+preserve separately specified provider and paid-call caps. A strategy-review
+threshold is not a spending budget or permission to increase one.
+
+Before execution, allocate the shared dollar allowance into the existing
+provider credit caps using current, conservative USD conversion rates. The sum
+of the allocations must not exceed the shared allowance; never grant the full
+allowance to each provider. Record the dollar cap, its default/explicit origin,
+rates and allocations in `report.md`, and persist the credit caps in
+`request.budget` and `budget.limits`. Give an unused provider a zero allocation.
+If a provider's dollar cost cannot be bounded, do not spend on that route;
+use a priced alternative or public sources. Do not assume prepaid credits are
+free. Reallocation may use only the unspent balance, including reservations for
+uncertain calls, and must preserve explicit provider caps and prior receipts.
+
+This is one run-wide allowance based on leads requested, not leads delivered.
+Rejected companies, retries, refills, continuations and model resumptions do
+not reset or enlarge it. Before each paid call, include all prior charges or
+conservative reservations plus the next call's bound. Stop that call if it
+would exceed the shared cap or an independent provider/call cap.
+
+This default governs sourcing-provider charges. Report model cost and combined
+full cost separately under the skill's Full cost rules; do not claim that the
+default bounds model charges. If the user explicitly caps model-inclusive cost,
+honor that scope and reserve it before provider spending.
+
+### Request normalization
+
 The normalized request must state the target count, ICP and exclusions,
 geography, buying-signal kinds and freshness window, requested roles, contact
 fields, and per-provider budget caps.
@@ -195,21 +228,12 @@ exact count from external evidence before acceptance.
    a gate. Continue while the accepted count is below the target and the
    frontier contains an `untried` or `continuable` route. Do not infer route
    exhaustion from one failed provider, one empty query, or an unchanged page.
-6. Stop only at the target or at an auditable terminal condition. For a
-   shortfall, first reassess the frontier using gap-specific live tool discovery
-   and alternative public sources. Record newly useful routes and their next
-   bounded tests; a closed initial route list does not prove exhaustion.
-   Continue with promising affordable routes before stopping. Missing fields,
-   inaccessible pages, or absent catalog matches remain evidence gaps, not
-   proof that a company fails the ICP. Every frontier item must then be
-   `exhausted` or `blocked`, and the stop
-   audit must attest that the seeded frontier is complete and state why each
-   blocked item cannot run. `no_productive_route` requires at least one
-   attempted route to be exhausted; use `provider_stop` when all routes are
-   blocked. `budget_exhausted`
-   additionally requires that neither paid provider can make another bounded
-   call. Provider failures do not end public-web research while a public route
-   remains available. Never exceed a hard cap to reach the target.
+6. Apply the [stopping check](output-contract.md#stopping-check) before each next
+   action and before delivery. Reassess discovery and every unresolved company
+   using different useful tools/sources. A completed attempt is not an exhausted
+   search strategy. Missing evidence does not prove failed fit. Preserve
+   unfinished routes when a verified budget/time limit ends the run; never close
+   them merely to pass validation. No implicit timeout or minimum-spend target.
 7. Write version `1.2` `results.json`. Follow the output contract's client-writing
    and taxonomy rules. Every route must include actual,
    estimated, or unknown cost fields. Run

@@ -9,78 +9,67 @@ Find companies first, then their requested buyers. Use the existing direct
 Deepline and ScrapingDog wrappers; tools are optional choices, not a checklist.
 Do not add a server, database, queue, CRM write, or outreach action.
 
+## Continue or stop
+
+Continue while qualified leads are below target, useful work is affordable, and
+the user's time limit (if any) has not expired. A failed call, rejected lead,
+finished batch, or closed route list is not a run-level stopping condition.
+Try a different useful approach; do not repeat uncertain calls or spend just
+to empty the budget.
+
+Before each next action, update `stop_check` and run
+`python3 scripts/validate_run.py <results.json> --check-stop`.
+Choose only an `eligible_actions` entry. Missing discovery/recovery actions or
+unknown prices require more planning, not a shortfall stop. Stop at the target,
+a verified time/budget limit, or concrete blockers covering every remaining
+action. Never exceed a cap first or invent a time limit after starting.
+Read the [stopping contract](references/output-contract.md#stopping-check) at setup.
+
 ## Workflow
 
-1. **Discover relevant tools and check their inputs and prices.** Normalize the
-   ICP, target, signal window, roles, contact fields, and hard budgets. Record
-   the run start before discovery, preserving it across resumptions. Check
-   credentials in the process; an unloaded `.env` is not a missing key. Follow
-   the repository's setup instructions without printing secrets. Search the
-   live Deepline catalog and describe the selected tool before each execution.
-   Use [tools.md](references/tools.md) to choose a route, then load only its
-   required adapter sections before calling it.
-2. **Run a small, budgeted search.** Start each material route with one paid
-   call and at most ten rows, using provider-native limits. Reserve a
-   conservative cost bound before dispatch; keep separate provider/call caps.
-   `budget.max_deepline_credits_per_next_lead` is optional and is a hard cap
-   only when the user explicitly requests it. Otherwise, 5 credits triggers a
-   nonblocking strategy review. Use the adapters' `--output-file` option to
-   save the full redacted response before displaying a compact summary. Never
-   automatically retry an uncertain paid call.
-3. **Verify company fit and intent from evidence.** Resolve and deduplicate
-   canonical domains. Require separate company-fit and current-signal evidence
-   for the same company. Read the actual source: a keyword match, search snippet,
-   ingestion date, or empty provider response does not prove qualification or
-   disqualification. Keep rejected, unresolved, and provider failures separate.
-   Use the output contract's [taxonomy and client-writing rules](references/output-contract.md#client-writing-and-taxonomy-version-12)
-   to classify the company and explain the signal from the same evidence.
-4. **Find the requested buyer and validate their email.** Only after the account
-   passes, verify the person's current role and company before contact-data
-   lookup. Respect primary/secondary role groups. Email is required unless
-   explicitly overridden; validate every stored address with a freshly
-   discovered Deepline ZeroBounce tool. Accept explicit `valid` directly; reject
-   `invalid`, `do_not_mail`, `spamtrap`, and `abuse` without fallback. For
-   `catch-all` or `unknown`, discover and describe BounceBan through Deepline,
-   then check the same address once within budget. Accept only a successful
-   `deliverable` verdict, preserving both receipts. Otherwise retain the
-   candidate as unresolved and continue with another address or requested buyer.
-5. **Save results; continue until the target or an honest stopping condition.**
-   Persist evidence, attempts, costs, decisions, and remaining routes as work
-   proceeds. Change route when a candidate fails. Link each later continuation
-   to its successor route ID and do not claim exhaustion while actionable or
-   promising unresolved paths remain. Require a concrete next action or blocker
-   for every unresolved company. Before a shortfall stop, search the live catalog
-   for unresolved evidence gaps and new discovery routes, not just the initial
-   provider list. Add and test promising affordable routes while below target;
-   unused budget alone does not justify repeating unproductive calls.
-   Write `report.md`, `results.json`, and
-   `leads.xlsx`; validate the full output contract and run
-   `scripts/validate_run.py` with `--show-progress` before delivery. Use its
-   account/contact groups in the report and keep route failures separate.
-   Before sending the final chat response, check all four items in the
+1. **Normalize and discover.** Record the ICP, target, signal window, roles,
+   contact fields, start time and explicit limits. Default paid-provider budget:
+   USD 0.50 per requested lead, shared across providers, unless overridden.
+   Apply [budget normalization](references/workflow-rules.md#default-run-budget).
+   Load credentials using repository setup; an unloaded `.env` is not a missing
+   key. Use [tools.md](references/tools.md), then search and describe the live
+   Deepline tool before every execution. Load only the selected adapter sections.
+2. **Pilot within budget.** Start each material route with one paid call and
+   at most ten rows using native limits. Reserve a conservative cost bound;
+   preserve provider/call caps and explicitly requested per-next-lead caps.
+   Save full redacted responses with `--output-file`. Never automatically retry
+   an uncertain paid call.
+3. **Verify the company.** Deduplicate domains and owner groups. Read actual
+   sources for separate company-fit and current-signal evidence. Snippets,
+   keywords and missing results are not qualification or rejection proof.
+   Keep rejected companies, missing evidence and provider failures separate.
+4. **Verify the buyer, then their email.** Account fit and current role must
+   pass before contact lookup. Respect requested role groups and contact fields.
+   Email defaults to required: Deepline ZeroBounce `valid`, or only for
+   catch-all/unknown one BounceBan `deliverable` fallback. Preserve both receipts;
+   never override invalid/risky outcomes. Otherwise try another address or buyer.
+5. **Persist, reassess and deliver.** Save evidence, receipts, costs and next actions as
+   work proceeds. Keep a new-company discovery action and a recovery action for
+   each unresolved company. Before a shortfall, search the live catalog for
+   different discovery and gap-specific tools, and test useful affordable options.
+   Only after the stop check permits delivery, write `report.md`, `results.json`
+   and `leads.xlsx`. Validate the full output contract and run
+   `python3 scripts/validate_run.py <results.json> --show-progress` (strict by
+   default). Never use legacy validation for a current run. Complete the
    [final-response checklist](references/output-contract.md#final-response-checklist).
 
 ## Full cost
 
-Capture run-scoped harness usage from start through completion, including the
-primary model, subagents, retries and verification. Price each model's input,
-cached-input, cache-write and output tokens using dated, applicable rates and
-tiers; avoid double counting. Report provider spend, LLM cost, combined total
-and cost per accepted lead (unavailable when none). Label API-equivalent model
-cost as an estimate, not billed spend. Missing or incomplete usage means full
-cost is unknown, never zero. Keep existing provider budget caps separate.
+Report provider spend, run-scoped primary/delegated model cost, combined cost
+and cost per accepted lead. Include retries and verification; use applicable
+dated rates without double counting. Label API-equivalent pricing as estimated.
+Incomplete model usage means full cost is unknown, never zero.
 
 ## References
 
-Read [workflow-rules.md](references/workflow-rules.md) when preparing a run for
-the exact evidence gates, role fallbacks, budget accounting, receipt helper,
-and shortfall rules. These safeguards remain mandatory; this shorter entry
-point does not change them.
-
-Load the remaining references by phase, not recursively or all at startup.
-For a long file, locate the linked heading with `rg -n` and read that section;
-reuse previously loaded rules. A link to a section is not a request to read
-the entire file.
+Read [workflow-rules.md](references/workflow-rules.md) at setup for evidence,
+role, budget and persistence rules. Load other references by phase and linked
+section only; reuse already loaded rules.
 
 | Phase | Required reading |
 |---|---|

@@ -62,6 +62,7 @@ class ProgressMatrixTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "results.json"
             document = cost_result([route])
+            document["stop_check"] = {"started_at": "2026-01-01T00:00:00Z", "next_actions": []}
             path.write_text(json.dumps(document))
             original = path.read_bytes()
             result = subprocess.run([sys.executable, str(VALIDATOR_PATH), str(path), "--show-progress", "--show-cost-summary"],
