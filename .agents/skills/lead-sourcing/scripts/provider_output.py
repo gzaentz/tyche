@@ -43,7 +43,7 @@ class ResponseFile:
         try:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent, delete=False) as stream:
                 temporary = stream.name
-                json.dump(self.redact(document), stream, ensure_ascii=False, allow_nan=False)
+                json.dump(self.redact(document), stream, ensure_ascii=True, allow_nan=False)
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())

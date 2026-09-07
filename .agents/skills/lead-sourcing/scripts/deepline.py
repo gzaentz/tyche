@@ -232,6 +232,8 @@ def _json_from_text(text: str) -> Any:
 
     if not isinstance(text, str) or not text.strip():
         raise ValueError("empty provider response")
+    # Preserve undecodable CLI bytes in the receipt, never as a parsed result.
+    text.encode("utf-8")
     try:
         return load_json(text)
     except json.JSONDecodeError:
@@ -1309,6 +1311,8 @@ def _invoke(command: Sequence[str], timeout_seconds: float) -> Tuple[int, str, s
             list(command),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             timeout=timeout_seconds,
             check=False,
         )
@@ -1620,7 +1624,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         code = 2
     # One compact JSON object is the only stdout output.  Operational detail is
     # intentionally omitted to keep credentials from appearing in logs.
-    sys.stdout.write(json.dumps(redact(body), ensure_ascii=False, separators=(",", ":")) + "\n")
+    sys.stdout.write(json.dumps(redact(body), ensure_ascii=True, separators=(",", ":")) + "\n")
     return code
 
 
