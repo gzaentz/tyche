@@ -961,12 +961,25 @@ must be labeled accordingly. Keep failed/unused routes and their costs separate
 from accepted-lead contribution. Counts alone do not establish provider accuracy
 or comparative yield without the corresponding attempted-candidate denominator.
 
-The final response must include total elapsed time, provider cost with its
-actual/estimated/unknown basis, a compact accepted-lead source summary and a
-link to the report for per-company attribution. Keep model cost separate.
-Retain the existing workbook delivery and honest shortfall rules. Do not claim
-the JSON validator enforces these report-only requirements; check timing
-arithmetic, source links and count reconciliation before delivery.
+### Final-response checklist
+
+Before sending the final chat response, verify it contains all four items:
+
+1. **Result and files:** accepted count versus target, workbook delivery and a
+   report link for per-company attribution.
+2. **Sources Used:** name the company-discovery tools, fit/signal and buyer-role
+   evidence sources, email finder and email validator directly in chat. Include
+   accepted-company discovery counts, selected-email source counts and validation
+   counts. Name underlying tools, not just their gateway. Distinguish evidence
+   publishers from discovery tools; mark unknown or not-requested stages explicitly.
+3. **Runtime and cost:** total elapsed time and provider cost labelled actual,
+   estimated or unknown. Keep model cost separate.
+4. **Caveats:** material limitations and any target/contact shortfall; state none
+   when there are none.
+
+A report link alone does not satisfy Sources Used. Check timing arithmetic and
+source-count reconciliation against the saved receipts. This is a final-answer
+self-check, not an additional sourcing step or a JSON-validator guarantee.
 
 ## `leads.xlsx` contract
 

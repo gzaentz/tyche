@@ -47,8 +47,8 @@ Do not add a server, database, queue, CRM write, or outreach action.
    actionable routes remain, exceed a budget, or present a partial run as
    complete. Write `report.md`, `results.json`, and `leads.xlsx`; validate the
    full output contract and run `scripts/validate_run.py` before delivery.
-   Return elapsed time, provider cost and an accepted-lead source breakdown,
-   following the reporting contract below.
+   Before sending the final chat response, check all four items in the
+   [final-response checklist](references/output-contract.md#final-response-checklist).
 
 ## References
 
