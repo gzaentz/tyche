@@ -55,6 +55,16 @@ Do not add a server, database, queue, CRM write, or outreach action.
    Before sending the final chat response, check all four items in the
    [final-response checklist](references/output-contract.md#final-response-checklist).
 
+## Full cost
+
+Capture run-scoped harness usage from start through completion, including the
+primary model, subagents, retries and verification. Price each model's input,
+cached-input, cache-write and output tokens using dated, applicable rates and
+tiers; avoid double counting. Report provider spend, LLM cost, combined total
+and cost per accepted lead (unavailable when none). Label API-equivalent model
+cost as an estimate, not billed spend. Missing or incomplete usage means full
+cost is unknown, never zero. Keep existing provider budget caps separate.
+
 ## References
 
 Read [workflow-rules.md](references/workflow-rules.md) when preparing a run for

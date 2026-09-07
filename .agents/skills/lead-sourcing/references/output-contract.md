@@ -996,8 +996,10 @@ Before sending the final chat response, verify it contains all four items:
    accepted-company discovery counts, selected-email source counts and validation
    counts. Name underlying tools, not just their gateway. Distinguish evidence
    publishers from discovery tools; mark unknown or not-requested stages explicitly.
-3. **Runtime and cost:** total elapsed time and provider cost labelled actual,
-   estimated or unknown. Keep model cost separate.
+3. **Runtime and full cost:** total elapsed time, provider spend, LLM cost,
+   combined total and cost per accepted lead, following the skill's
+   [full-cost rule](../SKILL.md#full-cost). Label actual, estimated and unknown
+   amounts explicitly; provider-only spend is not the full sourcing cost.
 4. **Caveats:** material limitations and any target/contact shortfall; state none
    when there are none.
 
