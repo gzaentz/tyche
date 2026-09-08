@@ -313,9 +313,3 @@ can claim continuation exhaustion. The agent must separately review each
 promising unresolved company and its next action or blocker; the validator
 checks recorded consistency, not real-world search completeness. Provider and
 paid-call caps and client workbook columns remain unchanged.
-
-## Project boundaries
-
-TYCHE has no runtime dependency on `Sourcing_model` or `pp`. It has no server,
-database, queue, browser harness, fixed provider router, CRM write, or outreach
-action. Add those only when a real use case requires them.
