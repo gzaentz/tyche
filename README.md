@@ -1,4 +1,4 @@
-# TYCHE
+# TYCHE - Open Source AI Lead Generation Agent
 
 TYCHE is a company-first lead-sourcing skill for Codex. It finds companies
 that match an ideal customer profile, proves a current buying signal, and then
