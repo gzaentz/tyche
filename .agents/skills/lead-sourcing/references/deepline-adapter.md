@@ -45,11 +45,14 @@ automatic fallback.
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"search","query":"companies with current hiring or job postings"}'
 python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"describe","tool":"<id returned by search>"}'
-python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"execute","tool":"<id returned by search>","payload":{"query":"<bounded query>","limit":10}}'
+python3 .agents/skills/lead-sourcing/scripts/deepline.py --input-file 'reports/<run-id>/requests/<route-id>.json'
 ```
 
-`execute` is paid. One route pilot has one paid call and at most 10 returned
-rows. The wrapper `limit` is 10 or less and truncates normalized output only;
+The execute request file includes `operation`, `tool`, `payload`, and the
+required [spend context](adapter-io.md#paid-call-budget). `execute` is paid.
+A company-discovery pilot has one paid call and at most 10 returned rows;
+contact lookups request 1-3 relevant people per missing company.
+The wrapper `limit` is 10 or less and truncates normalized output only;
 set provider-native result/count and page or cursor fields from the live schema,
 then bound the cost before execution. Inspect the live price first; expand only
 when rows are relevant, diverse, and evidentiary. The wrapper invokes

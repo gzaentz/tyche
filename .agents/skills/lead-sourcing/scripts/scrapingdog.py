@@ -19,6 +19,7 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from provider_output import ResponseFile, load_json, response_body
+from budget_guard import guarded_call
 
 
 STATUSES = {
@@ -1845,6 +1846,10 @@ def _continuation_cursor(payload: Any) -> Optional[str]:
 
 def run(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any], int]:
     request = validate_request(request)
+    return guarded_call(request, "scrapingdog", lambda: _run_validated(request, capture))
+
+
+def _run_validated(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any], int]:
     operation = request["operation"]
     operation_kind = request["operation_kind"]
     path, params = _params(request)

@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 from provider_output import ResponseFile, load_json, response_body
+from budget_guard import guarded_call
 
 
 STATUSES = {
@@ -1456,6 +1457,12 @@ def run(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any], int]:
     """Run one validated request and return (JSON body, process exit code)."""
 
     request = _validate_request(request)
+    if request["operation"] == "execute":
+        return guarded_call(request, "deepline", lambda: _run_validated(request, capture))
+    return _run_validated(request, capture)
+
+
+def _run_validated(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any], int]:
     operation = request["operation"]
     timeout_seconds = request["timeout_seconds"]
     deepline_bin = os.environ.get(_DEEPLINE_BIN, "").strip() or "deepline"

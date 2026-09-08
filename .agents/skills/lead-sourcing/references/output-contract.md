@@ -2,8 +2,9 @@
 
 This is the normative, machine-readable contract for one lead-sourcing run.
 The JSON Schema is draft 2020-12. A run directory is
-`reports/<run-id>/` and contains exactly `report.md`, `results.json`, and
-`leads.xlsx`.
+`reports/<run-id>/` and delivers `report.md`, `results.json`, and `leads.xlsx`.
+Keep provider receipts and the internal `results.json.budget.json` execution
+ledger alongside these deliverables; they do not change the result schema.
 
 ## Read by phase
 
@@ -582,6 +583,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "provider": {"enum": ["deepline", "scrapingdog", "public_web"]},
         "paid_calls": {"type": "integer", "minimum": 0},
         "cost_upper_bound_credits": {"type": ["number", "null"], "minimum": 0},
+        "entity_type": {"type": "string", "minLength": 1},
         "blocker": {
           "type": "object",
           "additionalProperties": false,
@@ -840,6 +842,8 @@ already dispatched provider call can be cancelled; retain its reservation/result
 Maintain `stop_check.next_actions` separately from historical attempt receipts.
 Each entry names a concrete, useful next test, with a unique `id`, `description`,
 `scope`, `provider`, `paid_calls` and conservative `cost_upper_bound_credits`.
+For an email-validation action, also set `entity_type: "email_validation"`,
+matching its adapter request so the protected verification balance is usable.
 Use `scope: "discovery"` for finding additional companies and the canonical
 domain for each unresolved account/contact (or its normalized `name:` key when
 no domain exists). Cover both new discovery and every unresolved company.
@@ -864,7 +868,10 @@ rules; lack of allocation to an otherwise useful provider is not tool exhaustion
 Run `python3 scripts/validate_run.py <results.json> --check-stop` before the next
 action. Draft results are allowed; budget/cost receipts must reconcile. The
 decision uses qualified accepted rows, the actual current UTC time, confirmed
-charges plus uncertain reservations, and each next action's maximum cost/calls:
+charges plus uncertain reservations, and each next action's maximum cost/calls.
+When an execution ledger is present, this uses the same shared-USD and
+verification-allowance calculation as dispatch. Eligibility is a snapshot;
+the adapter must still reserve atomically before sending the call. Decisions:
 
 - `target_met`: requested qualified company-contact count reached.
 - `time_limit_reached`: the user's explicit duration expired. Target takes
@@ -992,8 +999,9 @@ lead advances it. Acceptance uses the requested contact fields and preserves
 explicit email opt-outs; any stored email must pass the email gate. Before a paid
 Deepline execution, the agent must add its conservative cost upper bound to
 the amount already charged to the current count and must not run the call if
-the sum would exceed the allowance. This is an agent pre-call check and a
-post-run validation rule, not a spend cap enforced by the provider wrapper.
+the sum would exceed the allowance. The shared
+[paid-call ledger](adapter-io.md#paid-call-budget) enforces this cap before
+dispatch; post-run validation independently checks the recorded charges.
 Recorded counts must not move
 backward and cannot exceed the final number of accepted leads. The output
 limit, when present, must match the request limit. Artifacts without this

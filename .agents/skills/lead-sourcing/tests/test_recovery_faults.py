@@ -132,12 +132,19 @@ class CliBoundaryTests(unittest.TestCase):
         self.provider.chmod(0o700)
         self.calls = self.directory / "calls.log"
         self.path = self.directory / "response.json"
+        self.run_file = self.directory / "results.json"
+        self.run_file.write_text(json.dumps({"request": {"target_count": 1}, "accepted": [], "routes": [],
+            "budget": {"paid_calls": 0, "limits": {"deepline_credits": 5,
+                "scrapingdog_credits": 0, "max_paid_calls": 5}}}))
+        from budget_guard import initialize
+        initialize(self.run_file, verification_reserve_credits=1)
 
     def run_cli(self, raw, *, sleep=0, exit_code=0, timeout=5):
         env = dict(os.environ, DEEPLINE_BIN=str(self.provider), FIXTURE_CALL_LOG=str(self.calls),
                    FIXTURE_RESPONSE=raw, FIXTURE_SLEEP=str(sleep), FIXTURE_EXIT=str(exit_code))
         request = {"operation": "execute", "tool": "fixture", "entity_type": "email_validation",
-                   "payload": {"email": "owner@example.test"}, "timeout_seconds": timeout}
+                   "payload": {"email": "owner@example.test"}, "timeout_seconds": timeout,
+                   "spend": {"run_file": str(self.run_file), "route_id": "fixture", "max_cost_credits": 1}}
         return subprocess.run([sys.executable, str(ROOT / "scripts" / "deepline.py"),
                                "--input", json.dumps(request), "--output-file", str(self.path)],
                               env=env, text=True, capture_output=True, timeout=10)

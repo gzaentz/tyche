@@ -34,9 +34,13 @@ Read the [stopping contract](references/output-contract.md#stopping-check) at se
    Load credentials using repository setup; an unloaded `.env` is not a missing
    key. Use [tools.md](references/tools.md), then search and describe the live
    Deepline tool before every execution. Load only the selected adapter sections.
-2. **Pilot within budget.** Start each material route with one paid call and
-   at most ten rows using native limits. Reserve a conservative cost bound;
-   preserve provider/call caps and explicitly requested per-next-lead caps.
+2. **Pilot within budget.** Use available no-cost company sources first.
+   Initialize the [paid-call ledger](references/adapter-io.md#paid-call-budget)
+   before spending; protect the email-verification allowance. Start each
+   company-discovery route with one paid call and at most ten rows, using
+   provider-native limits. Retrieve only 1-3 relevant contacts for each company
+   still missing a buyer. Every paid adapter call needs a conservative maximum
+   cost and a unique route ID. Never bypass the guard with the raw CLI or HTTP.
    Save full redacted responses with `--output-file`. Never automatically retry
    an uncertain paid call.
 3. **Verify the company.** Deduplicate domains and owner groups. Read actual
@@ -55,7 +59,8 @@ Read the [stopping contract](references/output-contract.md#stopping-check) at se
    Only after the stop check permits delivery, write `report.md`, `results.json`
    and `leads.xlsx`. Validate the full output contract and run
    `python3 scripts/validate_run.py <results.json> --show-progress` (strict by
-   default). Never use legacy validation for a current run. Complete the
+   default). A successful `--check-stop` is not full validation. Never use
+   legacy validation for a current run. Complete the
    [final-response checklist](references/output-contract.md#final-response-checklist).
 
 ## Full cost
