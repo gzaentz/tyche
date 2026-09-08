@@ -142,6 +142,59 @@ primary-role contact passes. A selected contact can still be the output
 that distinction when it is known. Requests without role groups keep the
 legacy `requested_roles` behavior.
 
+## Run in your platform (planned)
+
+Use the server-side [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)
+to run TYCHE for requests submitted through your application. Start with one
+background worker and a protected provider endpoint in your existing backend.
+This is the integration design; the worker and gateway are not included yet.
+
+```text
+User request + budget
+  -> Backend creates a job
+  -> Isolated worker runs Codex SDK + TYCHE
+       -> Paid calls go through the backend's protected provider endpoint
+  -> Backend validates and stores results
+  -> User sees progress and downloads leads
+```
+
+Codex owns sourcing decisions. Your backend owns customer authentication,
+approved limits, job state, cancellation, recovery, and access to artifacts.
+Keep company qualification, contact validation, and output formats unchanged.
+
+Three integration changes are needed:
+
+1. **Add the worker in your platform.** Create an isolated workspace per job,
+   load the TYCHE skill, and persist progress and the Codex session needed for
+   recovery. Resume the same job and accounting state after interruption;
+   never blindly repeat a possibly billed provider call.
+2. **Put paid calls behind your backend.** Add a gateway transport to the
+   adapters while retaining direct calls for local use. Only the gateway holds
+   provider credentials and authoritative budget state, outside the agent's
+   access. Bind each request to its customer and job, verify permissions and
+   conservative whole-call costs from current pricing and enforced input
+   limits, and reserve funds atomically before dispatch. Preserve the existing
+   caps, verification allowance, unique call IDs, and receipt reconciliation.
+   Do not trust agent-supplied costs or an agent-writable budget ledger. Reuse the
+   [budget rules](.agents/skills/lead-sourcing/references/adapter-io.md#paid-call-budget)
+   in the protected backend; no separate gateway service is required.
+3. **Make delivery independent of the desktop app.** Run the existing full
+   validator in the backend before delivery. Supply a supported server-side
+   workbook runtime or replace the export dependency, preserving the
+   [workbook contract](.agents/skills/lead-sourcing/references/output-contract.md#leadsxlsx-contract).
+   The current exporter depends on a Codex-bundled library; installing the SDK
+   alone does not establish that dependency. Store results and receipts under
+   the job with customer-scoped access.
+
+Deployment must supply SDK authentication, Python/Node and provider runtimes,
+durable job storage, and restricted network access. Keep provider secrets out
+of the worker. Account for model usage separately: a provider cap is not a
+total-cost cap.
+
+Before launch, verify that a job produces validated downloads, customers
+cannot access each other's jobs, cancellation prevents new paid calls, and
+concurrent calls or crash recovery cannot reuse a reservation or bypass a cap.
+
 ## Budget behavior
 
 - Every provider has its own hard credit cap.
