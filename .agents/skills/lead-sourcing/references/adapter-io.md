@@ -22,9 +22,13 @@ The shared cap defaults to USD 0.50 per requested lead. Supply `--max-usd` for
 an explicit user cap, including zero. Deepline uses the configured USD 0.10 per
 credit. An enabled ScrapingDog allocation also requires
 `--scrapingdog-usd-per-credit` from the current plan; zero allocation disables
-that provider. Existing provider, paid-call and optional per-next-lead caps
+that provider. Existing provider and optional per-next-lead spending caps
 remain independent. Email-required runs need an explicit verification reserve,
 priced for the remaining leads and any planned fallback. Email opt-outs do not.
+
+Paid-call counts are audit data, not limits. New runs omit `max_paid_calls`.
+Legacy request, result, and ledger fields are ignored without rewriting the
+ledger or resetting charges, pending reservations, or monetary limits.
 
 Every Deepline `execute` and every ScrapingDog request now requires this
 wrapper-only object alongside `operation`/`payload` or the other native inputs:

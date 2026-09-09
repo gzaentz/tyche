@@ -59,8 +59,8 @@ Command paths below are relative to the skill directory, not this reference.
   receipts using `email_validation.fallback`. Never override a hard rejection
   or chain fallbacks. A missing status, missing receipt,
   `no_results`, or failed or uncertain provider call cannot pass by itself.
-  Count each validation execution against both the Deepline credit cap and the
-  paid-call cap.
+  Charge each validation execution against the Deepline credit and shared dollar
+  caps; retain the execution count for audit only.
 - Keep accepted, rejected, and unresolved output states separate from provider
   statuses. Reuse the existing `stage`, `reason_code`, and
   `qualification_checks` fields. Every unresolved company must state a
@@ -116,7 +116,7 @@ Command paths below are relative to the skill directory, not this reference.
   paid Deepline execution, add the route's conservative cost upper bound to
   the amount already charged to the current group. Do not run the call if that
   sum would exceed the requested allowance, or when the requested-cap route
-  has no conservative cost bound. Keep the overall provider and paid-call caps
+  has no conservative cost bound. Keep the overall provider and dollar caps
   as independent hard backstops. Actual cost that is unavailable remains
   bounded or `unknown`, never zero or free. The shared
   [paid-call ledger](adapter-io.md#paid-call-budget) enforces these reservations
@@ -131,7 +131,8 @@ When the user supplies no spending budget, the total paid-provider allowance
 is USD 0.50 multiplied by `target_count` (10 requested leads means USD 5.00).
 Apply this default without asking for approval of the missing budget. An
 explicit user spending budget overrides the default, including a zero budget;
-preserve separately specified provider and paid-call caps. A strategy-review
+preserve separately specified provider spending caps. Do not impose a paid-call
+limit; call counts are audit data only. A strategy-review
 threshold is not a spending budget or permission to increase one.
 
 Before execution, allocate the shared dollar allowance into the existing
@@ -146,7 +147,7 @@ free. Reallocation may use only the unspent balance, including reservations for
 uncertain calls, and must preserve explicit provider caps and prior receipts.
 
 Initialize the [paid-call ledger](adapter-io.md#paid-call-budget) once before
-the first paid call. It persists the shared USD cap, provider/call limits and
+the first paid call. It persists the shared USD cap, provider credit limits and
 verification reserve independently of editable report totals. Missing prices,
 missing ledger state, and repeated route IDs block dispatch. Resume the same
 ledger after interruptions; do not reset it or execute the raw CLI/HTTP to
@@ -157,7 +158,7 @@ This is one run-wide allowance based on leads requested, not leads delivered.
 Rejected companies, retries, refills, continuations and model resumptions do
 not reset or enlarge it. Before each paid call, include all prior charges or
 conservative reservations plus the next call's bound. Stop that call if it
-would exceed the shared cap or an independent provider/call cap.
+would exceed the shared cap or an independent provider spending cap.
 
 This default governs sourcing-provider charges. Report model cost and combined
 full cost separately under the skill's Full cost rules; do not claim that the

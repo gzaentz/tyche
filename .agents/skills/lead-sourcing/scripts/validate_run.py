@@ -581,16 +581,6 @@ def _validate_budget_accounting(document: dict[str, Any], errors: list[str]) -> 
             errors.append(
                 f"budget.spent.{provider}_credits exceeds limit {limit}"
             )
-    call_limit = limits.get("max_paid_calls")
-    if (
-        isinstance(call_limit, int)
-        and not isinstance(call_limit, bool)
-        and call_limit >= 0
-        and isinstance(paid_calls, int)
-        and not isinstance(paid_calls, bool)
-        and paid_calls > call_limit
-    ):
-        errors.append(f"budget.paid_calls exceeds limit {call_limit}")
 
 
 def _validate_next_lead_budget(document: dict[str, Any], errors: list[str]) -> None:
@@ -910,11 +900,6 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
         return result
     costs = calculate_cost_summary(document)
     receipts = document.get("routes", [])
-    paid_calls = sum(r.get("paid_calls", 0) for r in receipts if isinstance(r, dict) and type(r.get("paid_calls", 0)) is int)
-    call_limit = limits.get("max_paid_calls")
-    if call_limit is not None and (type(call_limit) is not int or call_limit < 0):
-        errors.append("max_paid_calls must be a nonnegative integer")
-        return result
     next_lead_limit = limits.get("max_deepline_credits_per_next_lead", request_budget.get("max_deepline_credits_per_next_lead"))
     blocked_kinds: list[str] = []
     needs_pricing = False
@@ -974,8 +959,6 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
             continue
         if cap is not None and Decimal(str(maximum)) + Decimal(str(bound)) > Decimal(str(cap)):
             continue
-        if call_limit is not None and paid_calls + calls > call_limit:
-            continue
         if provider == "deepline" and next_lead_limit is not None:
             since_last = calculate_progress(document)["deepline_since_last_lead"]["maximum_credits"]
             if since_last is None:
@@ -986,7 +969,7 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
         if execution_budget is not None:
             from budget_guard import BudgetError, check_allowance
             try:
-                check_allowance(execution_budget, provider, bound, len(accepted), paid_calls=max(1, calls),
+                check_allowance(execution_budget, provider, bound, len(accepted),
                                 verification=provider == "deepline" and action.get("entity_type") == "email_validation")
             except BudgetError:
                 continue
@@ -1507,14 +1490,14 @@ def main() -> int:
     try:
         document = json.loads(args.results.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        print(json.dumps({"valid": False, "errors": [str(exc)]}))
+        print(json.dumps({"valid": False, "delivery_allowed": False, "errors": [str(exc)]}))
         return 2
 
     from budget_guard import audit_ledger, load_ledger
     try:
         execution_budget = load_ledger(args.results)
     except (ValueError, OSError) as exc:
-        output = {"errors": [f"budget ledger: {exc}"], "valid": False}
+        output = {"errors": [f"budget ledger: {exc}"], "valid": False, "delivery_allowed": False}
         if args.check_stop:
             output.update(decision="repair_state", eligible_actions=[])
         print(json.dumps(output, sort_keys=True))
@@ -1524,14 +1507,25 @@ def main() -> int:
         execution_budget = None
     if args.check_stop:
         output = evaluate_stop(document, execution_budget=execution_budget)
+        output["delivery_allowed"] = False
         output["errors"].extend(ledger_errors)
         if output["errors"]:
             output.update(decision="repair_state", eligible_actions=[])
         print(json.dumps(output, sort_keys=True))
         return 2 if output["errors"] else 0
-    errors = validate_run(document, require_stop_check=not args.legacy_stop_policy, execution_budget=execution_budget)
+    checked_at = datetime.now(timezone.utc)
+    errors = validate_run(document, require_stop_check=not args.legacy_stop_policy, now=checked_at, execution_budget=execution_budget)
     errors.extend(ledger_errors)
     output: dict[str, Any] = {"valid": not errors, "errors": errors, "stop_policy": "legacy" if args.legacy_stop_policy else "strict"}
+    stop_check = evaluate_stop(document, now=checked_at, execution_budget=execution_budget)
+    stop_check["errors"].extend(ledger_errors)
+    if stop_check["errors"]:
+        stop_check.update(decision="repair_state", eligible_actions=[])
+    output["stop_decision"] = stop_check
+    # A successful planning or legacy check cannot authorize client delivery.
+    output["delivery_allowed"] = not errors and not args.legacy_stop_policy and stop_check["decision"] in {
+        "target_met", "budget_exhausted", "time_limit_reached", "provider_stop", "input_or_configuration_stop",
+    }
     if args.show_cost_summary and isinstance(document, dict):
         output["calculated_cost_summary"] = calculate_cost_summary(document)
     if args.show_progress and isinstance(document, dict):

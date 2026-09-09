@@ -56,7 +56,6 @@ def stop_document(
     limits = {
         "deepline_credits": 10,
         "scrapingdog_credits": 10,
-        "max_paid_calls": 5,
         **(limits or {}),
     }
     spent = {}
@@ -234,7 +233,7 @@ class StopPolicyTests(unittest.TestCase):
         self.assertEqual(result["decision"], "continue")
         self.assertEqual(result["eligible_actions"], ["old-but-useful"])
 
-    def test_budget_uses_confirmed_and_estimated_costs_and_call_cap(self):
+    def test_budget_uses_confirmed_and_estimated_costs_not_legacy_call_cap(self):
         routes = [
             {
                 "route_id": "confirmed-deepline",
@@ -265,7 +264,7 @@ class StopPolicyTests(unittest.TestCase):
             [
                 action("deepline-at-cap", provider="deepline", paid_calls=1, cost_upper_bound_credits=5),
                 action("deepline-over-cap", provider="deepline", paid_calls=1, cost_upper_bound_credits=5.01),
-                action("scrapingdog-over-call-cap", provider="scrapingdog", paid_calls=2, cost_upper_bound_credits=0.1),
+                action("scrapingdog-past-legacy-call-cap", provider="scrapingdog", paid_calls=2, cost_upper_bound_credits=0.1),
             ],
             routes=routes,
             limits={"deepline_credits": 10, "scrapingdog_credits": 10, "max_paid_calls": 4},
@@ -274,7 +273,7 @@ class StopPolicyTests(unittest.TestCase):
         result = VALIDATOR.evaluate_stop(document, now=NOW)
 
         self.assertEqual(result["decision"], "continue")
-        self.assertEqual(result["eligible_actions"], ["deepline-at-cap"])
+        self.assertEqual(result["eligible_actions"], ["deepline-at-cap", "scrapingdog-past-legacy-call-cap"])
 
     def test_action_over_credit_cap_is_not_eligible_but_free_action_is(self):
         document = stop_document(

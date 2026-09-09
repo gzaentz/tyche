@@ -56,7 +56,6 @@ def shortfall_result(frontier_state="exhausted", stop_reason="no_productive_rout
             "provider_call_capacity": {
                 "deepline": "available",
                 "scrapingdog": "available",
-                "paid_calls_remaining": 2,
             },
             "route_frontier": [
                 {
@@ -154,7 +153,6 @@ def cost_result(routes, accepted_contacts=1):
             "limits": {
                 "deepline_credits": 100,
                 "scrapingdog_credits": 100,
-                "max_paid_calls": 100,
             },
             "spent": spent,
             "paid_calls": sum(route.get("paid_calls", 0) for route in routes),
@@ -167,6 +165,16 @@ def cost_result(routes, accepted_contacts=1):
 
 
 class OutputContractExtensionTests(unittest.TestCase):
+    def test_schemas_do_not_require_legacy_call_limits(self):
+        request_schema, result_schema = load_schemas()
+        budgets = [schema["$defs"]["input_budget"] for schema in (request_schema, result_schema)]
+        budgets.append(result_schema["$defs"]["output_budget"]["properties"]["limits"])
+        for budget in budgets:
+            self.assertNotIn("max_paid_calls", budget["required"])
+            self.assertTrue(budget["properties"]["max_paid_calls"]["deprecated"])
+        capacity = result_schema["$defs"]["provider_call_capacity"]
+        self.assertNotIn("paid_calls_remaining", capacity["required"])
+
     def test_cost_schema_adds_backward_compatible_version_1_1_fields(self):
         _, result_schema = load_schemas()
         self.assertEqual(
@@ -784,7 +792,7 @@ class OutputContractExtensionTests(unittest.TestCase):
         self.assertTrue(any("must be null" in error for error in errors))
         self.assertTrue(any("budget.status must be unknown" in error for error in errors))
 
-    def test_known_spend_and_paid_calls_cannot_exceed_caps(self):
+    def test_known_spend_cannot_exceed_cap_but_legacy_call_limit_is_ignored(self):
         result = shortfall_result()
         result["routes"][0].update(
             {"provider": "deepline", "paid_calls": 2, "cost_credits": 6}
@@ -801,7 +809,10 @@ class OutputContractExtensionTests(unittest.TestCase):
         }
         errors = VALIDATOR.validate_run(result)
         self.assertTrue(any("deepline_credits exceeds limit" in error for error in errors))
-        self.assertTrue(any("paid_calls exceeds limit" in error for error in errors))
+        self.assertFalse(any("paid_calls exceeds limit" in error for error in errors))
+        result["routes"][0]["cost_credits"] = 5
+        result["budget"]["spent"]["deepline_credits"] = 5
+        self.assertEqual(VALIDATOR.validate_run(result), [])
 
     def test_exact_deepline_cost_and_cost_per_lead(self):
         result = cost_result(

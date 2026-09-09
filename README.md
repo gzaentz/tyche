@@ -167,7 +167,15 @@ Three integration changes are needed:
 1. **Add the worker in your platform.** Create an isolated workspace per job,
    load the TYCHE skill, and persist progress and the Codex session needed for
    recovery. Resume the same job and accounting state after interruption;
-   never blindly repeat a possibly billed provider call.
+   never blindly repeat a possibly billed provider call. After every agent turn,
+   run the full strict validator on the saved results. Publish only when it
+   returns `delivery_allowed: true`; otherwise resume that session with its
+   computed `stop_decision`, errors, and next actions. A model final message or
+   successful process exit must not mark the job complete. Reconcile invalid
+   state before more spending; record crashes, usage limits, and inability to
+   resume as host interruptions/errors, not successful sourcing completion.
+   Honor user cancellation and platform limits. The skill's instructions cannot
+   restart a terminated worker; this continuation loop belongs in the host.
 2. **Put paid calls behind your backend.** Add a gateway transport to the
    adapters while retaining direct calls for local use. Only the gateway holds
    provider credentials and authoritative budget state, outside the agent's
@@ -179,7 +187,10 @@ Three integration changes are needed:
    [budget rules](.agents/skills/lead-sourcing/references/adapter-io.md#paid-call-budget)
    in the protected backend; no separate gateway service is required.
 3. **Make delivery independent of the desktop app.** Run the existing full
-   validator in the backend before delivery. Supply a supported server-side
+   validator in the backend before delivery and require `delivery_allowed: true`.
+   `--check-stop` can exit successfully with `decision: continue`; its exit code
+   alone is not a delivery gate. Partial exports remain progress artifacts.
+   Supply a supported server-side
    workbook runtime or replace the export dependency, preserving the
    [workbook contract](.agents/skills/lead-sourcing/references/output-contract.md#leadsxlsx-contract).
    The current exporter depends on a Codex-bundled library; installing the SDK
@@ -266,8 +277,8 @@ route finishes with a concrete saved reason while unaffected work continues.
   See [paid-call setup](.agents/skills/lead-sourcing/references/adapter-io.md#paid-call-budget).
 - Deepline catalog `search` and `describe` calls are read-only.
 - The agent checks the live Deepline schema and price before `execute`.
-- Each ZeroBounce or BounceBan validation is a Deepline execution and counts against both
-  the Deepline credit cap and the total paid-call cap.
+- Each ZeroBounce or BounceBan validation charges the Deepline credit and shared
+  dollar caps. Paid-call counts are audit data, never stopping limits.
 - An uncertain paid result is not retried automatically.
 - An uncertain or failed call does not end the run when another route, query,
   page, tool, or provider remains available.
@@ -287,8 +298,9 @@ Record the count even without a per-lead cap so strategy warnings can be
 calculated. The agent must not execute a route without a conservative cost
 bound or when it would exceed a requested cap. The result validator checks
 recorded costs after the run; the shared adapter ledger enforces it before dispatch.
-Historic budgets are not reinterpreted. The overall provider
-credit and paid-call caps remain independent hard backstops.
+Historic monetary budgets and receipts are preserved. The overall provider
+credit and shared dollar caps remain hard backstops. Legacy `max_paid_calls`
+fields are ignored; new runs omit them. Explicit time limits still apply.
 
 Prices in the provider catalog are planning estimates. Check the current
 provider plan before a live run. New `results.json` files use schema version
@@ -433,5 +445,5 @@ A short run fails validation while any recorded route is untried or
 continuable. Referenced follow-ups must exist and be terminal before an attempt
 can claim continuation exhaustion. The agent must separately review each
 promising unresolved company and its next action or blocker; the validator
-checks recorded consistency, not real-world search completeness. Provider and
-paid-call caps and client workbook columns remain unchanged.
+checks recorded consistency, not real-world search completeness. Provider
+spending caps and client workbook columns remain unchanged.

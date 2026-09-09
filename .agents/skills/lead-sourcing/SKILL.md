@@ -26,24 +26,27 @@ authorization does not override runtime restrictions, budget caps, or evidence.
 
 ## Continue or stop
 
-Continue while qualified leads are below target, useful work is affordable, and
-the user's time limit (if any) has not expired. A failed call, rejected lead,
-finished batch, or closed route list is not a run-level stop. Try a different
-useful approach; never repeat an uncertain call or spend just to empty budget.
+Before each action, update `stop_check` and run
+`python3 scripts/validate_run.py <results.json> --check-stop`.
+`continue` requires an `eligible_actions` execution in this turn; resolve missing
+coverage or prices first. `repair_state` requires repair and recheck. Neither
+permits a final response, even an honest partial delivery.
 
-Before each next action, update `stop_check` and run
-`python3 scripts/validate_run.py <results.json> --check-stop`. Choose only an
-`eligible_actions` entry. Missing discovery/recovery actions or unknown prices
-require planning, not a shortfall stop. Stop at the target, a verified limit,
-or blockers covering every remaining action. Never exceed a cap first or
-invent a time limit after starting.
-Read the [stopping contract](references/output-contract.md#stopping-check) at setup.
+Keep checkpoints and status answers in commentary, then resume without asking
+for "continue". Preserve the run, budget, authorization and receipts across
+interruptions; honor explicit user pauses, cancellation or redirection.
+
+Final delivery requires full strict `delivery_allowed: true`: target met, a
+verified limit, or evidenced blockers covering every remaining action. Never
+invent limits or stop because a batch finished. Read the
+[stopping contract](references/output-contract.md#stopping-check) at setup.
 
 ## Workflow
 
 1. **Normalize and discover.** Record ICP, target, signal window, roles, fields,
    start time, and limits. Default paid-provider budget is USD 0.50 per
    requested lead, shared across providers. Apply [budget normalization](references/workflow-rules.md#default-run-budget).
+   Use spending and explicit time limits, never paid-call counts.
    Load credentials through repository setup; an unloaded `.env` is not a
    missing key. Use [tools.md](references/tools.md), then search and describe
    the Deepline tool before every execution.

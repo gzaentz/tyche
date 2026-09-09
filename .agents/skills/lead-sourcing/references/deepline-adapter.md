@@ -121,7 +121,7 @@ After ZeroBounce returns `catch-all`/`unknown`, or its execution returns
 `auth_failed`, or `quota_exceeded` without a usable verdict, search the live
 catalog for `BounceBan verify single email` and describe the returned tool. Execute once
 with the exact email and `entity_type: email_validation`, reserving the current
-price against the existing provider and paid-call caps, plus any explicitly
+price against the existing dollar and provider credit caps, plus any explicitly
 requested per-next-lead cap. Do not
 pin the tool ID or price. Keep catch-all verification enabled. Default to
 regular mode: deepverify assumes the email domain matches the current company

@@ -222,7 +222,7 @@ this default. No new JSON fields are required.
       "properties": {
         "deepline_credits": {"type": "number", "minimum": 0},
         "scrapingdog_credits": {"type": "number", "minimum": 0},
-        "max_paid_calls": {"type": "integer", "minimum": 0},
+        "max_paid_calls": {"type": "integer", "minimum": 0, "deprecated": true, "description": "Legacy metadata only; ignored. Omit in new runs."},
         "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0},
         "hard_stop": {"const": true}
       },
@@ -240,9 +240,12 @@ has passed the account evidence gate. `contacts_per_company` defaults to 3 and
 may be set from 1 to 3. Provider credit caps are separate because Deepline and
 ScrapingDog units are not interchangeable; a cap of 0 disables that provider.
 At least one provider credit cap is required. `hard_stop` is mandatory and
-true. `max_paid_calls` is an optional additional guard and may be 0, but it is
-not a substitute for a provider credit cap. Catalog search/describe calls are
-read-only, but every paid call counts against its provider cap and call guard.
+true. Stop limits are monetary budgets and explicit time limits, never call
+counts. New runs omit `max_paid_calls` and `paid_calls_remaining`; these legacy
+fields remain accepted but are ignored. Catalog search/describe calls are
+read-only. Charge each paid call against its spending caps and record the count
+in `paid_calls` for audit. Resuming an old ledger preserves every call, charge,
+reservation, and monetary limit; its old `max_paid_calls` value has no effect.
 If a provider does not expose usage, set its output `spent` and route
 `cost_credits` to `null`; never use `0` to mean unknown. New runs use result
 schema version `1.2`. Versions `1.0` and `1.1` remain valid for existing artifacts.
@@ -626,11 +629,11 @@ top-level result list or hide rejected/unresolved rows in a count.
     "provider_call_capacity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["deepline", "scrapingdog", "paid_calls_remaining"],
+      "required": ["deepline", "scrapingdog"],
       "properties": {
         "deepline": {"enum": ["available", "unavailable", "unknown"]},
         "scrapingdog": {"enum": ["available", "unavailable", "unknown"]},
-        "paid_calls_remaining": {"type": ["integer", "null"], "minimum": 0}
+        "paid_calls_remaining": {"type": ["integer", "null"], "minimum": 0, "deprecated": true, "description": "Legacy metadata only; ignored. Omit in new runs."}
       }
     },
     "stop_audit": {
@@ -716,7 +719,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "properties": {
         "deepline_credits": {"type": "number", "minimum": 0},
         "scrapingdog_credits": {"type": "number", "minimum": 0},
-        "max_paid_calls": {"type": "integer", "minimum": 0},
+        "max_paid_calls": {"type": "integer", "minimum": 0, "deprecated": true, "description": "Legacy metadata only; ignored. Omit in new runs."},
         "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0},
         "hard_stop": {"const": true}
       },
@@ -753,11 +756,11 @@ top-level result list or hide rejected/unresolved rows in a count.
         "limits": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["deepline_credits", "scrapingdog_credits", "max_paid_calls"],
+          "required": ["deepline_credits", "scrapingdog_credits"],
           "properties": {
             "deepline_credits": {"type": ["number", "null"], "minimum": 0},
             "scrapingdog_credits": {"type": ["number", "null"], "minimum": 0},
-            "max_paid_calls": {"type": ["integer", "null"], "minimum": 0},
+            "max_paid_calls": {"type": ["integer", "null"], "minimum": 0, "deprecated": true, "description": "Legacy metadata only; ignored. Omit in new runs."},
             "max_deepline_credits_per_next_lead": {"type": "number", "minimum": 0}
           }
         },
@@ -912,6 +915,33 @@ Checks validate recorded actions and receipts; they cannot prove completeness of
 an open-ended market search. The agent must still honestly discover alternatives
 and substantiate blockers, rather than manipulate labels to obtain a passing result.
 
+#### Turn completion and recovery
+
+Treat `continue` as an instruction to execute the next eligible action within
+the current turn. Use commentary for intermediate results, including a saved
+partial workbook; do not end the turn with a partial delivery or an offer to
+continue. When the decision is `repair_state`, reconcile the reported errors
+and run the check again. A correct explanation of a failed stopping check does
+not satisfy it. Context checkpoints preserve work so execution can resume;
+they do not create a new start time, budget, or stop reason.
+
+Full validator output includes `stop_decision` (the computed decision and eligible
+actions) and `delivery_allowed`. These are read-only CLI outputs, not new fields
+to copy over the saved `stop_check`. Only a passing strict validation may set
+`delivery_allowed: true`. `--check-stop` alone does not authorize final delivery;
+its zero exit code means the decision was computed successfully, including
+when that decision is `continue`. Legacy validation never authorizes delivery.
+
+For client jobs, the host must run the full strict validator after every agent
+turn and before publishing artifacts. If `delivery_allowed` is false, retain
+the job and resume the same session with the validator decision, errors, and
+saved next actions. Reconcile missing or invalid state before further spending.
+Do not interpret the model's final message, an exported workbook, or a successful
+process exit as job completion. Preserve the ledger and uncertain calls when
+recovering a process crash or usage limit; use the host's interruption or error
+state when it cannot resume. The skill cannot itself restart a terminated host.
+Honor explicit user cancellation and platform limits independently of sourcing.
+
 ### Result semantics
 
 The following semantic checks supplement JSON Schema: every signal's
@@ -1031,7 +1061,7 @@ optional field remain valid for backward compatibility.
 For new runs, record `accepted_leads_before_call` on every paid Deepline route
 even without that cap. At 5 credits spent or conservatively reserved since the
 last complete lead, review the strategy; this is a nonblocking warning. Total
-provider budgets and the paid-call limit remain hard. `--show-progress` on
+provider and shared dollar budgets remain hard. `--show-progress` on
 `validate_run.py` derives this warning without modifying the run or its verdict.
 Unmarked or unbounded costs are reported as incomplete, never zero.
 
@@ -1134,6 +1164,11 @@ from accepted-lead contribution. Counts alone do not establish provider accuracy
 or comparative yield without the corresponding attempted-candidate denominator.
 
 ### Final-response checklist
+
+Enter this checklist only after the latest full strict validation returns
+`delivery_allowed: true`. If it returns false, act on the computed decision and
+keep intermediate updates in commentary. Do not turn validation failure into
+a final-answer caveat.
 
 Before sending the final chat response, verify it contains all four items:
 

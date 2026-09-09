@@ -97,7 +97,8 @@ def initialize(run_file, *, max_usd=None, scrapingdog_usd_per_credit=None, verif
         raise BudgetError("initialize before the first paid call; existing paid runs need billing reconciliation")
     limits = document["budget"]["limits"]
     request_limits = request.get("budget", {})
-    if any(key in request_limits and request_limits[key] != value for key, value in limits.items()):
+    if any(key != "max_paid_calls" and key in request_limits and request_limits[key] != value
+           for key, value in limits.items()):
         raise BudgetError("request.budget and budget.limits must agree")
     credits = {provider: str(amount(limits[f"{provider}_credits"], provider)) for provider in PROVIDERS}
     rates = {"deepline": "0.10", "scrapingdog": None}
@@ -119,7 +120,6 @@ def initialize(run_file, *, max_usd=None, scrapingdog_usd_per_credit=None, verif
             raise BudgetError("budget ledger already exists; resume it instead of resetting spend")
         state.update(version=1, run_file=str(Path(run_file).resolve()), credit_limits=credits,
                      usd_limit=str(cap), usd_per_credit=rates,
-                     max_paid_calls=count(limits["max_paid_calls"], "max_paid_calls"),
                      next_lead_limit=None if next_lead is None else str(amount(next_lead, "next-lead cap")),
                      verification_reserve_credits=str(reserve), calls={}, blocked=None)
         check_limits(document, state)
@@ -128,7 +128,6 @@ def initialize(run_file, *, max_usd=None, scrapingdog_usd_per_credit=None, verif
 
 def check_limits(document, state):
     expected = {f"{provider}_credits": Decimal(state["credit_limits"][provider]) for provider in PROVIDERS}
-    expected["max_paid_calls"] = Decimal(state["max_paid_calls"])
     if state["next_lead_limit"] is not None:
         expected["max_deepline_credits_per_next_lead"] = Decimal(state["next_lead_limit"])
     limits = document["budget"]["limits"]
@@ -142,7 +141,7 @@ def check_limits(document, state):
         raise BudgetError("next-lead limit changed after ledger initialization")
 
 
-def check_allowance(state, provider, bound, accepted_count, *, verification=False, paid_calls=1):
+def check_allowance(state, provider, bound, accepted_count, *, verification=False):
     """Use the same affordability calculation for planning and locked dispatch."""
     if state.get("blocked"):
         raise BudgetError(state["blocked"])
@@ -151,8 +150,6 @@ def check_allowance(state, provider, bound, accepted_count, *, verification=Fals
     entry = dict(provider=provider, maximum_credits=str(amount(bound, "maximum call cost")),
                  actual_credits=None, actual_usd=None, verification=verification,
                  accepted_leads_before_call=accepted_count)
-    if len(state["calls"]) + paid_calls > state["max_paid_calls"]:
-        raise BudgetError("paid-call cap would be exceeded")
     credits = {name: Decimal(0) for name in PROVIDERS}
     usd = verified = since_last_lead = Decimal(0)
     for call in [*state["calls"].values(), entry]:

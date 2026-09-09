@@ -24,7 +24,7 @@ class BudgetGuardTests(unittest.TestCase):
         self.path = Path(self.directory.name) / "results.json"
         self.document = {"request": {"target_count": 10, "contact_fields": []},
                          "accepted": [], "routes": [], "budget": {"paid_calls": 0, "limits": {
-                             "deepline_credits": 50, "scrapingdog_credits": 50, "max_paid_calls": 100}}}
+                             "deepline_credits": 50, "scrapingdog_credits": 50}}}
         self.write()
 
     def write(self):
@@ -55,15 +55,38 @@ class BudgetGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(BudgetError, "disabled"):
             reserve(self.spend(cost=0), "deepline")
 
-    def test_explicit_dollar_and_paid_call_caps(self):
+    def test_legacy_call_limit_is_ignored_but_dollar_cap_still_applies(self):
         self.document["budget"]["limits"]["max_paid_calls"] = 1
+        self.document["request"]["budget"] = {"max_paid_calls": 0}
         self.write()
         self.init(max_usd=1)
+        self.assertNotIn("max_paid_calls", read_object(ledger_path(self.path)))
         with self.assertRaisesRegex(BudgetError, "shared USD cap"):
             reserve(self.spend(cost=11), "deepline")
         reserve(self.spend(cost=1), "deepline")
-        with self.assertRaisesRegex(BudgetError, "paid-call cap"):
-            reserve(self.spend("two", 1), "deepline")
+        reserve(self.spend("two", 9), "deepline")
+        with self.assertRaisesRegex(BudgetError, "shared USD cap"):
+            reserve(self.spend("three", 0.01), "deepline")
+
+    def test_legacy_ledger_resumes_past_40_calls_without_resetting_spend(self):
+        self.init(max_usd=1)
+        for index in range(40):
+            path, route_id = reserve(self.spend(str(index), 0.25), "deepline")
+            if index == 0:
+                settle(path, route_id, {"credits_charged": 0.1, "cost_usd": 0.01})
+        state = read_object(path)
+        state["max_paid_calls"] = 40
+        path.write_text(json.dumps(state), encoding="utf-8")
+        reserve(self.spend("41", 0.15), "deepline")
+        after = read_object(path)
+        self.assertEqual(len(after["calls"]), 41)
+        self.assertEqual({key: after[key] for key in after if key != "calls"},
+                         {key: state[key] for key in state if key != "calls"})
+        self.assertEqual({key: after["calls"][key] for key in state["calls"]}, state["calls"])
+        with self.assertRaisesRegex(BudgetError, "shared USD cap"):
+            reserve(self.spend("42", 0.01), "deepline")
+        with self.assertRaisesRegex(BudgetError, "already reserved"):
+            reserve(self.spend("0", 0), "deepline")
 
     def test_unpriced_or_invalid_inputs_never_reach_provider(self):
         self.init()
