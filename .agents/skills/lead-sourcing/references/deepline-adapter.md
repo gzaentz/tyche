@@ -5,7 +5,8 @@ first Deepline execution, read the core wrapper contract below and
 [shared I/O](adapter-io.md), unless already loaded. The core contract ends at
 Email validation. Read the [ZeroBounce gate](#deepline-zerobounce-email-gate)
 before validating email; read [BounceBan fallback](#bounceban-fallback) only
-when catch-all/unknown requires it. No other validator replaces these gates.
+when catch-all/unknown or a ZeroBounce service failure requires it.
+No other validator replaces these gates.
 
 ## Deepline wrapper
 
@@ -115,8 +116,10 @@ change route and retain `status`, `error` when present, `provider`, `operation`,
 
 ### BounceBan fallback
 
-Only after ZeroBounce returns `catch-all` or `unknown`, search the live catalog
-for `BounceBan verify single email` and describe the returned tool. Execute once
+After ZeroBounce returns `catch-all`/`unknown`, or its execution returns
+`provider_error` (including `NETWORK_ERROR`), `timeout`, `rate_limited`,
+`auth_failed`, or `quota_exceeded` without a usable verdict, search the live
+catalog for `BounceBan verify single email` and describe the returned tool. Execute once
 with the exact email and `entity_type: email_validation`, reserving the current
 price against the existing provider and paid-call caps, plus any explicitly
 requested per-next-lead cap. Do not
@@ -130,6 +133,13 @@ Read raw `result`, not API `status`. Acceptance requires API `success` and
 The adapter exposes the verdict as `email_status` while retaining raw fields.
 Store status/result, optional score/time and the Deepline source in the
 original receipt's `fallback` object. Never overwrite the ZeroBounce receipt.
+For a service failure, store ZeroBounce `status: null` and `provider_status`
+matching its failed execution route; do not invent `unknown` as an email verdict.
+Preserve the failed route's reservation as well as the fallback's charge. A
+schema/input error, local permission/budget refusal, or missing attempt receipt
+does not qualify. The fallback is a separate paid call, not a ZeroBounce retry.
+If BounceBan also fails, keep the address unresolved and continue other useful
+work. A local network error alone does not prove a downstream provider outage.
 Do not override invalid, do_not_mail, spamtrap or abuse. An unsuccessful or
 uncertain call stays unresolved; do not retry it automatically or chain
 validators. Choose another address or requested buyer instead.
@@ -174,10 +184,11 @@ receipt to a unique `email_validation` route and record actual usage.
 
 Apply TYCHE's current gate to the explicit ZeroBounce status after trimming and
 case normalization. `valid` passes directly. Reject `invalid`, `do_not_mail`,
-`spamtrap`, and `abuse` without fallback. Only `catch-all`/`unknown` may receive
-the single BounceBan check above. Unfamiliar statuses stay unresolved.
+`spamtrap`, and `abuse` without fallback. `catch-all`/`unknown` and the recorded
+service failures above may receive one BounceBan check. Unfamiliar verdicts stay unresolved.
 Continue with another discovered address or requested buyer.
 A missing status, `no_results`, provider error, timeout, or other uncertain
-call is unresolved and cannot support an accepted email. Do not retry an
+call cannot pass by itself; the eligible service failures may use BounceBan.
+Do not retry an
 uncertain paid validation call automatically. Deepline owns the provider
 credential; do not require or read a direct ZeroBounce key.

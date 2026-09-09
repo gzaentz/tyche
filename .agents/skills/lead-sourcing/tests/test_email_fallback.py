@@ -57,6 +57,52 @@ class EmailFallbackTests(unittest.TestCase):
         self.check_both(mutate=lambda d, r: r["fallback"].update(status="failed"), passes=False)
         self.check_both(mutate=lambda d, r: r["fallback"].update(status=" SUCCESS ", result=" DELIVERABLE "))
 
+    def test_service_failures_allow_one_deliverable_fallback(self):
+        for status in ("provider_error", "timeout", "rate_limited", "auth_failed", "quota_exceeded"):
+            def outage(document, receipt):
+                receipt.update(status=None, provider_status=status)
+                document["routes"][0].update(provider_status=status)
+            with self.subTest(status=status):
+                self.check_both(mutate=outage)
+
+    def test_outage_must_match_failed_route_and_not_override_verdicts(self):
+        mutations = [
+            lambda d, r: r.pop("provider_status"),
+            lambda d, r: r.update(provider_status=[]),
+            lambda d, r: r.update(provider_status={}),
+            lambda d, r: r.update(provider_status=None),
+            lambda d, r: r.pop("status"),
+            lambda d, r: r.update(status=""),
+            lambda d, r: r.update(status="invalid"),
+            lambda d, r: r.update(status="do_not_mail"),
+            lambda d, r: r.update(status="spamtrap"),
+            lambda d, r: r.update(status="abuse"),
+            lambda d, r: r.update(status="unknown"),
+            lambda d, r: d["routes"][0].update(provider_status="ok"),
+            lambda d, r: d["routes"][0].update(provider_status="timeout"),
+            lambda d, r: d["routes"][0].update(paid_calls=0),
+            lambda d, r: d["routes"].pop(0),
+            lambda d, r: r["fallback"].update(email="other@example.com"),
+            lambda d, r: r["fallback"].update(result="risky"),
+            lambda d, r: d["routes"][-1].update(provider_status="provider_error"),
+            lambda d, r: r["fallback"].update(fallback={}),
+            lambda d, r: r.pop("fallback"),
+            lambda d, r: d["routes"].reverse(),
+        ]
+        for index, mutation in enumerate(mutations):
+            def outage(document, receipt):
+                receipt.update(status=None, provider_status="provider_error")
+                document["routes"][0].update(provider_status="provider_error")
+                mutation(document, receipt)
+            with self.subTest(index=index):
+                self.check_both(mutate=outage, passes=False)
+        for status in ("ok", "partial", "no_results", "schema_error", "config_error"):
+            def not_outage(document, receipt):
+                receipt.update(status=None, provider_status=status)
+                document["routes"][0].update(provider_status=status)
+            with self.subTest(status=status):
+                self.check_both(mutate=not_outage, passes=False)
+
     def test_both_receipts_require_exact_email_source_and_ordered_paid_routes(self):
         mutations = [
             lambda d, r: r["fallback"].update(email="other@example.com"),

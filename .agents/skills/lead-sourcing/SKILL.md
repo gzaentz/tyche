@@ -69,9 +69,11 @@ Read the [stopping contract](references/output-contract.md#stopping-check) at se
    Keep rejected companies, missing evidence and provider failures separate.
 4. **Verify the buyer, then their email.** Account fit and current role must
    pass before contact lookup. Respect requested role groups and contact fields.
-   Email defaults to required: Deepline ZeroBounce `valid`, or only for
-   catch-all/unknown one BounceBan `deliverable` fallback. Preserve both receipts;
-   never override invalid/risky outcomes. Otherwise try another address or buyer.
+   Email defaults to required: Deepline ZeroBounce `valid`, or one BounceBan
+   `success` + `deliverable` fallback for catch-all/unknown or a recorded
+   [ZeroBounce service failure](references/deepline-adapter.md#bounceban-fallback).
+   Preserve both receipts and costs; never override a hard-negative verdict.
+   Otherwise try another address or buyer.
 5. **Persist, reassess and deliver.** Save evidence, receipts, costs and next actions as
    work proceeds. Keep a new-company discovery action and a recovery action for
    each unresolved company. Before a shortfall, search the live catalog for

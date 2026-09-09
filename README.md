@@ -21,7 +21,7 @@ provider adapters, budget controls, and output contract.
   rejected only because they are secondary.
 - Requires a current title and company match for every accepted contact.
 - Requires email by default and validates every stored email with ZeroBounce
-  through Deepline. Accept `valid`, or resolve catch-all/unknown once with
+  through Deepline. Accept `valid`, or resolve catch-all/unknown or a recorded service failure once with
   BounceBan and require an explicit `deliverable` verdict with both receipts.
 - Uses live Deepline capability discovery instead of fixed Deepline tool IDs.
 - Supports bounded ScrapingDog operations through one local adapter.
@@ -355,7 +355,8 @@ group and may contain a valid secondary fallback.
 
 Email is required by default. Every exported email has a matching Deepline
 ZeroBounce receipt in `results.json`. Accept `valid`, or for catch-all/unknown
-only, one successful BounceBan `deliverable` fallback with both receipts.
+or an eligible service failure, one successful BounceBan `deliverable` fallback
+with both receipts and costs retained.
 Invalid, do_not_mail, spamtrap and abuse cannot be overridden. Unresolved
 candidates retain their addresses and evidence in the research record, not
 the verified workbook. Email and phone stay absent from JSON and blank in

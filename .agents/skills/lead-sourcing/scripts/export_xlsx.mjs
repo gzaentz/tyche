@@ -166,6 +166,8 @@ function requestedValue(contact, field, requestedFields, index) {
   return value;
 }
 
+const EMAIL_FALLBACK_FAILURES = new Set(["provider_error", "timeout", "rate_limited", "auth_failed", "quota_exceeded"]);
+
 function validateEmailReceipt(document, contact, email, index, validator = "zerobounce", path = `accepted[${index}].primary_contact.email_validation`) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new ExportError(`${path} requires a valid email address`);
@@ -178,7 +180,13 @@ function validateEmailReceipt(document, contact, email, index, validator = "zero
     throw new ExportError(`${path}.email must match the contact email`);
   }
   const status = text(receipt.status);
-  if (!status) {
+  const outage = validator === "zerobounce" && receipt.status === null
+    && EMAIL_FALLBACK_FAILURES.has(receipt.provider_status);
+  if ("provider_status" in receipt && !outage) {
+    throw new ExportError(`${path}.provider_status requires a service failure with null verdict`);
+  }
+  const eligibleFallback = outage || ["catch-all", "unknown"].includes(status.toLowerCase());
+  if (!status && !outage) {
     throw new ExportError(`${path}.status is unresolved or missing`);
   }
   const fallback = receipt.fallback;
@@ -187,7 +195,7 @@ function validateEmailReceipt(document, contact, email, index, validator = "zero
       throw new ExportError(`${path} requires BounceBan success and result deliverable`);
     }
     if ("fallback" in receipt) throw new ExportError(`${path} cannot chain fallbacks`);
-  } else if (["catch-all", "unknown"].includes(status.toLowerCase()) && Object.keys(object(fallback)).length) {
+  } else if (eligibleFallback && Object.keys(object(fallback)).length) {
     validateEmailReceipt(document, { email_validation: fallback }, email, index, "bounceban", `${path}.fallback`);
     const ids = (document.routes || []).map((route) => text(object(route).route_id));
     if (ids.indexOf(text(object(fallback.source).route_id)) <= ids.indexOf(text(object(receipt.source).route_id))) {
@@ -196,8 +204,8 @@ function validateEmailReceipt(document, contact, email, index, validator = "zero
   } else if (status.toLowerCase() !== "valid") {
     throw new ExportError(`${path}.status must be valid`);
   }
-  if (validator === "zerobounce" && "fallback" in receipt && !["catch-all", "unknown"].includes(status.toLowerCase())) {
-    throw new ExportError(`${path} fallback is only allowed for catch-all or unknown`);
+  if (validator === "zerobounce" && "fallback" in receipt && !eligibleFallback) {
+    throw new ExportError(`${path} fallback requires catch-all, unknown, or a recorded service failure`);
   }
 
   const source = object(receipt.source);
@@ -229,7 +237,7 @@ function validateEmailReceipt(document, contact, email, index, validator = "zero
     || route.phase !== "email_validation"
     || route.operation !== "execute"
     || route.tool !== tool
-    || !["ok", "partial"].includes(route.provider_status)
+    || (outage ? route.provider_status !== receipt.provider_status : !["ok", "partial"].includes(route.provider_status))
     || !Number.isInteger(route.paid_calls)
     || route.paid_calls < 1
     || (validator === "bounceban" && route.paid_calls !== 1)
