@@ -73,5 +73,5 @@ actions, deploy monitors, start outreach, or relax the ICP to fill a shortfall.
 
 Contact identity and current role must pass before contact-data lookup.
 Finder confidence never replaces the existing ZeroBounce gate or its single
-conditional BounceBan fallback. Preserve all budget caps and uncertain-call
-handling in the workflow and adapter references.
+non-hard-rejection BounceBan fallback. Preserve all budget caps and
+uncertain-call handling in the workflow and adapter references.

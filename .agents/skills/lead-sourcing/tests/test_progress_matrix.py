@@ -90,6 +90,15 @@ class ProgressMatrixTests(unittest.TestCase):
         self.assertEqual(summary["provider_or_route_failures"], 1)
         self.assertEqual(summary["unresolved_contacts"][0]["candidate"]["company"], "B")
 
+    def test_funnel_keeps_buyer_and_email_completion_separate(self):
+        document = {"accepted": [{"company": {"domain": "done.example"}}], "unresolved": [
+            {"stage": "account", "candidate": {"domain": "size.example"}, "reason_code": "missing_account_evidence"},
+            {"stage": "contact", "candidate": {"domain": "role.example", "full_name": "Person", "current_title": "Manager"}, "reason_code": "current_role_unverified"},
+            {"stage": "contact", "candidate": {"domain": "email.example", "full_name": "Owner", "current_title": "Founder"}, "reason_code": "missing_email"},
+        ]}
+        self.assertEqual(VALIDATOR.calculate_progress(document)["stages"],
+                         {"company_fit": 3, "buyer_verified": 2, "completed_leads": 1})
+
 
 if __name__ == "__main__":
     unittest.main()

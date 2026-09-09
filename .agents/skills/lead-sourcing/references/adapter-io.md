@@ -6,6 +6,77 @@ provider-specific inputs and statuses live in [Deepline](deepline-adapter.md)
 and [ScrapingDog](scrapingdog-adapter.md). Examples beginning with `.agents/`
 run from the repository root.
 
+## Paid-call budget
+
+Before the first paid call, create `results.json` with the normalized request,
+empty `accepted`/`routes`, and the existing `budget.limits` and `budget.paid_calls`.
+Initialize its ledger once:
+
+```bash
+python3 .agents/skills/lead-sourcing/scripts/budget_guard.py \
+  reports/<run-id>/results.json \
+  --verification-reserve-credits <priced-total-verification-allowance>
+```
+
+The shared cap defaults to USD 0.50 per requested lead. Supply `--max-usd` for
+an explicit user cap, including zero. Deepline uses the configured USD 0.10 per
+credit. An enabled ScrapingDog allocation also requires
+`--scrapingdog-usd-per-credit` from the current plan; zero allocation disables
+that provider. Existing provider, paid-call and optional per-next-lead caps
+remain independent. Email-required runs need an explicit verification reserve,
+priced for the remaining leads and any planned fallback. Email opt-outs do not.
+
+Every Deepline `execute` and every ScrapingDog request now requires this
+wrapper-only object alongside `operation`/`payload` or the other native inputs:
+
+```json
+{
+  "spend": {
+    "run_file": "reports/<run-id>/results.json",
+    "route_id": "company-1-contact-1",
+    "max_cost_credits": 1
+  }
+}
+```
+
+The number above is illustrative, not a price. Obtain a conservative **whole
+call** bound from the live descriptor and bound provider-native rows/pages.
+The wrapper output `limit` only truncates the preview; it does not limit billing.
+Catalog `search`/`describe` stay unguarded because they do not execute providers.
+
+The adapters atomically persist reservations in `results.json.budget.json`
+before dispatch. All callers for a run must use the same results file. Confirmed
+charges plus outstanding maximum costs plus the next call and protected
+verification balance must fit every cap. Only Deepline requests marked
+`entity_type: "email_validation"` consume the verification allowance. Use that
+metadata only for a freshly described validation tool, never for discovery.
+`spend_receipt` identifies the ledger entry; record its route ID, accepted-lead
+count, and actual cost or retained upper bound in the usual result fields.
+Mark email-validation `next_actions` with the same `entity_type` so the stopping
+check can distinguish verification from other spending.
+Both validator CLI modes cross-check these routes against the ledger when it
+is present. Record every dispatched call before checking the next action or
+delivering results; `--check-stop` alone is still not full output validation.
+
+A finite Deepline billing receipt on a determinate response settles the reported
+currency, including an explicit zero charge. A USD-only receipt releases the
+dollar reservation but keeps the credit bound until credit usage is known;
+never infer actual credits from dollar pricing. Missing billing, uncertain
+outcomes and ScrapingDog calls retain their bounds. Success or `no_results`
+alone never releases money.
+A charge above its bound is preserved and blocks further paid work. A reused
+route ID is refused, even after a crash. A lock conflict fails without sending;
+retry that local refusal only after the active writer finishes. Never expire a
+lock automatically: after an interrupted write, inspect the ledger and receipts
+and confirm there is no writer before removing its stale `.lock` file.
+
+The ledger cannot be reinitialized over existing spend or have its caps raised
+by editing report totals. Start it before paid work; migrating an old paid run
+or adjusting frozen limits requires explicit billing reconciliation. Do not
+delete reservations, reset the ledger, or bypass the adapters with raw CLI/HTTP.
+This is a local execution guard, not a security sandbox against code or callers
+that can alter its files or use provider credentials directly.
+
 ## Response files
 
 Both adapters accept `--output-file <new-path>`. Use a distinct path per route
@@ -54,7 +125,7 @@ never a value:
 - `DEEPLINE_BIN` (optional path to the Deepline CLI binary).
 - `SCRAPINGDOG_API_KEY`.
 
-For each run, write exactly `reports/<run-id>/report.md`,
+For each run, deliver `reports/<run-id>/report.md`,
 `reports/<run-id>/results.json`, and `reports/<run-id>/leads.xlsx`. Include the
 request, hypotheses, route commands and filters, pilot observations, statuses,
 route cost bases, confirmed and maximum credits, Deepline dollar cost and cost

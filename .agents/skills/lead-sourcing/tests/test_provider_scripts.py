@@ -7,6 +7,7 @@ import pathlib
 import socket
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 from urllib.error import HTTPError
@@ -17,12 +18,32 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 
-def load_script(name: str):
+def load_script(name: str, *, budgeted=True):
     path = ROOT / "scripts" / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if budgeted:
+        # Normalization/transport fixtures get a real, isolated budget. Budget
+        # boundary tests load the unwrapped public entrypoint explicitly.
+        from budget_guard import initialize
+        run = module.run
+
+        def fixture_run(request, capture=None):
+            if not isinstance(request, dict) or "spend" in request:
+                return run(request, capture)
+            with tempfile.TemporaryDirectory() as directory:
+                path = pathlib.Path(directory) / "results.json"
+                path.write_text(json.dumps({
+                    "request": {"target_count": 10, "contact_fields": []}, "accepted": [], "routes": [],
+                    "budget": {"paid_calls": 0, "limits": {"deepline_credits": 10000,
+                        "scrapingdog_credits": 10000, "max_paid_calls": 100}},
+                }), encoding="utf-8")
+                initialize(path, max_usd=10000, scrapingdog_usd_per_credit=0.1)
+                return run(dict(request, spend={"run_file": str(path), "route_id": "fixture", "max_cost_credits": 1000}), capture)
+
+        module.run = fixture_run
     return module
 
 

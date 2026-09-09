@@ -4,8 +4,8 @@ For discovery, read [Capability discovery](#capability-discovery). Before the
 first Deepline execution, read the core wrapper contract below and
 [shared I/O](adapter-io.md), unless already loaded. The core contract ends at
 Email validation. Read the [ZeroBounce gate](#deepline-zerobounce-email-gate)
-before validating email; read [BounceBan fallback](#bounceban-fallback) only
-when catch-all/unknown requires it. No other validator replaces these gates.
+before validating email; read [BounceBan fallback](#bounceban-fallback) for any
+non-hard-rejection ZeroBounce issue. No other validator replaces these gates.
 
 ## Deepline wrapper
 
@@ -45,11 +45,14 @@ automatic fallback.
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"search","query":"companies with current hiring or job postings"}'
 python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"describe","tool":"<id returned by search>"}'
-python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"execute","tool":"<id returned by search>","payload":{"query":"<bounded query>","limit":10}}'
+python3 .agents/skills/lead-sourcing/scripts/deepline.py --input-file 'reports/<run-id>/requests/<route-id>.json'
 ```
 
-`execute` is paid. One route pilot has one paid call and at most 10 returned
-rows. The wrapper `limit` is 10 or less and truncates normalized output only;
+The execute request file includes `operation`, `tool`, `payload`, and the
+required [spend context](adapter-io.md#paid-call-budget). `execute` is paid.
+A company-discovery pilot has one paid call and at most 10 returned rows;
+contact lookups request 1-3 relevant people per missing company.
+The wrapper `limit` is 10 or less and truncates normalized output only;
 set provider-native result/count and page or cursor fields from the live schema,
 then bound the cost before execution. Inspect the live price first; expand only
 when rows are relevant, diverse, and evidentiary. The wrapper invokes
@@ -112,11 +115,11 @@ change route and retain `status`, `error` when present, `provider`, `operation`,
 
 ### BounceBan fallback
 
-Only after ZeroBounce returns `catch-all` or `unknown`, search the live catalog
-for `BounceBan verify single email` and describe the returned tool. Execute once
-with the exact email and `entity_type: email_validation`, reserving the current
-price against the existing provider and paid-call caps, plus any explicitly
-requested per-next-lead cap. Do not
+After ZeroBounce returns any non-hard-rejection status or recorded provider/runtime
+failure, search the live catalog for `BounceBan verify single email` and describe
+the returned tool. Execute once with the exact email and `entity_type:
+email_validation`, reserving the current price against the existing provider and
+paid-call caps, plus any explicitly requested per-next-lead cap. Do not
 pin the tool ID or price. Keep catch-all verification enabled. Default to
 regular mode: deepverify assumes the email domain matches the current company
 website, which is not safe for all verified brand/alias domains. No webhook
@@ -171,10 +174,11 @@ receipt to a unique `email_validation` route and record actual usage.
 
 Apply TYCHE's current gate to the explicit ZeroBounce status after trimming and
 case normalization. `valid` passes directly. Reject `invalid`, `do_not_mail`,
-`spamtrap`, and `abuse` without fallback. Only `catch-all`/`unknown` may receive
-the single BounceBan check above. Unfamiliar statuses stay unresolved.
-Continue with another discovered address or requested buyer.
-A missing status, `no_results`, provider error, timeout, or other uncertain
-call is unresolved and cannot support an accepted email. Do not retry an
-uncertain paid validation call automatically. Deepline owns the provider
-credential; do not require or read a direct ZeroBounce key.
+`spamtrap`, and `abuse` without fallback. Any other recorded status, including
+`catch-all`, `unknown`, provider error, timeout, rate limit, auth, quota, schema,
+or config failure, may receive the single BounceBan check above. Unfamiliar
+statuses remain unresolved unless BounceBan returns `success` and
+`deliverable`. A missing primary status or receipt remains unresolved because
+there is no primary outcome to preserve. Do not retry an uncertain paid
+validation call automatically. Deepline owns the provider credential; do not
+require or read a direct ZeroBounce key.

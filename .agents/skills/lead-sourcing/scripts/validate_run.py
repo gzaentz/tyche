@@ -39,6 +39,9 @@ COST_BASES = {"actual", "estimated", "unknown"}
 DEEPLINE_USD_PER_CREDIT = Decimal("0.10")
 COST_OUTPUT_QUANTUM = Decimal("0.0001")
 NEXT_LEAD_REVIEW_CREDITS = Decimal("5")
+ZEROBOUNCE_HARD_REJECTION_STATUSES = {
+    "invalid", "do_not_mail", "spamtrap", "abuse",
+}
 
 
 def _company_key(row: Any) -> Optional[str]:
@@ -143,6 +146,13 @@ def _validate_email_receipt(
         )
 
     status = _nonempty_text(receipt.get("status"))
+    normalized_status = status.casefold() if status is not None else None
+    has_fallback = isinstance(receipt.get("fallback"), dict)
+    fallback_eligible = (
+        validator == "zerobounce"
+        and normalized_status is not None
+        and normalized_status not in {"valid", *ZEROBOUNCE_HARD_REJECTION_STATUSES}
+    )
     if status is None:
         errors.append(
             f"{contact_path}.email_validation.status is unresolved or missing"
@@ -152,7 +162,7 @@ def _validate_email_receipt(
             errors.append(f"{contact_path}.email_validation requires BounceBan success and result deliverable")
         if "fallback" in receipt:
             errors.append(f"{contact_path}.email_validation cannot chain fallbacks")
-    elif status.casefold() in {"catch-all", "unknown"} and isinstance(receipt.get("fallback"), dict):
+    elif fallback_eligible and has_fallback:
         fallback = receipt["fallback"]
         _validate_email_receipt(
             {"email": email, "email_validation": fallback},
@@ -163,10 +173,12 @@ def _validate_email_receipt(
         ids = list(routes_by_id)
         if first_id in ids and next_id in ids and ids.index(next_id) <= ids.index(first_id):
             errors.append(f"{contact_path}.email_validation fallback must use a distinct later route")
-    elif status.casefold() != "valid":
+    elif normalized_status != "valid":
         errors.append(f"{contact_path}.email_validation.status must be valid")
-    if validator == "zerobounce" and "fallback" in receipt and (status or "").casefold() not in {"catch-all", "unknown"}:
-        errors.append(f"{contact_path}.email_validation fallback is only allowed for catch-all or unknown")
+    if validator == "zerobounce" and "fallback" in receipt and not fallback_eligible:
+        errors.append(
+            f"{contact_path}.email_validation fallback is not allowed for valid or hard-rejection statuses"
+        )
 
     source = receipt.get("source")
     if not isinstance(source, dict):
@@ -210,7 +222,17 @@ def _validate_email_receipt(
         errors.append(
             f"{contact_path}.email_validation.source.tool must match route {route_id}"
         )
-    if route.get("provider_status") not in {"ok", "partial"}:
+    route_status_ok = route.get("provider_status") in {"ok", "partial"}
+    route_status_failed_but_fallback = (
+        validator == "zerobounce"
+        and has_fallback
+        and fallback_eligible
+        and route.get("provider_status") in {
+            "no_results", "rate_limited", "auth_failed", "quota_exceeded",
+            "timeout", "schema_error", "provider_error", "config_error",
+        }
+    )
+    if not route_status_ok and not route_status_failed_but_fallback:
         errors.append(
             f"email validation route {route_id} is unresolved or unsuccessful"
         )
@@ -564,7 +586,8 @@ def _validate_budget_accounting(document: dict[str, Any], errors: list[str]) -> 
     for provider in sorted(PAID_PROVIDERS):
         limit = _decimal(limits.get(f"{provider}_credits"))
         actual = _decimal(spent.get(f"{provider}_credits"))
-        if limit is not None and actual is not None and actual > limit:
+        # An unknown total cannot erase charges that are already confirmed.
+        if limit is not None and max(known_costs[provider], actual or Decimal("0")) > limit:
             errors.append(
                 f"budget.spent.{provider}_credits exceeds limit {limit}"
             )
@@ -736,8 +759,20 @@ def calculate_progress(document: dict[str, Any]) -> dict[str, Any]:
         warnings.append("Review the sourcing strategy: at least 5 Deepline credits are charged or reserved since the last completed lead. This warning is not a spending cap or a stop reason.")
     if unknown:
         warnings.append("Next-lead cost is incomplete because some paid routes lack a usable cost or accepted-lead count. Unknown charges are not free.")
+    email_gaps = {"missing_email", "email_invalid", "email_validation_unresolved"}
+    buyers = {
+        key for key, row in buckets["contact"].items()
+        if _nonempty_text(row["candidate"].get("full_name"))
+        and _nonempty_text(row["candidate"].get("current_title"))
+        and row["reasons"] and all(reason["code"] in email_gaps for reason in row["reasons"])
+    }
     return {
         "accepted_companies": len(accepted_keys),
+        "stages": {
+            "company_fit": len(accepted_keys | set(buckets["contact"])),
+            "buyer_verified": len(accepted_keys | buyers),
+            "completed_leads": len(accepted_keys),
+        },
         "account_evidence_missing": len(buckets["account"]),
         "contact_completion_missing": len(buckets["contact"]),
         "provider_or_route_failures": len(failures),
@@ -816,8 +851,7 @@ def _validate_client_output(accepted: list, errors: list[str]) -> None:
         ):
             errors.append(f"{path}.company requires an exact canonical industry/sub_industry pair")
 
-
-def evaluate_stop(document: Any, *, now: Optional[datetime] = None) -> dict[str, Any]:
+def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_budget=None) -> dict[str, Any]:
     """Check next actions independently of self-declared exhausted route labels."""
     errors: list[str] = []
     result: dict[str, Any] = {"decision": "repair_state", "eligible_actions": [], "errors": errors}
@@ -847,6 +881,11 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None) -> dict[str,
         errors.append("max_duration_seconds must be a positive integer or null")
         return result
     result.update(checked_at=current.isoformat(), elapsed_seconds=(current - started).total_seconds())
+    _validate_budget_accounting(document, errors)
+    _validate_cost_accounting(document, errors)
+    _validate_next_lead_budget(document, errors)
+    if errors:
+        return result
     if len(accepted) >= target:
         result["decision"] = "target_met"
         return result
@@ -878,11 +917,6 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None) -> dict[str,
     limits = budget.get("limits", {}) if isinstance(budget, dict) else {}
     if not isinstance(limits, dict):
         errors.append("budget.limits must be an object")
-        return result
-    _validate_budget_accounting(document, errors)
-    _validate_cost_accounting(document, errors)
-    _validate_next_lead_budget(document, errors)
-    if errors:
         return result
     costs = calculate_cost_summary(document)
     receipts = document.get("routes", [])
@@ -922,6 +956,9 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None) -> dict[str,
         provider = action.get("provider")
         bound = action.get("cost_upper_bound_credits")
         calls = action.get("paid_calls")
+        if "entity_type" in action and not _nonempty_text(action["entity_type"]):
+            errors.append(f"{aid}: entity_type must be a nonempty string")
+            continue
         if not isinstance(provider, str) or provider not in PAID_PROVIDERS | {"public_web"} or type(calls) is not int or calls < 0:
             errors.append(f"{aid}: valid provider and nonnegative paid_calls are required")
             continue
@@ -956,6 +993,16 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None) -> dict[str,
                 continue
             if Decimal(str(since_last)) + Decimal(str(bound)) > Decimal(str(next_lead_limit)):
                 continue
+        if execution_budget is not None:
+            from budget_guard import BudgetError, check_allowance
+            try:
+                check_allowance(execution_budget, provider, bound, len(accepted), paid_calls=max(1, calls),
+                                verification=provider == "deepline" and action.get("entity_type") == "email_validation")
+            except BudgetError:
+                continue
+            except (KeyError, TypeError, ArithmeticError) as exc:
+                errors.append(f"execution budget: {exc}")
+                continue
         result["eligible_actions"].append(aid)
     if errors:
         result["eligible_actions"] = []
@@ -970,7 +1017,7 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None) -> dict[str,
     return result
 
 
-def validate_run(document: Any, *, require_stop_check: bool = False, now: Optional[datetime] = None) -> list[str]:
+def validate_run(document: Any, *, require_stop_check: bool = False, now: Optional[datetime] = None, execution_budget=None) -> list[str]:
     errors: list[str] = []
     if not isinstance(document, dict):
         return ["results.json must contain one JSON object"]
@@ -1153,8 +1200,8 @@ def validate_run(document: Any, *, require_stop_check: bool = False, now: Option
     stop_reason = document.get("stop_reason")
     stop_check = None
     if require_stop_check or "stop_check" in document:
-        stop_check = evaluate_stop(document, now=now)
-        errors.extend(stop_check["errors"])
+        stop_check = evaluate_stop(document, now=now, execution_budget=execution_budget)
+        errors.extend(error for error in stop_check["errors"] if error not in errors)
         decision = stop_check["decision"]
         if decision == "continue":
             errors.append("stop check requires continuation: affordable actions, missing recovery/discovery actions, or unresolved pricing remain")
@@ -1473,11 +1520,27 @@ def main() -> int:
         print(json.dumps({"valid": False, "errors": [str(exc)]}))
         return 2
 
+    from budget_guard import audit_ledger, load_ledger
+    try:
+        execution_budget = load_ledger(args.results)
+    except (ValueError, OSError) as exc:
+        output = {"errors": [f"budget ledger: {exc}"], "valid": False}
+        if args.check_stop:
+            output.update(decision="repair_state", eligible_actions=[])
+        print(json.dumps(output, sort_keys=True))
+        return 2
+    ledger_errors = audit_ledger(args.results, document, state=execution_budget) if execution_budget is not None else []
+    if ledger_errors:
+        execution_budget = None
     if args.check_stop:
-        output = evaluate_stop(document)
+        output = evaluate_stop(document, execution_budget=execution_budget)
+        output["errors"].extend(ledger_errors)
+        if output["errors"]:
+            output.update(decision="repair_state", eligible_actions=[])
         print(json.dumps(output, sort_keys=True))
         return 2 if output["errors"] else 0
-    errors = validate_run(document, require_stop_check=not args.legacy_stop_policy)
+    errors = validate_run(document, require_stop_check=not args.legacy_stop_policy, execution_budget=execution_budget)
+    errors.extend(ledger_errors)
     output: dict[str, Any] = {"valid": not errors, "errors": errors, "stop_policy": "legacy" if args.legacy_stop_policy else "strict"}
     if args.show_cost_summary and isinstance(document, dict):
         output["calculated_cost_summary"] = calculate_cost_summary(document)

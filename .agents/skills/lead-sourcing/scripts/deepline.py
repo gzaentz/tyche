@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 from provider_output import ResponseFile, load_json, response_body
+from budget_guard import guarded_call
 
 
 STATUSES = {
@@ -1023,7 +1024,7 @@ def _envelope_status(value: Any) -> Optional[str]:
                     return lowered
                 if lowered in {"success", "succeeded", "complete", "completed"}:
                     return "ok"
-                if lowered in {"empty", "none", "not_found", "notfound"}:
+                if lowered in {"empty", "none", "not_found", "notfound", "no_result"}:
                     return "no_results"
                 if lowered in {"failed", "failure", "error"}:
                     return "provider_error"
@@ -1401,6 +1402,21 @@ def _execute_output(
         (candidate for candidate in statuses if candidate in _FAILURE_STATUSES),
         "partial" if "partial" in statuses else selected_status or outer_status,
     )
+    if outer_status == "no_results":
+        # A canonical empty outcome need not contain a row-shaped payload.
+        nested = parsed.get("toolResponse", parsed.get("tool_response", {}))
+        nested_status = _envelope_status(nested)
+        error = _envelope_error(parsed)
+        outcome = "schema_error" if records else "no_results"
+        if nested_status in _FAILURE_STATUSES or error:
+            outcome = nested_status if nested_status in _FAILURE_STATUSES else _classify_error(json.dumps(error))
+        body = {"status": outcome, "provider": "deepline", "operation": "execute",
+                "tool": tool, "results": [], "evidence": [], **metadata}
+        if error:
+            body["error"] = error
+        if entity_type:
+            body["entity_type"] = entity_type
+        return body
     if not structured and not _known_envelope(parsed):
         body = {
             "status": status if status in _PROVIDER_ERROR_STATUSES else "schema_error",
@@ -1456,6 +1472,12 @@ def run(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any], int]:
     """Run one validated request and return (JSON body, process exit code)."""
 
     request = _validate_request(request)
+    if request["operation"] == "execute":
+        return guarded_call(request, "deepline", lambda: _run_validated(request, capture))
+    return _run_validated(request, capture)
+
+
+def _run_validated(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any], int]:
     operation = request["operation"]
     timeout_seconds = request["timeout_seconds"]
     deepline_bin = os.environ.get(_DEEPLINE_BIN, "").strip() or "deepline"
@@ -1521,6 +1543,18 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
             parsed = None
     if capture is not None:
         capture({"exit_code": returncode, "body": response_body(parsed, stdout), "stderr": stderr})
+    # Hunter's observed data-absence error is not an endpoint or transport 404.
+    if (request["operation"] == "execute" and request.get("tool") == "hunter_companies_find"
+            and request.get("entity_type") == "company" and isinstance(parsed, dict)
+            and set(parsed) <= {"ok", "error", "billing"} and parsed.get("ok") is False
+            and parsed.get("error") == {
+                "message": "not_found: The domain does not exist in our database",
+                "code": "UPSTREAM_NOT_FOUND", "details": {"statusCode": 404}}):
+        return {
+            "status": "no_results", "provider": "deepline", "operation": "execute",
+            "tool": request["tool"], "entity_type": "company", "results": [], "evidence": [],
+            "error": _envelope_error(parsed), **_execution_metadata(parsed),
+        }, 0
     if returncode != 0:
         if (
             parsed is not None

@@ -52,6 +52,10 @@ const COLUMN_WIDTHS = [
   18, 18, 18, 18, 18, 16, 48, 72, 20,
 ];
 
+const ZEROBOUNCE_HARD_REJECTION_STATUSES = new Set([
+  "invalid", "do_not_mail", "spamtrap", "abuse",
+]);
+
 export class ExportError extends Error {}
 
 function isClientOutput(document) {
@@ -182,22 +186,25 @@ function validateEmailReceipt(document, contact, email, index, validator = "zero
     throw new ExportError(`${path}.status is unresolved or missing`);
   }
   const fallback = receipt.fallback;
+  const normalizedStatus = status.toLowerCase();
+  const fallbackEligible = validator === "zerobounce"
+    && !["valid", ...ZEROBOUNCE_HARD_REJECTION_STATUSES].includes(normalizedStatus);
   if (validator === "bounceban") {
     if (status.toLowerCase() !== "success" || text(receipt.result).toLowerCase() !== "deliverable") {
       throw new ExportError(`${path} requires BounceBan success and result deliverable`);
     }
     if ("fallback" in receipt) throw new ExportError(`${path} cannot chain fallbacks`);
-  } else if (["catch-all", "unknown"].includes(status.toLowerCase()) && Object.keys(object(fallback)).length) {
+  } else if (fallbackEligible && Object.keys(object(fallback)).length) {
     validateEmailReceipt(document, { email_validation: fallback }, email, index, "bounceban", `${path}.fallback`);
     const ids = (document.routes || []).map((route) => text(object(route).route_id));
     if (ids.indexOf(text(object(fallback.source).route_id)) <= ids.indexOf(text(object(receipt.source).route_id))) {
       throw new ExportError(`${path} fallback must use a distinct later route`);
     }
-  } else if (status.toLowerCase() !== "valid") {
+  } else if (normalizedStatus !== "valid") {
     throw new ExportError(`${path}.status must be valid`);
   }
-  if (validator === "zerobounce" && "fallback" in receipt && !["catch-all", "unknown"].includes(status.toLowerCase())) {
-    throw new ExportError(`${path} fallback is only allowed for catch-all or unknown`);
+  if (validator === "zerobounce" && "fallback" in receipt && !fallbackEligible) {
+    throw new ExportError(`${path} fallback is not allowed for valid or hard-rejection statuses`);
   }
 
   const source = object(receipt.source);
@@ -229,7 +236,11 @@ function validateEmailReceipt(document, contact, email, index, validator = "zero
     || route.phase !== "email_validation"
     || route.operation !== "execute"
     || route.tool !== tool
-    || !["ok", "partial"].includes(route.provider_status)
+    || (!(["ok", "partial"].includes(route.provider_status)
+      || (validator === "zerobounce"
+        && fallbackEligible
+        && ["no_results", "rate_limited", "auth_failed", "quota_exceeded",
+          "timeout", "schema_error", "provider_error", "config_error"].includes(route.provider_status))))
     || !Number.isInteger(route.paid_calls)
     || route.paid_calls < 1
     || (validator === "bounceban" && route.paid_calls !== 1)

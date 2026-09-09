@@ -131,7 +131,7 @@ private traits from social activity or turn anonymous community authors into lea
 | D Datagma `datagma_find_email` | Person name plus domain/company, or supported LinkedIn identifier | Independent work-email lookup; retain provider receipt and validate through the existing gate. |
 | D ContactOut `contactout_linkedin_contact_info` | `profile`, `email_type`, `include_phone` | Selected LinkedIn profile reveal. Request work email only and no phone unless that extra data is in scope. |
 | C Additional contact coverage | `fullenrich_people_search`, `bettercontact_enrich`, `findymail_find_from_name`, `forager_person_contacts_lookup_work_emails`, `dropleads_search_people` | Different person graphs/waterfalls. Inspect async recovery, per-page billing, and masked/reveal behavior before use. |
-| Live validation discovery | Search `ZeroBounce single email validation`, then conditional `BounceBan verify single email` | Follow the [Deepline email gate](deepline-adapter.md#email-validation); other catalog validators do not replace or extend it. |
+| Live validation discovery | Search `ZeroBounce single email validation`, then use `BounceBan verify single email` for any non-hard-rejection ZeroBounce issue | Follow the [Deepline email gate](deepline-adapter.md#email-validation); other catalog validators do not replace or extend it. |
 
 ## Registries, vertical sources, and source retrieval
 

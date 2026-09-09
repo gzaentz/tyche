@@ -42,13 +42,23 @@ class EmailFallbackTests(unittest.TestCase):
                 mutate(document, document["accepted"][0]["primary_contact"]["email_validation"])
             self.assertEqual(check(document), passes, json.dumps(document))
 
-    def test_only_eligible_zerobounce_statuses_can_use_fallback(self):
-        for status in ("catch-all", "unknown", " UNKNOWN "):
+    def test_any_non_hard_zerobounce_issue_can_use_fallback(self):
+        for status in (
+            "catch-all", "unknown", " UNKNOWN ", "provider_error", "timeout",
+            "rate_limited", "auth_failed", "quota_exceeded", "config_error",
+            "schema_error", "no_results", "new_status",
+        ):
             with self.subTest(status=status):
                 self.check_both(status)
-        for status in ("valid", "invalid", "do_not_mail", "spamtrap", "abuse", "", "new_status"):
+        for status in ("valid", "invalid", "do_not_mail", "spamtrap", "abuse", ""):
             with self.subTest(status=status):
                 self.check_both(status, passes=False)
+
+    def test_provider_failure_route_can_be_recovered_once(self):
+        self.check_both(
+            status="provider_error",
+            mutate=lambda d, r: d["routes"][0].update(provider_status="provider_error"),
+        )
 
     def test_verdict_is_not_api_success(self):
         for verdict in ("risky", "unknown", "undeliverable", "success", "", None):
@@ -69,7 +79,6 @@ class EmailFallbackTests(unittest.TestCase):
             lambda d, r: r["fallback"]["source"].update(route_id=d["routes"][0]["route_id"]),
             lambda d, r: d["routes"].reverse(),
             lambda d, r: d["routes"][-1].update(provider_status="timeout"),
-            lambda d, r: d["routes"][0].update(provider_status="provider_error"),
             lambda d, r: d["routes"][-1].update(paid_calls=0),
             lambda d, r: d["routes"][-1].update(paid_calls=2),
             lambda d, r: r["fallback"].update(fallback={}),

@@ -25,7 +25,12 @@ Command paths below are relative to the skill directory, not this reference.
   Never invent or pin a Deepline tool ID. Optional provider hypotheses such as
   PredictLeads events, HarvestAPI LinkedIn posts, TheirStack jobs/projects, or
   DiscoLike niche discovery are choices to test, not a mandatory fanout.
-- Pilot each material route with at most 10 returned rows and one paid call.
+- Start with available no-cost company research; paid scraping is not free.
+  Pilot company-discovery routes with at most 10 returned rows and one paid call.
+  Once an account passes, buy only 1-3 relevant contacts for that missing company
+  using native company/title filters and result limits. Do not buy a broad
+  people batch to fill a few known company gaps. Price and protect the remaining
+  email-verification work before expanding discovery or buying backups.
   Inspect rows, evidence, duplicates, misses, provider status, and cost before
   expanding. No automatic retry; a timeout or other uncertain paid outcome is
   unresolved and needs a different route.
@@ -47,12 +52,14 @@ Command paths below are relative to the skill directory, not this reference.
   Do not pin its Deepline tool ID. Only an explicit, trimmed, case-insensitive
   ZeroBounce status of `valid` passes this gate. Reject `invalid`,
   `do_not_mail`, `spamtrap`, and `abuse` with `email_invalid`; retain all other
-  statuses as `email_validation_unresolved`, except catch-all/unknown may
-  receive one budgeted BounceBan check through Deepline. Discover and describe
-  it first; accept only API success plus result deliverable. Preserve both
-  receipts using `email_validation.fallback`. Never override a hard rejection
-  or chain fallbacks. A missing status, missing receipt,
-  `no_results`, or failed or uncertain provider call is unresolved, not valid.
+  statuses as `email_validation_unresolved`, except any non-hard-rejection
+  ZeroBounce issue may receive one budgeted BounceBan check through Deepline.
+  Discover and describe it first; accept only API success plus result
+  deliverable. Preserve both receipts using `email_validation.fallback`. Never
+  override a hard rejection or chain fallbacks. A missing primary receipt or
+  missing status remains unresolved because there is no primary outcome to
+  preserve; a recorded provider/runtime failure can be recovered by the one
+  BounceBan attempt.
   Count each validation execution against both the Deepline credit cap and the
   paid-call cap.
 - Keep accepted, rejected, and unresolved output states separate from provider
@@ -112,10 +119,10 @@ Command paths below are relative to the skill directory, not this reference.
   sum would exceed the requested allowance, or when the requested-cap route
   has no conservative cost bound. Keep the overall provider and paid-call caps
   as independent hard backstops. Actual cost that is unavailable remains
-  bounded or `unknown`, never zero or free. The agent performs this pre-call
-  check; the result validator checks recorded costs after the run. The
-  provider wrapper does not enforce this allowance. Omitting this field does
-  not invalidate legacy budget records.
+  bounded or `unknown`, never zero or free. The shared
+  [paid-call ledger](adapter-io.md#paid-call-budget) enforces these reservations
+  in both adapters; the validator checks recorded costs after the run. Omitting
+  this field does not invalidate legacy budget records.
 
 ## Inputs and workflow
 
@@ -138,6 +145,14 @@ If a provider's dollar cost cannot be bounded, do not spend on that route;
 use a priced alternative or public sources. Do not assume prepaid credits are
 free. Reallocation may use only the unspent balance, including reservations for
 uncertain calls, and must preserve explicit provider caps and prior receipts.
+
+Initialize the [paid-call ledger](adapter-io.md#paid-call-budget) once before
+the first paid call. It persists the shared USD cap, provider/call limits and
+verification reserve independently of editable report totals. Missing prices,
+missing ledger state, and repeated route IDs block dispatch. Resume the same
+ledger after interruptions; do not reset it or execute the raw CLI/HTTP to
+work around a budget refusal. The initial implementation freezes its limits
+for the run; reallocations require explicit reconciliation, not a new ledger.
 
 This is one run-wide allowance based on leads requested, not leads delivered.
 Rejected companies, retries, refills, continuations and model resumptions do
@@ -206,8 +221,9 @@ exact count from external evidence before acceptance.
 4. As each company passes the account gate, look up contacts only for that
    accepted company/domain. If role groups are present, search and rank the
    primary group first, then search the secondary group if no primary-role
-   contact passes. Target up to three relevant candidates, select one output
-   primary, and retain up to two others as backups. A valid secondary-role
+   contact passes. Retrieve 1-3 relevant candidates with a provider-native limit,
+   finishing one missing company before purchasing another contact batch. Select
+   one output primary, and retain up to two others as backups. A valid secondary-role
    contact can be the output primary when no primary-role contact passes; mark
    it with `role_group: "secondary"` when known. If only one current contact
    passes, keep the company accepted and record the backup shortfall. If no
@@ -217,13 +233,13 @@ exact count from external evidence before acceptance.
    and execute it once against the exact address. Store the status and source
    receipt. Accept `valid` directly. Reject `invalid`, `do_not_mail`, `spamtrap`,
    and `abuse`; try another discovered address or current-role contact. For
-   catch-all/unknown only, check once with a freshly discovered/described
-   BounceBan tool within budget. Accept only successful deliverable with both
-   receipts. Risky/unknown stays unresolved; undeliverable is rejected. If
-   validation has another status, is missing, or is uncertain, keep the
-   contact unresolved and change route; do not accept it or retry the uncertain
-   paid call automatically. Store an email on a backup only after the same
-   validation gate passes.
+   any non-hard-rejection ZeroBounce issue, check once with a freshly
+   discovered/described BounceBan tool within budget. Accept only successful
+   deliverable with both receipts. Risky/unknown stays unresolved;
+   undeliverable is rejected. If the primary receipt or status is missing, keep
+   the contact unresolved because the fallback cannot be linked to a preserved
+   primary outcome. Do not chain fallbacks or retry the same uncertain route.
+   Store an email on a backup only after the same validation gate passes.
 5. Refill from a changed route whenever an account or contact candidate fails
    a gate. Continue while the accepted count is below the target and the
    frontier contains an `untried` or `continuable` route. Do not infer route
@@ -278,14 +294,16 @@ ZeroBounce status, and a source receipt linked to one successful or partial
 Deepline `email_validation` route. The receipt records `provider: "deepline"`,
 `validator: "zerobounce"`, `operation: "execute"`, the dynamically discovered
 tool, and route ID. ZeroBounce valid passes after trimming/case normalization.
-Only catch-all/unknown may instead pass with one successful BounceBan
-result deliverable receipt nested in `email_validation.fallback`. Preserve
+Any non-hard-rejection ZeroBounce status may instead pass with one successful
+BounceBan result deliverable receipt nested in `email_validation.fallback`.
+This includes catch-all/unknown and recorded provider/runtime failures such as
+timeout, rate limit, auth, quota, schema, config, or provider error. Preserve
 both receipts for the same address and distinct ordered validation routes.
 API success alone is not a deliverability verdict. Never override invalid,
-do_not_mail, spamtrap or abuse; do not chain fallbacks.
-A missing status or a failed, blocked, timed-out, or otherwise uncertain call
-is unresolved. Preserve rejected and unresolved outcomes and continue with
-another discovered address or requested-role buyer within the budget.
+do_not_mail, spamtrap or abuse; do not chain fallbacks. A missing primary
+status or receipt is unresolved because it cannot preserve the primary outcome.
+Preserve rejected and unresolved outcomes and continue with another discovered
+address or requested-role buyer within the budget.
 
 Write `reports/<run-id>/report.md`, `reports/<run-id>/results.json`, and
 `reports/<run-id>/leads.xlsx`. The report must contain the request, assumptions,

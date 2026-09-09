@@ -21,8 +21,8 @@ provider adapters, budget controls, and output contract.
   rejected only because they are secondary.
 - Requires a current title and company match for every accepted contact.
 - Requires email by default and validates every stored email with ZeroBounce
-  through Deepline. Accept `valid`, or resolve catch-all/unknown once with
-  BounceBan and require an explicit `deliverable` verdict with both receipts.
+  through Deepline. Accept `valid`, or resolve any non-hard-rejection issue once
+  with BounceBan and require an explicit `deliverable` verdict with both receipts.
 - Uses live Deepline capability discovery instead of fixed Deepline tool IDs.
 - Supports bounded ScrapingDog operations through one local adapter.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
@@ -148,7 +148,13 @@ legacy `requested_roles` behavior.
 - `budget.max_deepline_credits_per_next_lead` is optional and is a hard cap only
   when the user explicitly requests it. When absent, 5 credits is a
   nonblocking strategy-review warning, not a default allowance or free spend.
-- A material route starts with one paid call and at most 10 returned rows.
+- Company-discovery routes start with one paid call and at most 10 returned rows.
+  Use available no-cost company research first, then retrieve only 1-3 relevant
+  contacts per missing company with provider-native filters and limits.
+- Both paid adapters require a persistent per-run budget ledger. It reserves
+  maximum call costs before dispatch, protects an email-verification allowance,
+  and prevents concurrent or interrupted calls from reusing the same balance.
+  See [paid-call setup](.agents/skills/lead-sourcing/references/adapter-io.md#paid-call-budget).
 - Deepline catalog `search` and `describe` calls are read-only.
 - The agent checks the live Deepline schema and price before `execute`.
 - Each ZeroBounce or BounceBan validation is a Deepline execution and counts against both
@@ -171,7 +177,7 @@ Any stored email must pass the email gate; explicit email opt-outs still apply.
 Record the count even without a per-lead cap so strategy warnings can be
 calculated. The agent must not execute a route without a conservative cost
 bound or when it would exceed a requested cap. The result validator checks
-recorded costs after the run; the provider wrapper does not enforce this allowance.
+recorded costs after the run; the shared adapter ledger enforces it before dispatch.
 Historic budgets are not reinterpreted. The overall provider
 credit and paid-call caps remain independent hard backstops.
 
@@ -185,7 +191,7 @@ cost is not included in direct provider cost.
 
 ## Output
 
-Each run creates exactly:
+Each run delivers:
 
 ```text
 reports/<run-id>/
@@ -193,6 +199,12 @@ reports/<run-id>/
 |-- results.json
 `-- leads.xlsx
 ```
+
+The internal `results.json.budget.json` ledger and provider receipts remain in
+the run directory for accounting and recovery. Use the same ledger on resume;
+do not reset it or bypass the wrappers with raw CLI/HTTP calls. The guard is
+not a security boundary against callers that can edit its files or access
+provider credentials directly.
 
 - `report.md` is the human audit record. It includes route, evidence, cost,
   decision, and stop receipts.
@@ -233,8 +245,8 @@ traceability. The output slot `primary_contact` is separate from this role
 group and may contain a valid secondary fallback.
 
 Email is required by default. Every exported email has a matching Deepline
-ZeroBounce receipt in `results.json`. Accept `valid`, or for catch-all/unknown
-only, one successful BounceBan `deliverable` fallback with both receipts.
+ZeroBounce receipt in `results.json`. Accept `valid`, or for any non-hard-rejection
+ZeroBounce issue, one successful BounceBan `deliverable` fallback with both receipts.
 Invalid, do_not_mail, spamtrap and abuse cannot be overridden. Unresolved
 candidates retain their addresses and evidence in the research record, not
 the verified workbook. Email and phone stay absent from JSON and blank in

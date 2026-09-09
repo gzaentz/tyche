@@ -2,8 +2,9 @@
 
 This is the normative, machine-readable contract for one lead-sourcing run.
 The JSON Schema is draft 2020-12. A run directory is
-`reports/<run-id>/` and contains exactly `report.md`, `results.json`, and
-`leads.xlsx`.
+`reports/<run-id>/` and delivers `report.md`, `results.json`, and `leads.xlsx`.
+Keep provider receipts and the internal `results.json.budget.json` execution
+ledger alongside these deliverables; they do not change the result schema.
 
 ## Read by phase
 
@@ -56,13 +57,13 @@ complete artifact. All applicable semantic rules still apply.
    Every accepted primary contact must contain each requested field; otherwise
    the company remains unresolved. Every stored email must have a matching
    Deepline ZeroBounce validation receipt. Only an explicit ZeroBounce status
-   of `valid` passes directly (trimmed, case-insensitive). For catch-all/unknown
-   only, one successful BounceBan deliverable fallback may pass with both
-   receipts preserved. Reject risky
-   statuses (`invalid`, `do_not_mail`, `spamtrap`, `abuse`); other statuses
-   remain unresolved. Use `email_invalid` for rejected email outcomes. A
-   missing status, missing receipt, failed call, or uncertain provider outcome
-   is unresolved. In the workbook unrequested fields are blank. Do not perform
+   of `valid` passes directly (trimmed, case-insensitive). For any other
+   non-hard-rejection ZeroBounce status or recorded provider/runtime failure,
+   one successful BounceBan deliverable fallback may pass with both receipts
+   preserved. Reject hard-rejection statuses (`invalid`, `do_not_mail`,
+   `spamtrap`, `abuse`) and use `email_invalid` for those outcomes. A missing
+   primary status or receipt remains unresolved because it cannot preserve the
+   primary outcome. In the workbook unrequested fields are blank. Do not perform
    contact-data lookup or email validation before the identity/current-role
    gate.
 8. `target_count` is the completion condition. After account or contact
@@ -582,6 +583,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "provider": {"enum": ["deepline", "scrapingdog", "public_web"]},
         "paid_calls": {"type": "integer", "minimum": 0},
         "cost_upper_bound_credits": {"type": ["number", "null"], "minimum": 0},
+        "entity_type": {"type": "string", "minLength": 1},
         "blocker": {
           "type": "object",
           "additionalProperties": false,
@@ -840,6 +842,8 @@ already dispatched provider call can be cancelled; retain its reservation/result
 Maintain `stop_check.next_actions` separately from historical attempt receipts.
 Each entry names a concrete, useful next test, with a unique `id`, `description`,
 `scope`, `provider`, `paid_calls` and conservative `cost_upper_bound_credits`.
+For an email-validation action, also set `entity_type: "email_validation"`,
+matching its adapter request so the protected verification balance is usable.
 Use `scope: "discovery"` for finding additional companies and the canonical
 domain for each unresolved account/contact (or its normalized `name:` key when
 no domain exists). Cover both new discovery and every unresolved company.
@@ -861,10 +865,18 @@ prices require a free price-discovery action, not an invented budget failure.
 Provider budget allocations may be changed only under the existing shared-cap
 rules; lack of allocation to an otherwise useful provider is not tool exhaustion.
 
+Record `approval_required` only when an applicable instruction or actual runtime
+denial requires approval the user has not already given; cite that source.
+Continue unaffected actions and retire resolved blockers on resume, retaining
+historical receipts.
+
 Run `python3 scripts/validate_run.py <results.json> --check-stop` before the next
 action. Draft results are allowed; budget/cost receipts must reconcile. The
 decision uses qualified accepted rows, the actual current UTC time, confirmed
-charges plus uncertain reservations, and each next action's maximum cost/calls:
+charges plus uncertain reservations, and each next action's maximum cost/calls.
+When an execution ledger is present, this uses the same shared-USD and
+verification-allowance calculation as dispatch. Eligibility is a snapshot;
+the adapter must still reserve atomically before sending the call. Decisions:
 
 - `target_met`: requested qualified company-contact count reached.
 - `time_limit_reached`: the user's explicit duration expired. Target takes
@@ -910,17 +922,18 @@ must contain every requested field. Every stored email, including an email on
 a backup, must have an `email_validation` receipt for the same address. Its
 source must identify Deepline and ZeroBounce, link to the matching successful
 or partial `email_validation` route, use the same dynamically discovered tool,
-and record explicit `valid`, or `catch-all`/`unknown` with one nested `fallback`
-receipt for the same address. The fallback requires Deepline/BounceBan, API
-`status: success` and `result: deliverable` after trimming/case normalization.
-It must link to a distinct later successful paid email-validation route with
-exactly one paid call. Preserve the original ZeroBounce status. Never allow
-fallback for invalid, do_not_mail, spamtrap, abuse, missing or unfamiliar
-statuses; never chain fallbacks. A risky/unknown fallback stays unresolved;
-an undeliverable fallback is rejected. Keep the candidate and both receipts
-in unresolved/rejected outcomes, outside the verified workbook and target
-count. Missing receipts or statuses and blocked, failed, or uncertain
-validation routes are unresolved and cannot appear on an accepted contact.
+and record explicit `valid`, or any other non-hard-rejection status with one
+nested `fallback` receipt for the same address. The fallback requires
+Deepline/BounceBan, API `status: success` and `result: deliverable` after
+trimming/case normalization. It must link to a distinct later successful paid
+email-validation route with exactly one paid call. Preserve the original
+ZeroBounce status and route, including recorded provider/runtime failures.
+Never allow fallback for invalid, do_not_mail, spamtrap, abuse, or a missing
+primary status/receipt; never chain fallbacks. A risky/unknown fallback stays
+unresolved; an undeliverable fallback is rejected. Keep the candidate and both
+receipts in unresolved/rejected outcomes, outside the verified workbook and
+target count unless BounceBan is successful and deliverable. Failed, blocked,
+or uncertain BounceBan routes remain unresolved.
 Validate `primary_contact` and every item in `backup_contacts` with
 the same role and role-group rules. When
 `request.contact_role_groups` is present, its `primary` and
@@ -992,8 +1005,9 @@ lead advances it. Acceptance uses the requested contact fields and preserves
 explicit email opt-outs; any stored email must pass the email gate. Before a paid
 Deepline execution, the agent must add its conservative cost upper bound to
 the amount already charged to the current count and must not run the call if
-the sum would exceed the allowance. This is an agent pre-call check and a
-post-run validation rule, not a spend cap enforced by the provider wrapper.
+the sum would exceed the allowance. The shared
+[paid-call ledger](adapter-io.md#paid-call-budget) enforces this cap before
+dispatch; post-run validation independently checks the recorded charges.
 Recorded counts must not move
 backward and cannot exceed the final number of accepted leads. The output
 limit, when present, must match the request limit. Artifacts without this
