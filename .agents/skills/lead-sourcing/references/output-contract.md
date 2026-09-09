@@ -57,13 +57,13 @@ complete artifact. All applicable semantic rules still apply.
    Every accepted primary contact must contain each requested field; otherwise
    the company remains unresolved. Every stored email must have a matching
    Deepline ZeroBounce validation receipt. Only an explicit ZeroBounce status
-   of `valid` passes directly (trimmed, case-insensitive). For any other
-   non-hard-rejection ZeroBounce status or recorded provider/runtime failure,
-   one successful BounceBan deliverable fallback may pass with both receipts
-   preserved. Reject hard-rejection statuses (`invalid`, `do_not_mail`,
-   `spamtrap`, `abuse`) and use `email_invalid` for those outcomes. A missing
-   primary status or receipt remains unresolved because it cannot preserve the
-   primary outcome. In the workbook unrequested fields are blank. Do not perform
+   of `valid` passes directly (trimmed, case-insensitive). For catch-all/unknown
+   or a recorded ZeroBounce service failure, one successful BounceBan deliverable fallback may pass with both
+   receipts preserved. Reject risky
+   statuses (`invalid`, `do_not_mail`, `spamtrap`, `abuse`); other statuses
+   remain unresolved. Use `email_invalid` for rejected email outcomes. A
+   missing status, missing receipt, failed call, or uncertain provider outcome
+   cannot pass by itself. In the workbook unrequested fields are blank. Do not perform
    contact-data lookup or email validation before the identity/current-role
    gate.
 8. `target_count` is the completion condition. After account or contact
@@ -441,9 +441,14 @@ top-level result list or hide rejected/unresolved rows in a count.
       "type": "object",
       "additionalProperties": false,
       "required": ["email", "status", "source"],
+      "allOf": [
+        {"if": {"properties": {"status": {"type": "null"}}, "required": ["status"]}, "then": {"required": ["provider_status"]}},
+        {"if": {"required": ["provider_status"]}, "then": {"properties": {"status": {"type": "null"}}}}
+      ],
       "properties": {
         "email": {"type": "string", "format": "email", "minLength": 3},
-        "status": {"type": "string", "minLength": 1},
+        "status": {"type": ["string", "null"], "minLength": 1},
+        "provider_status": {"enum": ["provider_error", "timeout", "rate_limited", "auth_failed", "quota_exceeded"]},
         "sub_status": {"type": ["string", "null"]},
         "fallback": {"$ref": "#/$defs/bounceban_validation"},
         "processed_at": {"type": ["string", "null"]},
@@ -865,10 +870,16 @@ prices require a free price-discovery action, not an invented budget failure.
 Provider budget allocations may be changed only under the existing shared-cap
 rules; lack of allocation to an otherwise useful provider is not tool exhaustion.
 
-Record `approval_required` only when an applicable instruction or actual runtime
-denial requires approval the user has not already given; cite that source.
-Continue unaffected actions and retire resolved blockers on resume, retaining
-historical receipts.
+Before recording `approval_required`, apply the
+[authorization rules](../SKILL.md#authorization) and check the current request,
+prior user approvals, and trusted application job context. A contact email or
+change of provider is not itself a missing approval. Cite the exact applicable
+instruction or actual runtime denial and preserve its source in the report;
+an agent-authored blocker is not proof of a platform refusal. On resume, remove
+resolved blockers from next actions while retaining historical receipts. An
+email-validation denial does not block company discovery or other permitted
+work. The validator checks the recorded blocker structure and references; it
+cannot independently verify user authorization or a runtime denial.
 
 Run `python3 scripts/validate_run.py <results.json> --check-stop` before the next
 action. Draft results are allowed; budget/cost receipts must reconcile. The
@@ -920,20 +931,24 @@ function; every accepted contact's `requested_role` must be in
 by the effective field set, which defaults to email. Every accepted primary
 must contain every requested field. Every stored email, including an email on
 a backup, must have an `email_validation` receipt for the same address. Its
-source must identify Deepline and ZeroBounce, link to the matching successful
-or partial `email_validation` route, use the same dynamically discovered tool,
-and record explicit `valid`, or any other non-hard-rejection status with one
-nested `fallback` receipt for the same address. The fallback requires
-Deepline/BounceBan, API `status: success` and `result: deliverable` after
-trimming/case normalization. It must link to a distinct later successful paid
-email-validation route with exactly one paid call. Preserve the original
-ZeroBounce status and route, including recorded provider/runtime failures.
-Never allow fallback for invalid, do_not_mail, spamtrap, abuse, or a missing
-primary status/receipt; never chain fallbacks. A risky/unknown fallback stays
-unresolved; an undeliverable fallback is rejected. Keep the candidate and both
-receipts in unresolved/rejected outcomes, outside the verified workbook and
-target count unless BounceBan is successful and deliverable. Failed, blocked,
-or uncertain BounceBan routes remain unresolved.
+source must identify Deepline and ZeroBounce, link to the matching
+`email_validation` route, use the same dynamically discovered tool,
+and record explicit `valid`, or `catch-all`/`unknown` with one nested `fallback`
+receipt for the same address. A service failure instead records `status: null`
+and `provider_status` equal to the failed execution route: `provider_error`,
+`timeout`, `rate_limited`, `auth_failed`, or `quota_exceeded`. It may use the
+same single fallback. `schema_error`, `config_error`, missing receipts, and
+unrecognized verdicts are ineligible. Non-failure ZeroBounce receipts still
+require an `ok` or `partial` route. The fallback requires Deepline/BounceBan, API
+`status: success` and `result: deliverable` after trimming/case normalization.
+It must link to a distinct later successful paid email-validation route with
+exactly one paid call. Preserve the original ZeroBounce status. Never allow
+fallback for invalid, do_not_mail, spamtrap, abuse, or unfamiliar verdicts;
+never chain fallbacks. A risky/unknown fallback stays unresolved;
+an undeliverable fallback is rejected. Keep the candidate and both receipts
+in unresolved/rejected outcomes, outside the verified workbook and target
+count. The failed ZeroBounce route and its cost reservation remain in the
+audit after successful fallback; a failure alone never accepts an email.
 Validate `primary_contact` and every item in `backup_contacts` with
 the same role and role-group rules. When
 `request.contact_role_groups` is present, its `primary` and

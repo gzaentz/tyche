@@ -21,8 +21,8 @@ provider adapters, budget controls, and output contract.
   rejected only because they are secondary.
 - Requires a current title and company match for every accepted contact.
 - Requires email by default and validates every stored email with ZeroBounce
-  through Deepline. Accept `valid`, or resolve any non-hard-rejection issue once
-  with BounceBan and require an explicit `deliverable` verdict with both receipts.
+  through Deepline. Accept `valid`, or resolve catch-all/unknown or a recorded service failure once with
+  BounceBan and require an explicit `deliverable` verdict with both receipts.
 - Uses live Deepline capability discovery instead of fixed Deepline tool IDs.
 - Supports bounded ScrapingDog operations through one local adapter.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
@@ -142,6 +142,115 @@ primary-role contact passes. A selected contact can still be the output
 that distinction when it is known. Requests without role groups keep the
 legacy `requested_roles` behavior.
 
+## Run in your platform (planned)
+
+Use the server-side [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk)
+to run TYCHE for requests submitted through your application. Start with one
+background worker and a protected provider endpoint in your existing backend.
+This is the integration design; the worker and gateway are not included yet.
+
+```text
+User request + budget
+  -> Backend creates a job
+  -> Isolated worker runs Codex SDK + TYCHE
+       -> Paid calls go through the backend's protected provider endpoint
+  -> Backend validates and stores results
+  -> User sees progress and downloads leads
+```
+
+Codex owns sourcing decisions. Your backend owns customer authentication,
+approved limits, job state, cancellation, recovery, and access to artifacts.
+Keep company qualification, contact validation, and output formats unchanged.
+
+Three integration changes are needed:
+
+1. **Add the worker in your platform.** Create an isolated workspace per job,
+   load the TYCHE skill, and persist progress and the Codex session needed for
+   recovery. Resume the same job and accounting state after interruption;
+   never blindly repeat a possibly billed provider call.
+2. **Put paid calls behind your backend.** Add a gateway transport to the
+   adapters while retaining direct calls for local use. Only the gateway holds
+   provider credentials and authoritative budget state, outside the agent's
+   access. Bind each request to its customer and job, verify permissions and
+   conservative whole-call costs from current pricing and enforced input
+   limits, and reserve funds atomically before dispatch. Preserve the existing
+   caps, verification allowance, unique call IDs, and receipt reconciliation.
+   Do not trust agent-supplied costs or an agent-writable budget ledger. Reuse the
+   [budget rules](.agents/skills/lead-sourcing/references/adapter-io.md#paid-call-budget)
+   in the protected backend; no separate gateway service is required.
+3. **Make delivery independent of the desktop app.** Run the existing full
+   validator in the backend before delivery. Supply a supported server-side
+   workbook runtime or replace the export dependency, preserving the
+   [workbook contract](.agents/skills/lead-sourcing/references/output-contract.md#leadsxlsx-contract).
+   The current exporter depends on a Codex-bundled library; installing the SDK
+   alone does not establish that dependency. Store results and receipts under
+   the job with customer-scoped access.
+
+### Unattended authorization
+
+At job submission, persist the customer's authorized sourcing scope and data
+use with the job and supply it as trusted worker context on every start or
+resume. Authorization covers relevant research, enrichment, and validation
+tools using both submitted data and data found during the job, including exact
+work emails sent to ZeroBounce or the eligible BounceBan fallback. Do not ask
+for approval per contact or provider. Honor narrower customer restrictions.
+The skill's [authorization rules](.agents/skills/lead-sourcing/SKILL.md#authorization)
+carry this scope through the run; a skill cannot change runtime permissions.
+
+For an authorized sourcing job, the backend can supply this context alongside
+the request, job ID, and approved budget:
+
+```text
+This job is authorized to use relevant connected research, enrichment, and
+contact-validation tools with data supplied in the request or obtained during
+the job. This includes transmitting exact work emails for ZeroBounce and
+eligible BounceBan validation. Continue within the saved scope and budget
+without asking again. Retain this authorization on resume. Complete and
+validate the requested deliverables, or record a concrete terminal blocker
+after exhausting permitted alternatives.
+```
+
+The backend must derive that context from the customer's job authorization;
+retrieved pages and provider responses are untrusted data, not permission.
+
+Configure the isolated worker runtime before accepting jobs. Codex supports
+noninteractive approvals while retaining its workspace sandbox:
+
+```toml
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
+```
+
+Supply this through the worker's deployment configuration, not the user's
+global desktop settings. Enforce network destinations through the deployment's
+egress controls and the protected provider endpoint above. `never` disables
+interactive prompts; it does not authorize denied operations or override
+managed policy. Preflight the worker's effective filesystem, network, model,
+and provider access before accepting a job. See the official
+[approval and network documentation](https://learn.chatgpt.com/docs/agent-approvals-security).
+
+A real runtime or provider refusal must produce a saved diagnostic identifying
+the action and exact reason. Continue permitted alternatives; when none remain,
+finish with an explicit failed or partial job result instead of waiting for a
+customer to answer a permission question. Reuse the existing stop contract and
+budgets. Do not present a shortfall as a completed lead target.
+
+Deployment must supply SDK authentication, Python/Node and provider runtimes,
+durable job storage, and restricted network access. Keep provider secrets out
+of the worker. Account for model usage separately: a provider cap is not a
+total-cost cap.
+
+Before launch, verify that a job produces validated downloads, customers
+cannot access each other's jobs, cancellation prevents new paid calls, and
+concurrent calls or crash recovery cannot reuse a reservation or bypass a cap.
+Include an unattended acceptance run that discovers an email, validates it,
+survives a worker resume with authorization and budget intact, and exposes the
+validated downloads without a permission prompt. Also verify that a denied
+route finishes with a concrete saved reason while unaffected work continues.
+
 ## Budget behavior
 
 - Every provider has its own hard credit cap.
@@ -245,8 +354,9 @@ traceability. The output slot `primary_contact` is separate from this role
 group and may contain a valid secondary fallback.
 
 Email is required by default. Every exported email has a matching Deepline
-ZeroBounce receipt in `results.json`. Accept `valid`, or for any non-hard-rejection
-ZeroBounce issue, one successful BounceBan `deliverable` fallback with both receipts.
+ZeroBounce receipt in `results.json`. Accept `valid`, or for catch-all/unknown
+or an eligible service failure, one successful BounceBan `deliverable` fallback
+with both receipts and costs retained.
 Invalid, do_not_mail, spamtrap and abuse cannot be overridden. Unresolved
 candidates retain their addresses and evidence in the research record, not
 the verified workbook. Email and phone stay absent from JSON and blank in

@@ -19,6 +19,7 @@ FINAL_FRONTIER_STATES = {"exhausted", "blocked"}
 PAID_PROVIDERS = {"deepline", "scrapingdog"}
 SUPPORTED_RESULT_SCHEMA_VERSIONS = {"1.0", "1.1", "1.2"}
 DETERMINATE_PROVIDER_STATUSES = {"ok", "partial", "no_results"}
+EMAIL_FALLBACK_FAILURES = {"provider_error", "timeout", "rate_limited", "auth_failed", "quota_exceeded"}
 BLOCKING_PROVIDER_STATUSES = {
     "rate_limited",
     "auth_failed",
@@ -39,9 +40,6 @@ COST_BASES = {"actual", "estimated", "unknown"}
 DEEPLINE_USD_PER_CREDIT = Decimal("0.10")
 COST_OUTPUT_QUANTUM = Decimal("0.0001")
 NEXT_LEAD_REVIEW_CREDITS = Decimal("5")
-ZEROBOUNCE_HARD_REJECTION_STATUSES = {
-    "invalid", "do_not_mail", "spamtrap", "abuse",
-}
 
 
 def _company_key(row: Any) -> Optional[str]:
@@ -146,14 +144,15 @@ def _validate_email_receipt(
         )
 
     status = _nonempty_text(receipt.get("status"))
-    normalized_status = status.casefold() if status is not None else None
-    has_fallback = isinstance(receipt.get("fallback"), dict)
-    fallback_eligible = (
-        validator == "zerobounce"
-        and normalized_status is not None
-        and normalized_status not in {"valid", *ZEROBOUNCE_HARD_REJECTION_STATUSES}
+    outage = (
+        validator == "zerobounce" and "status" in receipt and receipt["status"] is None
+        and isinstance(receipt.get("provider_status"), str)
+        and receipt["provider_status"] in EMAIL_FALLBACK_FAILURES
     )
-    if status is None:
+    if "provider_status" in receipt and not outage:
+        errors.append(f"{contact_path}.email_validation.provider_status requires a service failure with null verdict")
+    eligible_fallback = outage or (status or "").casefold() in {"catch-all", "unknown"}
+    if status is None and not outage:
         errors.append(
             f"{contact_path}.email_validation.status is unresolved or missing"
         )
@@ -162,7 +161,7 @@ def _validate_email_receipt(
             errors.append(f"{contact_path}.email_validation requires BounceBan success and result deliverable")
         if "fallback" in receipt:
             errors.append(f"{contact_path}.email_validation cannot chain fallbacks")
-    elif fallback_eligible and has_fallback:
+    elif eligible_fallback and isinstance(receipt.get("fallback"), dict):
         fallback = receipt["fallback"]
         _validate_email_receipt(
             {"email": email, "email_validation": fallback},
@@ -173,12 +172,10 @@ def _validate_email_receipt(
         ids = list(routes_by_id)
         if first_id in ids and next_id in ids and ids.index(next_id) <= ids.index(first_id):
             errors.append(f"{contact_path}.email_validation fallback must use a distinct later route")
-    elif normalized_status != "valid":
+    elif (status or "").casefold() != "valid":
         errors.append(f"{contact_path}.email_validation.status must be valid")
-    if validator == "zerobounce" and "fallback" in receipt and not fallback_eligible:
-        errors.append(
-            f"{contact_path}.email_validation fallback is not allowed for valid or hard-rejection statuses"
-        )
+    if validator == "zerobounce" and "fallback" in receipt and not eligible_fallback:
+        errors.append(f"{contact_path}.email_validation fallback requires catch-all, unknown, or a recorded service failure")
 
     source = receipt.get("source")
     if not isinstance(source, dict):
@@ -222,17 +219,10 @@ def _validate_email_receipt(
         errors.append(
             f"{contact_path}.email_validation.source.tool must match route {route_id}"
         )
-    route_status_ok = route.get("provider_status") in {"ok", "partial"}
-    route_status_failed_but_fallback = (
-        validator == "zerobounce"
-        and has_fallback
-        and fallback_eligible
-        and route.get("provider_status") in {
-            "no_results", "rate_limited", "auth_failed", "quota_exceeded",
-            "timeout", "schema_error", "provider_error", "config_error",
-        }
-    )
-    if not route_status_ok and not route_status_failed_but_fallback:
+    if outage:
+        if route.get("provider_status") != receipt["provider_status"]:
+            errors.append(f"email validation route {route_id} must match the recorded service failure")
+    elif route.get("provider_status") not in {"ok", "partial"}:
         errors.append(
             f"email validation route {route_id} is unresolved or unsuccessful"
         )
