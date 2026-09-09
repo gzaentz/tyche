@@ -865,6 +865,17 @@ prices require a free price-discovery action, not an invented budget failure.
 Provider budget allocations may be changed only under the existing shared-cap
 rules; lack of allocation to an otherwise useful provider is not tool exhaustion.
 
+Before recording `approval_required`, apply the
+[authorization rules](../SKILL.md#authorization) and check the current request,
+prior user approvals, and trusted application job context. A contact email or
+change of provider is not itself a missing approval. Cite the exact applicable
+instruction or actual runtime denial and preserve its source in the report;
+an agent-authored blocker is not proof of a platform refusal. On resume, remove
+resolved blockers from next actions while retaining historical receipts. An
+email-validation denial does not block company discovery or other permitted
+work. The validator checks the recorded blocker structure and references; it
+cannot independently verify user authorization or a runtime denial.
+
 Run `python3 scripts/validate_run.py <results.json> --check-stop` before the next
 action. Draft results are allowed; budget/cost receipts must reconcile. The
 decision uses qualified accepted rows, the actual current UTC time, confirmed

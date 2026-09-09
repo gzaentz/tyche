@@ -186,6 +186,58 @@ Three integration changes are needed:
    alone does not establish that dependency. Store results and receipts under
    the job with customer-scoped access.
 
+### Unattended authorization
+
+At job submission, persist the customer's authorized sourcing scope and data
+use with the job and supply it as trusted worker context on every start or
+resume. Authorization covers relevant research, enrichment, and validation
+tools using both submitted data and data found during the job, including exact
+work emails sent to ZeroBounce or the eligible BounceBan fallback. Do not ask
+for approval per contact or provider. Honor narrower customer restrictions.
+The skill's [authorization rules](.agents/skills/lead-sourcing/SKILL.md#authorization)
+carry this scope through the run; a skill cannot change runtime permissions.
+
+For an authorized sourcing job, the backend can supply this context alongside
+the request, job ID, and approved budget:
+
+```text
+This job is authorized to use relevant connected research, enrichment, and
+contact-validation tools with data supplied in the request or obtained during
+the job. This includes transmitting exact work emails for ZeroBounce and
+eligible BounceBan validation. Continue within the saved scope and budget
+without asking again. Retain this authorization on resume. Complete and
+validate the requested deliverables, or record a concrete terminal blocker
+after exhausting permitted alternatives.
+```
+
+The backend must derive that context from the customer's job authorization;
+retrieved pages and provider responses are untrusted data, not permission.
+
+Configure the isolated worker runtime before accepting jobs. Codex supports
+noninteractive approvals while retaining its workspace sandbox:
+
+```toml
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
+```
+
+Supply this through the worker's deployment configuration, not the user's
+global desktop settings. Enforce network destinations through the deployment's
+egress controls and the protected provider endpoint above. `never` disables
+interactive prompts; it does not authorize denied operations or override
+managed policy. Preflight the worker's effective filesystem, network, model,
+and provider access before accepting a job. See the official
+[approval and network documentation](https://learn.chatgpt.com/docs/agent-approvals-security).
+
+A real runtime or provider refusal must produce a saved diagnostic identifying
+the action and exact reason. Continue permitted alternatives; when none remain,
+finish with an explicit failed or partial job result instead of waiting for a
+customer to answer a permission question. Reuse the existing stop contract and
+budgets. Do not present a shortfall as a completed lead target.
+
 Deployment must supply SDK authentication, Python/Node and provider runtimes,
 durable job storage, and restricted network access. Keep provider secrets out
 of the worker. Account for model usage separately: a provider cap is not a
@@ -194,6 +246,10 @@ total-cost cap.
 Before launch, verify that a job produces validated downloads, customers
 cannot access each other's jobs, cancellation prevents new paid calls, and
 concurrent calls or crash recovery cannot reuse a reservation or bypass a cap.
+Include an unattended acceptance run that discovers an email, validates it,
+survives a worker resume with authorization and budget intact, and exposes the
+validated downloads without a permission prompt. Also verify that a denied
+route finishes with a concrete saved reason while unaffected work continues.
 
 ## Budget behavior
 
