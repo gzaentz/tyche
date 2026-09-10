@@ -5,9 +5,8 @@ description: Source evidence-backed companies with current buying signals and re
 
 # TYCHE Lead Sourcing
 
-Find companies first, then their requested buyers. Use Deepline and
-ScrapingDog wrappers; tools are choices, not a checklist.
-Do not add a server, database, CRM write, or outreach.
+Find companies, then requested buyers, using Deepline/ScrapingDog wrappers.
+Do not add servers, databases, CRM writes, or outreach.
 
 ## Authorization
 
@@ -61,9 +60,11 @@ invent limits or stop because a batch finished. Read the
    route ID. Never bypass the guard; save redacted responses with `--output-file`
    and never retry an uncertain paid call.
 3. **Verify the company.** Deduplicate domains and owner groups. Read sources
-   for separate company-fit and current-signal evidence. Snippets, keywords,
+   for company fit and buying rationale separately. Snippets, keywords,
    and missing results are not qualification or rejection proof. Keep rejected
-   companies, missing evidence, and provider failures separate.
+   companies, missing evidence, and provider failures separate. Follow the
+   [qualification policy](references/workflow-rules.md#qualification-policy):
+   verify must-haves, rank optional intent, and label grounded use-case inferences.
 4. **Verify the buyer, then their email.** Account fit and current role must
    pass before lookup. Respect requested role groups and fields. Email defaults
    to Deepline ZeroBounce `valid`, or one BounceBan `success` + `deliverable`
@@ -80,22 +81,21 @@ invent limits or stop because a batch finished. Read the
 
 ## Full cost
 
-Report provider spend, run-scoped model cost, combined total, and cost per
-accepted lead. Include retries and verification without double counting. Label
-estimates; incomplete usage means full cost is unknown. Keep caps separate.
+Report provider spend, run-scoped model cost, total, and cost/accepted lead.
+Include retries/verification without double counting. Label estimates and
+unknown full costs; keep caps separate.
 
 ## References
 
-Read [workflow-rules.md](references/workflow-rules.md) for evidence, roles,
-budget, and shortfall rules. Load remaining references by phase and reuse them.
+Read [workflow rules](references/workflow-rules.md); reuse phase-loaded references.
 
 | Phase | Required reading |
 |---|---|
-| Normalize the request, before discovery | [Lifecycle invariants](references/output-contract.md#lifecycle-invariants), [input contract](references/output-contract.md#input-contract), and [timing](references/output-contract.md#timing). |
-| Choose or change a route | [Tool index](references/tools.md); only the relevant capability section and selected adapter contract it links. |
-| Before recording the first route; when adding record fields | [Result semantics](references/output-contract.md#semantic-checks), [source attribution](references/output-contract.md#accepted-lead-sources), and the relevant [schema definitions](references/output-contract.md#resultsjson-schema). |
-| Qualify companies and write accepted rows | [Client writing and taxonomy](references/output-contract.md#client-writing-and-taxonomy-version-12). |
-| Export, validate, and deliver | [Workbook contract](references/output-contract.md#leadsxlsx-contract), [report requirements](references/output-contract.md#reportmd-minimum-contents), and [final-response checklist](references/output-contract.md#final-response-checklist). |
+| Before discovery | [Lifecycle invariants](references/output-contract.md#lifecycle-invariants), [input contract](references/output-contract.md#input-contract), and [timing](references/output-contract.md#timing). |
+| Route choice/change | [Tool index](references/tools.md); selected capability and linked adapter contract. |
+| First route/new fields | [Result semantics](references/output-contract.md#semantic-checks), [source attribution](references/output-contract.md#accepted-lead-sources), and the relevant [schema definitions](references/output-contract.md#resultsjson-schema). |
+| Qualification | [Client writing and taxonomy](references/output-contract.md#client-writing-and-taxonomy-version-12). |
+| Delivery | [Workbook contract](references/output-contract.md#leadsxlsx-contract), [report requirements](references/output-contract.md#reportmd-minimum-contents), and [final-response checklist](references/output-contract.md#final-response-checklist). |
 
 Phase loading never skips full artifact validation or an applicable safety
 check. Use the bundled workspace dependencies for workbook generation;

@@ -81,8 +81,13 @@ complete artifact. All applicable semantic rules still apply.
 10. All dates are ISO calendar dates. A relative provider date may be resolved
    from retrieval time only when the original wording is retained in
    `report.md`; never invent a date or a person.
-11. `signal_match_mode` defaults to `any`. It applies across the entries in
-   `buying_signals`; facts joined inside one signal query remain conjunctive.
+11. `signal_match_mode` defaults to `any`. For required intent, apply it
+   across required entries in `buying_signals`; facts within a query stay
+   conjunctive. Apply the [qualification policy](workflow-rules.md#qualification-policy).
+   Preserve optional hypotheses in the request and mark their existing
+   qualification checks preferred; do not silently promote them to must-haves.
+   When none are supplied, record a preferred use-case hypothesis in
+   `buying_signals`, clearly identified as inferred rather than a user requirement.
    A signal's `min_age_days` and `max_age_days` are measured backwards from
    the effective as-of date. `min_age_days` is optional and defaults to zero;
    when both bounds are present, the minimum must not exceed the maximum.
@@ -951,9 +956,14 @@ present; every accepted contact's
 equal one plus the number of backups; `backup_shortfall` must equal
 `max(0, request.contacts_per_company - contact_candidate_count)`; each accepted
 account domain must be unique; `account_fit` must support ICP fit;
-`signal_evidence` must support a signal selected by `signal_match_mode` and
-fall within that signal's bounds (or the input time window when a signal bound
-is absent); their evidence URLs and sources may differ; contact evidence must
+when the request requires intent, `signal_evidence` must support a requested
+signal under `signal_match_mode` and its applicable bounds. When intent is
+optional, missing intent does not block qualification: the existing signal
+fields may instead explain a conditional use case grounded in sourced business
+facts, explicitly labeled `Inferred use case`, not observed buying intent.
+Keep optional signal checks preferred, document the request interpretation,
+and never use this fallback for a required signal. Evidence URLs and sources
+may differ; contact evidence must
 explicitly support a current role at that company; `approved_family` must be
 within the full user-approved role family and never an unapproved adjacent
 function; every accepted contact's `requested_role` must be in
@@ -1261,7 +1271,9 @@ unverified optional values as empty cells rather than placeholder text.
   layoffs, an existing service is not unmet demand, and an old opening is not
   newly dated intent. Do not turn observation dates into event dates.
 - Keep `signal_evidence.signal` short and consistent within the request, such as
-  `New HR leader`, `Announced layoffs` or `Housing expansion`. Preserve detailed
+  `New HR leader`, `Announced layoffs` or `Housing expansion`. Use
+  `Inferred use case` when intent is optional and only a grounded hypothesis
+  is available; disclose what is unknown in `intent_details`. Preserve detailed
   claims in evidence and prose. Every factual clause in the narrative must be
   supported by the saved signal or qualification evidence for that company.
   Save additional supporting sources as existing qualification-check evidence;

@@ -184,9 +184,10 @@ valid fallbacks; do not turn a secondary fallback into a contact false
 negative. Resolve obvious company identity ambiguity before paid work.
 Numeric employee filters use inclusive range semantics: a company passes when
 its verified count is between the requested minimum and maximum. Translate that
-range to the provider's live field semantics. If the provider exposes upper-bound
-buckets, select every bucket that overlaps the requested range and verify the
-exact count from external evidence before acceptance.
+range to the provider's live field semantics. For discovery, include every
+provider bucket that overlaps the requested range. For acceptance, one credible
+count or range wholly within the requested bounds suffices. A bucket crossing
+a boundary needs further verification, not automatic rejection.
 
 1. Record the request, assumptions, signal hypotheses, route frontier, and
    budget. Seed the frontier with materially different discovery paths for the
@@ -267,15 +268,37 @@ exact count from external evidence before acceptance.
    directory. If validation reports an actionable frontier item or incomplete
    stop audit, continue the run instead of presenting it as complete.
 
+## Qualification policy
+
+Keep one model and the existing outcomes; do not add scores or gates.
+
+- Separate user must-haves from preferences at normalization. Preserve explicit
+  constraints, required signals and their windows; do not silently add them.
+  Optional intent improves ranking, not eligibility. Record the distinction in
+  the report and existing required/preferred qualification checks.
+- Verify must-haves. Ordinary workflows may be inferred from sourced business
+  facts when a plausible use case is enough for the request. Label the inference
+  and its basis in existing evidence/prose; never imply observed pain, intent,
+  incumbent tools or manual processes. Likely handling agreements does not
+  establish paper signing. A specifically required workflow needs evidence.
+- One credible source can suffice. Use the same standard for every candidate;
+  match current responsibilities and seniority, not literal titles. Resolve
+  material contradictions, not merely overlapping headcount ranges.
+- Accept supported must-haves, even without optional intent. Keep missing
+  must-haves unresolved; reject evidenced mismatches. Recover the specific gap
+  through another source, signal or buyer within existing limits. A bad signal
+  or buyer does not reject the company. Do not count unresolved rows as qualified.
+
 ## Gates, statuses, and artifacts
 
-The account gate requires trimmed, non-empty canonical `company` and `domain`,
-an `account_fit` object with an explicit ICP `fit_claim`, and a separate
-`signal_evidence` object with a current `signal` claim. Each object requires its
-own evidence URL, date, date basis, text, and source; the URLs and sources may
-differ. Each URL must identify the same company and substantiate its own claim;
-a search-results page, profile-only fit fact, stale date, or unsupported
-inference fails the relevant gate. Resolve relative dates from retrieval time
+The account gate requires canonical `company` and `domain`, an evidenced
+`account_fit`, and separate `signal_evidence`. Apply the qualification policy:
+require a current observed signal only when the request requires it. Otherwise
+`signal_evidence` may contain a clearly labeled inferred use case grounded in
+sourced business facts, with unknown pain, intent and incumbent tools disclosed.
+Preserve URL, date, date basis, text and source for each object's supporting
+facts. An observation date dates the business facts, never an inferred event.
+Unsupported facts, search-results pages and stale required signals cannot pass. Resolve relative dates from retrieval time
 and retain the original wording in the report. When `qualification_checks` is
 present, record each criterion as `pass`, `fail`, or `unknown` with its
 `required`/`preferred` importance and an evidence array. Reject only an
