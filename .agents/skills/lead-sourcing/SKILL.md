@@ -49,7 +49,10 @@ invent limits or stop because a batch finished. Read the
    Use spending and explicit time limits, never paid-call counts.
    Load credentials through repository setup; an unloaded `.env` is not a
    missing key. Use [tools.md](references/tools.md), then search and describe
-   the Deepline tool before every execution.
+   the Deepline tool before every execution. Deepline calls need network access;
+   in a restricted environment, use the host's supported approval mechanism.
+   Before treating DNS or `NETWORK_ERROR` failures as provider outages, follow
+   [network access recovery](references/deepline-adapter.md#network-access).
 2. **Pilot within budget.** Use no-cost company sources first. Initialize the
    [paid-call ledger](references/adapter-io.md#paid-call-budget) before spending
    and protect email verification. Start each discovery route with one paid

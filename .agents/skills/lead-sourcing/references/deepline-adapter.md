@@ -15,6 +15,32 @@ schemas, prices, and bounded company, signal, or contact candidates. A catalog
 hit is not company or contact evidence. A disconnected tool is not an empty
 result.
 
+### Network access
+
+The wrapper and its CLI subprocess inherit the host's network restrictions.
+When network access is restricted, use the supported approved execution path
+for Deepline calls. In Codex, request `sandbox_permissions: "require_escalated"`
+with a scoped justification on the host execution tool; this is not a shell
+flag or Deepline request field. Reuse applicable existing approvals.
+
+`NETWORK_ERROR`, `fetch failed`, and `Could not resolve host` can reflect local
+sandbox restrictions. Before declaring Deepline unavailable, check execution
+permissions and retry a no-cost catalog `search` or `describe` through the
+approved path. A successful health check alone does not establish catalog
+access. Save both attempt receipts. If catalog access succeeds, remove resolved
+access blockers, rerun the stop check, and continue eligible work with the
+existing budget, start time, and reservations.
+
+If approval is denied, preserve the denial and affected action, honor that
+boundary, and continue unaffected work. Do not change global sandbox or DNS
+settings or pin host IPs as a workaround. If approved execution still fails,
+record that evidence and leave the cause uncertain unless further diagnostics
+establish it.
+
+Use free catalog calls for connectivity diagnostics. Never retry a paid
+`execute` whose remote outcome is uncertain; preserve its receipt and spend
+reservation even when a later catalog check succeeds.
+
 ### Capability discovery
 
 Search the live catalog with narrow seeds that match the hypothesis. These are
@@ -60,7 +86,7 @@ when rows are relevant, diverse, and evidentiary. The wrapper invokes
 `deepline tools search`, `describe`, or
 `execute`, writes a temporary payload file, redacts secrets, and emits one JSON
 object. Catalog calls default to 30 seconds (cap 120); execute calls
-default to 240 seconds (cap 780). Never automatically retry an uncertain call.
+default to 240 seconds (cap 780). Never automatically retry an uncertain paid call.
 After each execute, use billed usage as `cost_credits` with
 `cost_basis: "actual"`. If billed usage is unavailable but the live description
 gives a conservative bound for all calls recorded by the route, use
