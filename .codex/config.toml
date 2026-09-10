@@ -1,0 +1,12 @@
+# TYCHE-only unattended sourcing; managed and task-level policy still apply.
+web_search = "live"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
+
+# This allowlist governs command traffic, not built-in web search.
+[features.network_proxy]
+enabled = true
+domains = { "code.deepline.com" = "allow", "api.scrapingdog.com" = "allow" }
