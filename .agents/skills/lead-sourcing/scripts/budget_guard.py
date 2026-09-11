@@ -171,7 +171,9 @@ def check_allowance(state, provider, bound, accepted_count, *, verification=Fals
                 if call["actual_usd"] is None else amount(call["actual_usd"], "receipted USD"))
         if call["verification"]:
             verified += charge
-        if name == "deepline" and call["accepted_leads_before_call"] == accepted_count:
+        # A review can remove accepted leads. Keep spend at higher historical
+        # counts in the current allowance; a correction never creates credit.
+        if name == "deepline" and call["accepted_leads_before_call"] >= accepted_count:
             since_last_lead += charge
     hold = max(Decimal(0), Decimal(state["verification_reserve_credits"]) - verified)
     credits["deepline"] += hold
@@ -205,8 +207,6 @@ def reserve(spend, provider, *, verification=False):
             raise BudgetError("ledger belongs to a different run; do not copy or reset budget state")
         check_limits(document, state)
         calls = state["calls"]
-        if any(call["accepted_leads_before_call"] > len(accepted) for call in calls.values()):
-            raise BudgetError("accepted count moved backwards; reconcile the ledger before further paid work")
         if route_id in calls:
             raise BudgetError("route_id already reserved or charged; do not repeat a possibly billed call")
         # Catch recorded calls made outside the ledger instead of forgetting them.

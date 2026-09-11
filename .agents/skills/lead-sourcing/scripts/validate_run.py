@@ -799,10 +799,7 @@ def _validate_next_lead_budget(document: dict[str, Any], errors: list[str]) -> N
     routes = document.get("routes", [])
     if not isinstance(routes, list):
         return
-    accepted = document.get("accepted", [])
-    accepted_count = len(accepted) if isinstance(accepted, list) else 0
     grouped_costs: dict[int, Decimal] = {}
-    previous_accepted_before: int | None = None
     for index, route in enumerate(routes):
         if not isinstance(route, dict):
             continue
@@ -819,21 +816,6 @@ def _validate_next_lead_budget(document: dict[str, Any], errors: list[str]) -> N
                 "next-lead Deepline allowance is active"
             )
             continue
-        if accepted_before > accepted_count:
-            errors.append(
-                f"routes[{index}].accepted_leads_before_call cannot exceed the "
-                f"final accepted lead count {accepted_count}"
-            )
-        if (
-            previous_accepted_before is not None
-            and accepted_before < previous_accepted_before
-        ):
-            errors.append(
-                f"routes[{index}].accepted_leads_before_call must not decrease "
-                "across paid Deepline routes"
-            )
-        previous_accepted_before = accepted_before
-
         basis = route.get("cost_basis")
         if basis == "actual":
             charge = _decimal(route.get("cost_credits"))
@@ -849,11 +831,13 @@ def _validate_next_lead_budget(document: dict[str, Any], errors: list[str]) -> N
             continue
         grouped_costs[accepted_before] = grouped_costs.get(accepted_before, Decimal("0")) + charge
 
-    for accepted_before, total in sorted(grouped_costs.items()):
+        # Check each dispatch against all spend recorded so far at its count
+        # or higher. Later demotions do not invalidate previously legal calls.
+        total = sum(cost for group, cost in grouped_costs.items() if group >= accepted_before)
         if total > limit:
             errors.append(
                 "Deepline next-lead allowance exceeded for "
-                f"accepted_leads_before_call={accepted_before}: {total} > {limit} credits"
+                f"routes[{index}] at accepted_leads_before_call={accepted_before}: {total} > {limit} credits"
             )
 
 
@@ -897,10 +881,10 @@ def calculate_progress(document: dict[str, Any]) -> dict[str, Any]:
         if route.get("provider") != "deepline" or not isinstance(route.get("paid_calls"), int) or route["paid_calls"] < 1:
             continue
         group = route.get("accepted_leads_before_call")
-        if type(group) is not int or group < 0 or group > len(accepted):
+        if type(group) is not int or group < 0:
             unknown = True
             continue
-        if group != len(accepted):
+        if group < len(accepted):
             continue
         basis = route.get("cost_basis")
         amount = _decimal(route.get("cost_credits") if basis == "actual" else route.get("cost_upper_bound_credits"))

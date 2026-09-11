@@ -1010,7 +1010,11 @@ fields may instead explain a conditional use case grounded in sourced business
 facts, explicitly labeled `Inferred use case`, not observed buying intent.
 Keep optional signal checks preferred, document the request interpretation,
 and never use this fallback for a required signal. Evidence URLs and sources
-may differ; contact evidence must
+may differ. Follow the [qualification policy](workflow-rules.md#qualification-policy)
+to corroborate the same project across sources: use the dated activity in
+`signal_evidence`, retain technical corroboration in the relevant
+`qualification_checks[].evidence` arrays, and explain the linkage in
+`intent_details`. Keep each source's own date and attribution. Contact evidence must
 explicitly support a current role at that company; `approved_family` must be
 within the full user-approved role family and never an unapproved adjacent
 function; every accepted contact's `requested_role` must be in
@@ -1101,17 +1105,20 @@ record the non-negative `accepted_leads_before_call` count. Sum each route's
 actual `cost_credits`, or its `cost_upper_bound_credits` when
 `cost_basis` is `estimated`, by that count. A paid Deepline route with unknown
 cost cannot prove the allowance and is invalid while the guard is active. The
-sum for each count must not exceed the configured allowance. Route changes,
+sum at each dispatch must include all earlier costs at that count or higher
+and must not exceed the configured allowance. Route changes,
 rejections, and failed lookups do not change the count; only a fully accepted
 lead advances it. Acceptance uses the requested contact fields and preserves
 explicit email opt-outs; any stored email must pass the email gate. Before a paid
 Deepline execution, the agent must add its conservative cost upper bound to
-the amount already charged to the current count and must not run the call if
+the amount already charged at the current count or higher and must not run the call if
 the sum would exceed the allowance. The shared
 [paid-call ledger](adapter-io.md#paid-call-budget) enforces this cap before
 dispatch; post-run validation independently checks the recorded charges.
-Recorded counts must not move
-backward and cannot exceed the final number of accepted leads. The output
+Review may reduce the accepted count below historical snapshots. Preserve
+those snapshots and all costs; neither demotion nor reacceptance erases spend.
+Recompute the remaining allowance without retroactively invalidating calls
+that were affordable when made. The output
 limit, when present, must match the request limit. Artifacts without this
 optional field remain valid for backward compatibility.
 

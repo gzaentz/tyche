@@ -232,6 +232,48 @@ except (ValueError, OSError):
         with self.assertRaisesRegex(BudgetError, "per-next-lead"):
             reserve(self.spend("two", 2), "deepline")
 
+    def test_review_demotion_resumes_without_rewriting_spend_or_releasing_reserve(self):
+        self.document["accepted"] = [{}] * 7
+        self.write()
+        self.init(verification_reserve_credits=5)
+        path, rid = reserve(self.spend(cost=30), "deepline")
+        settle(path, rid, {"credits_charged": 10, "cost_usd": 1})
+        before = read_object(path)
+        self.document["accepted"] = [{}]
+        self.write()
+        reserve(self.spend("after-review", 35), "deepline")
+        after = read_object(path)
+        self.assertEqual(after["calls"][rid], before["calls"][rid])
+        self.assertEqual(after["calls"]["after-review"]["accepted_leads_before_call"], 1)
+        self.assertEqual({k: v for k, v in after.items() if k != "calls"},
+                         {k: v for k, v in before.items() if k != "calls"})
+        with self.assertRaisesRegex(BudgetError, "shared USD cap"):
+            reserve(self.spend("over-budget", 0.01), "scrapingdog")
+        with self.assertRaisesRegex(BudgetError, "already reserved"):
+            reserve(self.spend(rid, 0), "deepline")
+        # The protected verification allowance remains usable.
+        reserve(self.spend("verify", 5), "deepline", verification=True)
+
+    def test_demotion_and_reacceptance_cannot_reset_optional_allowance(self):
+        self.document["budget"]["limits"]["max_deepline_credits_per_next_lead"] = 5
+        self.document["accepted"] = [{}]
+        self.write()
+        self.init()
+        reserve(self.spend("at-one", 1), "deepline")
+        self.document["accepted"] = [{}] * 7
+        self.write()
+        reserve(self.spend("at-seven", 2), "deepline")
+        self.document["accepted"] = [{}]
+        self.write()
+        with self.assertRaisesRegex(BudgetError, "per-next-lead"):
+            reserve(self.spend("cannot-reset", 3), "deepline")
+        reserve(self.spend("after-review", 2), "deepline")
+        self.document["accepted"] = [{}, {}]
+        self.write()
+        with self.assertRaisesRegex(BudgetError, "per-next-lead"):
+            reserve(self.spend("higher-history-still-counts", 4), "deepline")
+        reserve(self.spend("fits", 3), "deepline")
+
     def test_lock_and_disk_failure_prevent_dispatch(self):
         self.init()
         lock = Path(str(ledger_path(self.path)) + ".lock")
@@ -355,6 +397,28 @@ except (ValueError, OSError):
         with self.assertRaisesRegex(BudgetError, "shared USD cap"):
             reserve(self.spend("next", 1), "deepline")
         self.assertEqual(len(read_object(ledger_path(self.path))["calls"]), 2)
+
+    def test_stop_check_and_dispatch_share_remaining_allowance_after_demotion(self):
+        self.document["budget"]["limits"]["max_deepline_credits_per_next_lead"] = 5
+        self.document["accepted"] = [{}] * 7
+        self.write()
+        self.init()
+        reserve(self.spend("before-review", 3), "deepline")
+        self.document = stop_document([
+            action("fits", provider="deepline", paid_calls=1, cost_upper_bound_credits=2),
+            action("too-much", provider="deepline", paid_calls=1, cost_upper_bound_credits=3)],
+            target_count=10, accepted=[{}], limits=self.document["budget"]["limits"], routes=[{
+                "route_id": "before-review", "provider": "deepline", "paid_calls": 1,
+                "cost_credits": None, "cost_upper_bound_credits": 3, "cost_basis": "estimated",
+                "accepted_leads_before_call": 7}])
+        add_catalog_review(self.document)
+        self.write()
+        decision = VALIDATOR.evaluate_stop(self.document, now=NOW,
+                                           execution_budget=read_object(ledger_path(self.path)))
+        self.assertEqual((decision["decision"], decision["eligible_actions"]), ("continue", ["fits"]))
+        with self.assertRaisesRegex(BudgetError, "per-next-lead"):
+            reserve(self.spend("too-much", 3), "deepline")
+        reserve(self.spend("fits", 2), "deepline")
 
     def test_stop_cli_excludes_discovery_but_allows_reserved_verification(self):
         self.init(verification_reserve_credits=5)

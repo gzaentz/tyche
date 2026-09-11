@@ -142,6 +142,32 @@ class AttemptExecutionTests(unittest.TestCase):
             {"provider": "deepline", "operation": "execute", "status": "no_results", "results": [],
              "billing": {"credits_charged": 0.1, "cost_usd": 0.01}}, 0))
 
+    def test_review_demotion_keeps_receipts_and_executes_next_planned_action(self):
+        self.doc["accepted"] = [{"company": {"domain": f"company-{i}.example"}} for i in range(7)]
+        self.path.write_text(json.dumps(self.doc))
+        runner.run_attempt(self.path, self.spec("before-review", paid=True), execute=self.paid_response)
+        ledger_before = budget_guard.load_ledger(self.path)
+        receipt_path = self.path.parent / "receipts/before-review.json"
+        receipt_before = receipt_path.read_bytes()
+        doc = json.loads(self.path.read_text())
+        removed = doc["accepted"][1:]
+        doc["accepted"] = doc["accepted"][:1]
+        doc["unresolved"] = [dict(stage="account", candidate={"domain": r["company"]["domain"]},
+            reason_code="missing_account_evidence", reason_text="Confirm this project's steel specification.")
+            for r in removed]
+        self.path.write_text(json.dumps(doc))
+        next_spec = self.spec("after-review", query="different project evidence", paid=True)
+        result = runner.run_attempt(self.path, next_spec, execute=self.paid_response)
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(result["provider_status"], "no_results")
+        self.assertEqual(result["stop_decision"]["decision"], "continue")
+        self.assertIn("company-1.example", result["stop_decision"]["missing_scopes"])
+        after = budget_guard.load_ledger(self.path)
+        self.assertEqual(after["calls"]["before-review"], ledger_before["calls"]["before-review"])
+        self.assertEqual(after["calls"]["after-review"]["accepted_leads_before_call"], 1)
+        self.assertEqual(receipt_path.read_bytes(), receipt_before)
+        self.assertEqual(budget_guard.audit_ledger(self.path, json.loads(self.path.read_text())), [])
+
     def company_specs(self):
         specs = [self.spec(f"check-{i}", query=f"company-{i}.example", paid=True) for i in range(3)]
         for i, spec in enumerate(specs):

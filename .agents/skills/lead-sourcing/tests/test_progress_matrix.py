@@ -22,12 +22,14 @@ class ProgressMatrixTests(unittest.TestCase):
                 value = rng.choice([0, .01, .28, .55, 1.1, 2.51, 4.99, 5, 5.01])
                 routes.append({"route_id": f"r{index}", "provider": rng.choice(["deepline", "scrapingdog"]),
                     "paid_calls": 1, "provider_status": rng.choice(["ok", "schema_error", "no_results"]),
-                    "accepted_leads_before_call": rng.choice(list(range(accepted + 1)) + [None]),
+                    "accepted_leads_before_call": rng.choice(list(range(accepted + 4)) + [None]),
                     "cost_basis": basis, "cost_credits": value if basis == "actual" else None,
                     "cost_upper_bound_credits": value if basis != "unknown" else None})
             document = cost_result(routes, accepted)
             before = copy.deepcopy(document)
-            current = [r for r in routes if r["provider"] == "deepline" and r["accepted_leads_before_call"] == accepted]
+            current = [r for r in routes if r["provider"] == "deepline"
+                       and r["accepted_leads_before_call"] is not None
+                       and r["accepted_leads_before_call"] >= accepted]
             unmarked = any(r["provider"] == "deepline" and r["accepted_leads_before_call"] is None for r in routes)
             unknown = unmarked or any(r["cost_basis"] == "unknown" for r in current)
             confirmed = sum((Fraction(str(r["cost_credits"])) for r in current if r["cost_basis"] == "actual"), Fraction())

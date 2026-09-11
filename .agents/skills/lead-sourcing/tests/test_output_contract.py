@@ -725,7 +725,7 @@ class OutputContractExtensionTests(unittest.TestCase):
         errors = VALIDATOR.validate_run(marked)
         self.assertTrue(any("accepted_leads_before_call is required" in error for error in errors))
 
-    def test_next_lead_allowance_rejects_impossible_or_decreasing_counts(self):
+    def test_next_lead_allowance_accepts_reviewed_counts_and_keeps_historical_spend(self):
         result = cost_result(
             [
                 {
@@ -764,8 +764,13 @@ class OutputContractExtensionTests(unittest.TestCase):
 
         errors = VALIDATOR.validate_run(result)
 
-        self.assertTrue(any("must not decrease" in error for error in errors))
-        self.assertTrue(any("cannot exceed the final accepted lead count" in error for error in errors))
+        self.assertEqual(errors, [])
+        # At count zero, the preceding count-one cost still consumes allowance.
+        result["routes"][1].update(cost_credits=5, cost_upper_bound_credits=5)
+        result["budget"]["spent"]["deepline_credits"] = 7
+        result["cost_summary"] = VALIDATOR.calculate_cost_summary(result)
+        self.assertTrue(any("next-lead allowance exceeded" in error
+                            for error in VALIDATOR.validate_run(result)))
 
     def test_unknown_route_cost_requires_unknown_spend_status_and_capacity(self):
         result = shortfall_result()

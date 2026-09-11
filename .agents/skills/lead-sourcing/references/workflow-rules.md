@@ -111,7 +111,9 @@ Command paths below are relative to the skill directory, not this reference.
   cap is present, enforce it. Record `accepted_leads_before_call` on every paid
   Deepline route receipt, including uncapped runs, and group each route's actual
   cost, or its conservative upper bound when actual cost is unavailable, by
-  that accepted-lead count. Route
+  that accepted-lead count. When review removes accepted leads, preserve their
+  historical receipts and counts. Include spend at the current count or higher
+  in the next-lead allowance; demotion never resets spend. Route
   changes, rejected candidates, and failed lookups do not reset the group.
   Reset the allowance only after a complete accepted lead (company, signal,
   requested contact, and requested contact fields) is stored. Any stored email
@@ -286,6 +288,16 @@ while repeatedly starting new country searches.
 - One credible source can suffice. Use the same standard for every candidate;
   match current responsibilities and seniority, not literal titles. Resolve
   material contradictions, not merely overlapping headcount ranges.
+- Corroborate facts across credible sources for the same identified project.
+  A recent announcement or substantive progress update can establish activity
+  within the requested window; drawings, specifications or another project
+  report can establish its technical requirement. Technical evidence may be
+  older when it still applies to that project. Record the project linkage,
+  each source's actual date and the fact it supports in existing evidence
+  arrays and prose. Never date old technical work as new, combine unrelated
+  projects, or substitute general service capability for required recent intent.
+  Installed work shows project activity, not an outstanding purchase; preserve
+  any explicit request for future demand or a new award.
 - Accept supported must-haves, even without optional intent. Keep missing
   must-haves unresolved; reject evidenced mismatches. Recover the specific gap
   through another source, signal or buyer within existing limits. A bad signal

@@ -25,8 +25,8 @@ authorization does not override runtime restrictions, budget caps, or evidence.
 ## Continue or stop
 
 Keep trying relevant, materially different approaches while the target is unmet
-and useful, affordable actions remain. Use research, product pages and
-local-language sources early for niche businesses.
+and useful, affordable actions remain. Use product pages and local-language
+research for niche businesses.
 
 Use `scripts/run_attempt.py`: [pilots](references/adapter-io.md#one-attempt),
 then [up to three concurrent checks](references/adapter-io.md#concurrent-company-checks)
@@ -62,8 +62,8 @@ invent limits or stop because a batch finished. Read the
    bound and unique route ID. Preserve redacted responses; never bypass the
    guard or repeat an uncertain paid call.
 3. **Verify the company.** Apply exclusions and deduplicate domains, known aliases
-   and owner groups before contact lookup. Read sources
-   for company fit and buying rationale separately. Snippets, keywords,
+   and owner groups before contact lookup. Corroborate sources for the same
+   project; separate company fit from buying intent. Snippets, keywords,
    and missing results are not qualification or rejection proof. Keep rejected
    companies, missing evidence, and provider failures separate. Follow the
    [qualification policy](references/workflow-rules.md#qualification-policy):
