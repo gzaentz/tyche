@@ -954,6 +954,22 @@ the adapter must still reserve atomically before sending the call. Decisions:
   cap. Never exceed a cap first. A free available action prevents this stop.
 - `provider_stop` or `input_or_configuration_stop`: all covered next actions
   have evidenced concrete blockers; request only what is needed to unblock them.
+- `no_productive_route`: an explicit, reviewed partial outcome. No useful next
+  actions remain and every frontier item is resolved. The last two substantive
+  discovery attempts used different documented approaches and distinct saved
+  request fingerprints, have completed `ok`/`no_results` receipts and evidenced
+  exhausted frontier entries, and added no qualified account or accepted lead.
+  Renaming the same query is not another approach. This is a minimum check, not
+  automatic permission to stop after any two searches: review the requested
+  countries and ICP segments and finish promising paths before closing.
+  Each unresolved company needs a completed, exhausted substantive review and
+  `reason_text` explaining its missing evidence and why no useful action remains.
+  A review may add facts without resolving the buyer; do not demand two extra
+  empty calls per company. Reuse this run's catalog review while its capabilities
+  still apply; ordinary research does not expire it. Refresh for changed needs
+  or availability, and still verify the live price/schema before spending.
+  Preserve existing receipts and snapshots. This reports the reviewed search's
+  shortfall, never proof that the market contains no other matching companies.
 - `repair_state`: invalid/missing state. Repair it; this is not a sourcing outcome.
 
 After choosing an eligible paid action, persist its reservation before dispatch.
@@ -962,20 +978,27 @@ Final `validate_run.py` is strict by default: it requires `stop_check` and a
 matching `stop_reason`, in addition to all evidence and budget validation.
 The schema keeps `stop_check` optional solely for old reports;
 `--legacy-stop-policy` is for read-only historical audits, never current delivery.
-`no_productive_route` is a legacy label, not an allowed current stopping decision.
+An empty next-action list alone never establishes `no_productive_route`.
 Checks validate recorded actions and receipts; they cannot prove completeness of
 an open-ended market search. The agent must still honestly discover alternatives
 and substantiate blockers, rather than manipulate labels to obtain a passing result.
 
 #### Turn completion and recovery
 
-Treat `continue` as an instruction to execute the next eligible action within
-the current turn. Use commentary for intermediate results, including a saved
+Treat `continue` as an instruction to execute the next useful eligible action within
+the current turn, or complete the evidenced exhaustion review when no useful
+next action remains. Use commentary for intermediate results, including a saved
 partial workbook; do not end the turn with a partial delivery or an offer to
 continue. When the decision is `repair_state`, reconcile the reported errors
 and run the check again. A correct explanation of a failed stopping check does
 not satisfy it. Context checkpoints preserve work so execution can resume;
 they do not create a new start time, budget, or stop reason.
+
+Dispatch validates the affected company's account gate before contact work;
+an unrelated draft row must not block discovery, catalog reads or another
+qualified company. Full delivery validation still checks every row, all accepted
+lead requirements, exclusions, receipts and financial accounting. Do not remove
+missing evidence merely to make a draft pass.
 
 Full validator output includes `stop_decision` (the computed decision and eligible
 actions) and `delivery_allowed`. These are read-only CLI outputs, not new fields

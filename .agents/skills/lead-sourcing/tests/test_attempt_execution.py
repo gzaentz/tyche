@@ -57,13 +57,13 @@ class PersistencePolicyTests(unittest.TestCase):
         doc["stop_audit"]["route_frontier"].reverse()
         self.assertIsNone(VALIDATOR._blocker_error(next_action, doc))
 
-    def test_shortfall_needs_current_catalog_review(self):
+    def test_shortfall_reuses_run_catalog_review_after_more_research(self):
         doc = stop_document([action("too-costly", provider="deepline", paid_calls=1, cost_upper_bound_credits=20)])
         self.assertEqual(VALIDATOR.evaluate_stop(doc, now=NOW)["catalog_review_required"], ["discovery"])
         reviewed(doc)
         self.assertEqual(VALIDATOR.evaluate_stop(doc, now=NOW)["decision"], "budget_exhausted")
         doc["routes"].append(dict(route_id="another-attempt", provider="public_web", paid_calls=0))
-        self.assertEqual(VALIDATOR.evaluate_stop(doc, now=NOW)["decision"], "continue")
+        self.assertEqual(VALIDATOR.evaluate_stop(doc, now=NOW)["decision"], "budget_exhausted")
 
     def test_catalog_outage_does_not_require_an_impossible_successful_refresh(self):
         doc = reviewed(stop_document([action("blocked", provider="deepline", paid_calls=0,

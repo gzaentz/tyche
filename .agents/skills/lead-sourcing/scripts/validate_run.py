@@ -142,6 +142,58 @@ def _route_scope(route: dict) -> Optional[str]:
     return route.get("scope") or ("discovery" if route.get("phase") == "account_discovery" else _company_key(route))
 
 
+def _missing_exhaustion_review(document: dict, scopes: set[str]) -> list[str]:
+    """Review discovery saturation and the remaining company gaps.
+
+    This reviews the recorded search, not the completeness of an entire market.
+    Reuse receipts and progress snapshots instead of adding another state log.
+    """
+    audit = document.get("stop_audit", {})
+    frontier = audit.get("route_frontier", []) if isinstance(audit, dict) else []
+    if (not isinstance(frontier, list) or not frontier or audit.get("frontier_complete") is not True
+            or any(not isinstance(r, dict) or r.get("state") not in FINAL_FRONTIER_STATES for r in frontier)):
+        return sorted(scopes)
+    completed = {r.get("route_id") for r in frontier
+                 if _nonempty_text(r.get("route_id")) and r.get("state") == "exhausted" and _nonempty_text(r.get("reason"))
+                 and _nonempty_text(r.get("exhaustion_basis"))}
+    current = progress_snapshot(document)
+    missing = []
+    for scope in sorted(scopes):
+        attempts = [r for r in document.get("routes", []) if isinstance(r, dict)
+                    and _route_scope(r) == scope and r.get("entity_type") != "tool_catalog"]
+        if scope != "discovery":
+            # A completed company review may add useful facts yet leave the
+            # requested buyer unprovable. Do not demand two more empty calls.
+            rows = [r for r in document.get("unresolved", []) if _company_key(r) == scope]
+            latest = attempts[-1] if attempts else {}
+            if (not _nonempty_text(latest.get("route_id")) or latest["route_id"] not in completed
+                    or latest.get("provider_status") not in {"ok", "no_results"}
+                    or not rows or any(not _nonempty_text(r.get("reason_text")) for r in rows)):
+                missing.append(scope)
+            continue
+        pair = attempts[-2:]
+        if (len(pair) != 2 or any(not _nonempty_text(r.get("route_id")) or r["route_id"] not in completed
+                or r.get("provider_status") not in {"ok", "no_results"}
+                or not _nonempty_text(r.get("approach"))
+                or not isinstance(r.get("request_fingerprint"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", r["request_fingerprint"])
+                or not isinstance(r.get("progress_before"), list)
+                or not all(isinstance(f, str) for f in r["progress_before"]) for r in pair)
+                or pair[0]["approach"] == pair[1]["approach"]
+                or pair[0]["request_fingerprint"] == pair[1]["request_fingerprint"]):
+            missing.append(scope)
+            continue
+
+        def facts(snapshot):
+            # More unrelated or rejected shops are not discovery success.
+            return {f for f in snapshot if f.endswith((":account", ":lead"))}
+
+        first, second = (facts(r["progress_before"]) for r in pair)
+        if second - first or facts(current) - second:
+            missing.append(scope)
+    return missing
+
+
 def _blocker_error(action: dict, document: dict) -> Optional[str]:
     blocker = action["blocker"]
     rows = document.get("routes", []) + [r for r in document.get("unresolved", []) if isinstance(r, dict) and r.get("stage") == "route"]
@@ -182,14 +234,13 @@ def _blocker_error(action: dict, document: dict) -> Optional[str]:
 
 
 def _missing_catalog_review(document: dict, scopes: set[str]) -> list[str]:
-    """A shortfall requires current catalog receipts, not a completeness assertion."""
+    """Reuse this run's capability review; ordinary research does not expire it."""
     routes = [r for r in document.get("routes", []) if isinstance(r, dict)]
-    last_attempt = max((i for i, r in enumerate(routes) if r.get("entity_type") != "tool_catalog"), default=-1)
     refs = document.get("stop_check", {}).get("catalog_review_route_ids", [])
     if not isinstance(refs, list):
         return sorted(scopes)
-    reviewed = {_route_scope(r) for i, r in enumerate(routes)
-                if i > last_attempt and r.get("route_id") in refs
+    reviewed = {_route_scope(r) for r in routes
+                if r.get("route_id") in refs
                 and r.get("provider") == "deepline" and r.get("entity_type") == "tool_catalog"
                 and r.get("operation") == "search"
                 and r.get("provider_status") in {"ok", "no_results"} | BLOCKING_PROVIDER_STATUSES}
@@ -1157,6 +1208,14 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
             missing_routes.append(route.get("route_id"))
     result.update(strategy_change_required=bool(strategy_changes), stalled_approaches=sorted(stalled),
                   missing_routes=missing_routes)
+    if document.get("stop_reason") == "no_productive_route" and not actions:
+        review_missing = _missing_exhaustion_review(document, scopes)
+        catalog_missing = _missing_catalog_review(document, scopes)
+        result.update(exhaustion_review_required=review_missing,
+                      catalog_review_required=catalog_missing)
+        if not review_missing and not catalog_missing:
+            result["decision"] = "no_productive_route"
+            return result
     if result["eligible_actions"] or missing or missing_routes or needs_pricing or strategy_changes:
         result.update(decision="continue", missing_scopes=missing, pricing_required=needs_pricing)
     elif missing_review := _missing_catalog_review(document, scopes):
@@ -1677,7 +1736,7 @@ def main() -> int:
     output["stop_decision"] = stop_check
     # A successful planning or legacy check cannot authorize client delivery.
     output["delivery_allowed"] = not errors and not args.legacy_stop_policy and stop_check["decision"] in {
-        "target_met", "budget_exhausted", "time_limit_reached", "provider_stop", "input_or_configuration_stop",
+        "target_met", "budget_exhausted", "time_limit_reached", "provider_stop", "input_or_configuration_stop", "no_productive_route",
     }
     if args.show_cost_summary and isinstance(document, dict):
         output["calculated_cost_summary"] = calculate_cost_summary(document)

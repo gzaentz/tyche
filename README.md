@@ -26,9 +26,15 @@ provider adapters, budget controls, and output contract.
 - Uses live Deepline capability discovery instead of fixed Deepline tool IDs.
 - Supports bounded ScrapingDog operations through one local adapter.
 - Keeps accepted, rejected, unresolved, and provider-error states separate.
+- Keeps draft qualification failures local to their company during research;
+  full evidence and accounting validation still gates final delivery.
 - Keeps an auditable paid and public-web route frontier, links continuations
   with `continuation_route_ids`, and continues refilling until the target is met
   or every remaining route is resolved as exhausted or blocked.
+- Allows an evidenced `no_productive_route` partial outcome after distinct
+  discovery approaches stop producing qualified accounts and remaining company
+  gaps have been reviewed. Reuses saved capability reviews. Unspent budget alone
+  does not require endless new searches; two searches alone never prove market coverage.
 - Reports confirmed and maximum provider credits, Deepline cost at $0.10 per
   credit, and Deepline cost per accepted lead.
 - Produces an audit report, structured JSON, and a clean Excel workbook.

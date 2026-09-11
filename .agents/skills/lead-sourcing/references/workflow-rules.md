@@ -70,6 +70,8 @@ Command paths below are relative to the skill directory, not this reference.
   concrete next action or blocker in `reason_text`; a contact-stage unresolved
   result keeps the account evidence that already passed. Provider failures are not
   companies and must not be counted in reviewed or accepted company totals.
+  Keep buyer-role gaps in contact evidence and `reason_text`; do not add them
+  as failed company checks that prevent the lookup needed to resolve that buyer.
   `no_results` is valid only when the provider actually returned no results;
   an input error, response error, timeout, or uncertain response is not
   `no_results` and remains unresolved or blocked as appropriate.
@@ -77,6 +79,13 @@ Command paths below are relative to the skill directory, not this reference.
   remain below it, refill from a changed route, query, page, tool, or provider.
   Check at most three companies at once, reducing the batch to the remaining
   lead shortfall. Do not use a fixed 5x multiplier or any other fixed over-fetch.
+- When useful remaining approaches are exhausted, apply the evidenced
+  `no_productive_route` review in the [stopping contract](output-contract.md#stopping-check).
+  A shortfall can be an honest final result without spending the whole budget.
+  Keep its candidates unresolved, preserve every receipt and report missing
+  evidence; do not turn missing evidence into acceptance or invent a provider
+  outage to finish. Do not repeat full-state validation between ordinary reads
+  or after an attempt helper has already returned the current stop decision.
 - If `contact_role_groups` is present, search and rank its `primary` roles
   first. Use `secondary` roles as valid fallbacks when no primary-role contact
   passes; a secondary-role contact may fill `primary_contact` and must not be

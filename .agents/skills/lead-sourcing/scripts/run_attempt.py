@@ -49,6 +49,15 @@ def refresh(document):
 def _contact_gate(document, action):
     if action["phase"] not in {"contact_discovery", "contact_verification", "email_validation"}:
         return
+    # Draft problems belong to their company. Keep the full-document gate at
+    # delivery; an unrelated candidate must not block discovery or recovery.
+    scoped = dict(document, rejected=[])
+    for state in ("accepted", "unresolved"):
+        scoped[state] = [r for r in document.get(state, [])
+                         if isinstance(r, dict) and _company_key(r) == action["scope"]]
+    problems = qualification_errors(scoped)
+    if problems:
+        raise ValueError("; ".join(problems))
     rows = [r for r in document.get("accepted", []) + document.get("unresolved", [])
             if isinstance(r, dict) and _company_key(r) == action["scope"]
             and (r in document.get("accepted", []) or r.get("stage") == "contact")]
@@ -113,9 +122,6 @@ def _prepare(run_file, spec):
 
     def plan(document):
         refresh(document)
-        problems = qualification_errors(document)
-        if problems:
-            raise ValueError("; ".join(problems))
         _contact_gate(document, action)
         audit = document.setdefault("stop_audit", {})
         frontier = audit.setdefault("route_frontier", [])
