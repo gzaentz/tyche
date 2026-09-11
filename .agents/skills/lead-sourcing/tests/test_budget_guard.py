@@ -9,7 +9,7 @@ from unittest import mock
 
 from test_provider_scripts import ROOT, load_script
 from budget_guard import BudgetError, audit_ledger, initialize, ledger_path, read_object, reserve, settle
-from test_stop_policy import NOW, action, stop_document
+from test_stop_policy import NOW, action, stop_document, add_catalog_review
 from test_output_contract import VALIDATOR, cost_result
 
 
@@ -338,6 +338,7 @@ except (ValueError, OSError):
     def planned_document(self, actions, routes):
         self.document = stop_document(actions, target_count=10, routes=routes,
                                       limits=self.document["budget"]["limits"])
+        add_catalog_review(self.document)
         self.write()
         return VALIDATOR.evaluate_stop(self.document, now=NOW, execution_budget=read_object(ledger_path(self.path)))
 

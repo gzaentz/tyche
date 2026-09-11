@@ -24,10 +24,11 @@ def response_body(parsed, text):
 
 
 class ResponseFile:
-    def __init__(self, path, redact):
+    def __init__(self, path, redact, metadata=None):
         self.path = Path(path)
         self.redact = redact
         self.response = None
+        self.metadata = dict(metadata or {})
         # Reserve a unique destination and prove it is writable before dispatch.
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.close(fd)
@@ -43,7 +44,7 @@ class ResponseFile:
         try:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent, delete=False) as stream:
                 temporary = stream.name
-                json.dump(self.redact(document), stream, ensure_ascii=True, allow_nan=False)
+                json.dump(self.redact(dict(document, **self.metadata)), stream, ensure_ascii=True, allow_nan=False)
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())

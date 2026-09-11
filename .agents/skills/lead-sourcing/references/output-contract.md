@@ -357,6 +357,8 @@ top-level result list or hide rejected/unresolved rows in a count.
         "hq_state": {"type": "string", "minLength": 1},
         "hq_country": {"type": "string", "minLength": 1},
         "employee_count": {"type": "integer", "minimum": 0},
+        "owner_group": {"type": "string", "minLength": 1},
+        "aliases": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "description": {"type": "string", "minLength": 1}
       }
     },
@@ -549,7 +551,9 @@ top-level result list or hide rejected/unresolved rows in a count.
         "candidate": {"$ref": "#/$defs/candidate"},
         "qualification_checks": {"type": "array", "items": {"$ref": "#/$defs/qualification_check"}},
         "provider_status": {"$ref": "#/$defs/provider_status"},
-        "route_id": {"type": "string", "minLength": 1}
+        "route_id": {"type": "string", "minLength": 1},
+        "scope": {"type": "string", "minLength": 1},
+        "provider": {"enum": ["deepline", "scrapingdog", "public_web"]}
       }
     },
     "route": {
@@ -573,6 +577,12 @@ top-level result list or hide rejected/unresolved rows in a count.
         "cost_upper_bound_credits": {"type": ["number", "null"], "minimum": 0},
         "cost_basis": {"enum": ["actual", "estimated", "unknown"]},
         "accepted_leads_before_call": {"type": "integer", "minimum": 0},
+        "scope": {"type": "string", "minLength": 1},
+        "approach": {"type": "string", "minLength": 1},
+        "request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "progress_before": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "status_read": {"type": "boolean"},
+        "entity_type": {"type": "string", "minLength": 1},
         "error": {"type": "string", "minLength": 1}
       }
     },
@@ -582,6 +592,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "required": ["started_at", "next_actions"],
       "properties": {
         "started_at": {"type": "string", "format": "date-time"},
+        "catalog_review_route_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
         "next_actions": {"type": "array", "items": {"$ref": "#/$defs/next_action"}}
       }
     },
@@ -591,6 +602,12 @@ top-level result list or hide rejected/unresolved rows in a count.
       "required": ["id", "scope", "description", "provider", "paid_calls", "cost_upper_bound_credits"],
       "properties": {
         "id": {"type": "string", "minLength": 1},
+        "phase": {"enum": ["account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"]},
+        "approach": {"type": "string", "minLength": 1},
+        "status_read": {"type": "boolean"},
+        "operation": {"type": "string", "minLength": 1},
+        "tool": {"type": "string", "minLength": 1},
+        "request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "scope": {"type": "string", "minLength": 1},
         "description": {"type": "string", "minLength": 1},
         "provider": {"enum": ["deepline", "scrapingdog", "public_web"]},
@@ -614,6 +631,11 @@ top-level result list or hide rejected/unresolved rows in a count.
       "additionalProperties": false,
       "required": ["route_id", "phase", "provider", "operation", "request_summary", "state", "reason"],
       "properties": {
+        "status_read": {"type": "boolean"},
+        "scope": {"type": "string", "minLength": 1},
+        "approach": {"type": "string", "minLength": 1},
+        "request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "entity_type": {"type": "string", "minLength": 1},
         "route_id": {"type": "string", "minLength": 1},
         "phase": {"enum": ["account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"]},
         "provider": {"enum": ["deepline", "scrapingdog", "public_web"]},
@@ -863,6 +885,13 @@ no domain exists). Cover both new discovery and every unresolved company.
 Retire completed actions and add the next useful action; completing a batch or
 marking all attempt routes exhausted is not proof that no next action exists.
 
+The attempt helper adds optional audit metadata without changing client output:
+`scope`, stable `approach`, `request_fingerprint`, and verified `progress_before`
+milestones. Two completed non-catalog attempts without new verified milestones
+require a different approach. A provider switch alone is not a strategy change.
+Actionable frontier entries must retain a matching next action or continuation;
+covering only the generic discovery scope cannot hide an untried research path.
+
 Before a shortfall, refresh live tool discovery for both new companies and
 missing evidence. Include public/free alternatives, not only paid providers.
 Do not repeat a failed identical lookup, spend solely to consume the cap, or
@@ -877,6 +906,24 @@ remaining discovery/recovery scopes after alternative-source review. Unknown
 prices require a free price-discovery action, not an invented budget failure.
 Provider budget allocations may be changed only under the existing shared-cap
 rules; lack of allocation to an otherwise useful provider is not tool exhaustion.
+
+Blocker receipts must match the action's provider, scope and tool when specified.
+A successful later call on that same route/tool or its continuation invalidates
+the old error as a stopping reason. Before a budget/provider/input shortfall,
+`catalog_review_route_ids` must reference live catalog search attempt receipts
+after the last substantive attempt. One run-wide discovery review can cover
+all remaining evidence gaps; do not repeat identical catalog queries per company.
+Recovery actions and blockers still need company-specific coverage.
+The helper tags catalog calls `entity_type: "tool_catalog"`. Review the returned
+capabilities and add useful alternatives; a catalog receipt is not itself proof
+that alternatives were exhausted. If catalog access fails, preserve the failure
+and review other accessible sources; an outage must not force endless refreshes
+or block another provider. Target/time stops do not require another search.
+
+Company `owner_group` and `aliases` are optional, evidence-backed identities for
+exclusions and deduplication, not inferred corporate relationships. Required
+qualification checks marked unknown remain account-unresolved. A current
+`not_icp_fit` rejection needs an evidenced failed required check.
 
 Before recording `approval_required`, apply the
 [authorization rules](../SKILL.md#authorization) and check the current request,

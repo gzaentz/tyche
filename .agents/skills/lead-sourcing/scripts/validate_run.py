@@ -9,6 +9,7 @@ import math
 import pathlib
 import re
 import sys
+import unicodedata
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -40,6 +41,161 @@ COST_BASES = {"actual", "estimated", "unknown"}
 DEEPLINE_USD_PER_CREDIT = Decimal("0.10")
 COST_OUTPUT_QUANTUM = Decimal("0.0001")
 NEXT_LEAD_REVIEW_CREDITS = Decimal("5")
+
+
+def _identity(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    value = re.sub(r"^https?://", "", value.strip().casefold()).rstrip("/")
+    value = re.sub(r"^www\.", "", value)
+    value = unicodedata.normalize("NFKD", value)
+    return "".join(c for c in value if c.isalnum())
+
+
+def excluded_company(request: dict, row: dict) -> bool:
+    """Match known company/owner aliases; discovering ownership still needs evidence."""
+    company = row.get("company")
+    company = company if isinstance(company, dict) else row.get("candidate", row)
+    if not isinstance(company, dict):
+        return False
+    names = [company.get(k) for k in ("canonical_name", "company", "domain", "owner_group")]
+    aliases = company.get("aliases", [])
+    if isinstance(aliases, list):
+        names.extend(aliases)
+    icp = request.get("icp", {})
+    exclusions = request.get("exclusions", [])
+    exclusions = list(exclusions) if isinstance(exclusions, list) else []
+    if isinstance(icp, dict) and isinstance(icp.get("exclusions"), list):
+        exclusions.extend(icp["exclusions"])
+    return bool({_identity(n) for n in names} & ({_identity(n) for n in exclusions} - {""}))
+
+
+def qualification_errors(document: dict) -> list[str]:
+    errors = []
+    owners = set()
+    for state in ("accepted", "rejected", "unresolved"):
+        for index, row in enumerate(document.get(state, [])):
+            if not isinstance(row, dict):
+                continue
+            path = f"{state}[{index}]"
+            checks = row.get("qualification_checks", [])
+            if not isinstance(checks, list):
+                errors.append(f"{path}.qualification_checks must be an array")
+                continue
+            required = [c for c in checks if isinstance(c, dict) and c.get("importance") == "required"]
+            failed = [c for c in required if c.get("status") == "fail" and c.get("evidence")]
+            if state == "accepted" or (state == "unresolved" and row.get("stage") == "contact"):
+                if excluded_company(document.get("request", {}), row):
+                    errors.append(f"{path}: excluded company cannot pass the account gate")
+                if any(c.get("status") != "pass" or not c.get("evidence") for c in required):
+                    errors.append(f"{path}: missing or failed required evidence must remain account-unresolved")
+            if state == "rejected" and row.get("reason_code") == "not_icp_fit" and not failed:
+                errors.append(f"{path}: not_icp_fit requires an evidenced required failure; unknown is unresolved")
+            if state == "accepted":
+                company = row.get("company", {})
+                owner = _identity(company.get("owner_group")) if isinstance(company, dict) else ""
+                if owner and owner in owners:
+                    errors.append(f"{path}: duplicate owner group")
+                owners.add(owner)
+    return errors
+
+
+def progress_snapshot(document: dict) -> list[str]:
+    """Stable verified milestones, not returned rows or model-written progress totals."""
+    facts = set()
+    for state in ("accepted", "unresolved", "rejected"):
+        for row in document.get(state, []):
+            if not isinstance(row, dict) or not (key := _company_key(row)):
+                continue
+            if state == "accepted":
+                facts.add(f"{key}:lead")
+            if state == "accepted" or (state == "unresolved" and row.get("stage") == "contact"):
+                facts.add(f"{key}:account")
+            checks = row.get("qualification_checks", [])
+            for check in checks if isinstance(checks, list) else []:
+                if (isinstance(check, dict) and check.get("importance") == "required"
+                        and check.get("status") in {"pass", "fail"} and check.get("evidence")):
+                    facts.add(f"{key}:evidence:{_identity(check.get('criterion'))}")
+            contact = row.get("primary_contact", row.get("candidate", {}))
+            if (isinstance(contact, dict) and contact.get("full_name")
+                    and contact.get("current_title") and contact.get("evidence")):
+                facts.add(f"{key}:buyer:{_identity(contact['full_name'])}")
+    return sorted(facts)
+
+
+def stalled_approaches(document: dict) -> set[str]:
+    attempts = [r for r in document.get("routes", []) if isinstance(r, dict)
+                and r.get("entity_type") != "tool_catalog" and isinstance(r.get("approach"), str)
+                and isinstance(r.get("progress_before"), list)
+                and all(isinstance(k, str) for k in r["progress_before"])
+                and r.get("provider_status") in {"ok", "no_results"}]
+    if len(attempts) < 2:
+        return set()
+    first, second = attempts[-2:]
+    if (set(second["progress_before"]) - set(first["progress_before"])
+            or set(progress_snapshot(document)) - set(second["progress_before"])):
+        return set()
+    return {first["approach"], second["approach"]}
+
+
+def _route_scope(route: dict) -> Optional[str]:
+    return route.get("scope") or ("discovery" if route.get("phase") == "account_discovery" else _company_key(route))
+
+
+def _blocker_error(action: dict, document: dict) -> Optional[str]:
+    blocker = action["blocker"]
+    rows = document.get("routes", []) + [r for r in document.get("unresolved", []) if isinstance(r, dict) and r.get("stage") == "route"]
+    evidence = next((r for r in rows if isinstance(r, dict) and r.get("route_id") == blocker.get("evidence_route_id")), None)
+    if (not _nonempty_text(blocker.get("reason")) or not evidence
+            or evidence.get("provider_status") not in BLOCKING_PROVIDER_STATUSES):
+        return "blocker needs a reason and blocking receipt/outcome evidence_route_id"
+    candidate = evidence.get("candidate", {})
+    provider = evidence.get("provider") or (candidate.get("provider") if isinstance(candidate, dict) else None)
+    if provider != action.get("provider") or _route_scope(evidence) != action.get("scope"):
+        return "blocker receipt must match this provider and scope"
+    if action.get("tool") and evidence.get("tool", evidence.get("operation")) != action["tool"]:
+        return "blocker receipt must match this tool"
+    frontier = document.get("stop_audit", {}).get("route_frontier", [])
+    descendants = {evidence["route_id"]}
+    for _ in frontier:
+        for route in frontier:
+            if route.get("route_id") in descendants:
+                descendants.update(route.get("continuation_route_ids", []))
+    # Pre-dispatch failures can exist only as route outcomes. Their position in
+    # the append-only frontier still establishes whether a recovery came later.
+    positions = {r.get("route_id"): i for i, r in enumerate(frontier)}
+    outcome_only = not any(r.get("route_id") == evidence["route_id"] for r in document.get("routes", []))
+    evidence_position = positions.get(evidence["route_id"])
+    later = False
+    for route in document.get("routes", []):
+        if route.get("route_id") == evidence["route_id"]:
+            later = True
+            continue
+        same_tool = (route.get("provider") == provider and _route_scope(route) == _route_scope(evidence)
+                     and route.get("tool", route.get("operation")) == evidence.get("tool", evidence.get("operation")))
+        later_outcome = outcome_only and (route.get("route_id") in descendants or (
+            evidence_position is not None and positions.get(route.get("route_id"), -1) > evidence_position))
+        if ((later or later_outcome) and (same_tool or route.get("route_id") in descendants)
+                and route.get("provider_status") in DETERMINATE_PROVIDER_STATUSES):
+            return "recovered error cannot justify stopping"
+    return None
+
+
+def _missing_catalog_review(document: dict, scopes: set[str]) -> list[str]:
+    """A shortfall requires current catalog receipts, not a completeness assertion."""
+    routes = [r for r in document.get("routes", []) if isinstance(r, dict)]
+    last_attempt = max((i for i, r in enumerate(routes) if r.get("entity_type") != "tool_catalog"), default=-1)
+    refs = document.get("stop_check", {}).get("catalog_review_route_ids", [])
+    if not isinstance(refs, list):
+        return sorted(scopes)
+    reviewed = {_route_scope(r) for i, r in enumerate(routes)
+                if i > last_attempt and r.get("route_id") in refs
+                and r.get("provider") == "deepline" and r.get("entity_type") == "tool_catalog"
+                and r.get("operation") == "search"
+                and r.get("provider_status") in {"ok", "no_results"} | BLOCKING_PROVIDER_STATUSES}
+    # Capabilities are run-wide; do not repeat an identical catalog query for
+    # every company. Recovery actions and blocker evidence remain scope-specific.
+    return [] if "discovery" in reviewed else sorted(scopes - reviewed)
 
 
 def _company_key(row: Any) -> Optional[str]:
@@ -74,6 +230,27 @@ def _account_outcomes(document: dict[str, Any]) -> list[dict[str, Any]]:
                 if isinstance(row, dict) and row.get("stage") == "account"
             )
     return rows
+
+
+def calculate_review_counts(document: dict[str, Any]) -> dict[str, int]:
+    """Derive review counts from outcomes, without inferring qualification."""
+    accepted = document.get("accepted", [])
+    account_rows = _account_outcomes(document)
+    accepted_keys = {key for key in map(_company_key, accepted) if key is not None}
+    reviewed_keys = {key for key in map(_company_key, accepted + account_rows) if key is not None}
+    reasons_by_key: dict[str, set[str]] = {}
+    for row in account_rows:
+        key, reason = _company_key(row), row.get("reason_code")
+        if key is not None and isinstance(reason, str):
+            reasons_by_key.setdefault(key, set()).add(reason)
+    exclusion_keys = {key for key, reasons in reasons_by_key.items()
+                      if reasons == {"explicit_exclusion"} and key not in accepted_keys}
+    return {
+        "candidate_companies_reviewed": len(reviewed_keys),
+        "exclusion_only_rejections": len(exclusion_keys),
+        "substantive_account_reviews": len(reviewed_keys - exclusion_keys),
+        "duplicate_candidates": sum(row.get("reason_code") == "duplicate_domain" for row in account_rows),
+    }
 
 
 def _normalized_role(value: Any) -> Optional[str]:
@@ -899,10 +1076,11 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
         errors.append("budget.limits must be an object")
         return result
     costs = calculate_cost_summary(document)
-    receipts = document.get("routes", [])
     next_lead_limit = limits.get("max_deepline_credits_per_next_lead", request_budget.get("max_deepline_credits_per_next_lead"))
     blocked_kinds: list[str] = []
     needs_pricing = False
+    stalled = stalled_approaches(document)
+    strategy_changes = []
     for action in actions:
         if not isinstance(action, dict):
             errors.append("each next action must be an object")
@@ -921,11 +1099,9 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
             if not isinstance(blocker, dict) or not isinstance(blocker.get("kind"), str) or blocker["kind"] not in {"approval_required", "access_unavailable", "required_input"}:
                 errors.append(f"{aid}: invalid concrete blocker")
                 continue
-            evidence_id = blocker.get("evidence_route_id")
-            evidence = [r for r in receipts if isinstance(r, dict) and r.get("route_id") == evidence_id]
-            evidence += [r for r in document.get("unresolved", []) if isinstance(r, dict) and r.get("stage") == "route" and r.get("route_id") == evidence_id]
-            if not _nonempty_text(blocker.get("reason")) or not evidence or not any(isinstance(r.get("provider_status"), str) and r["provider_status"] in BLOCKING_PROVIDER_STATUSES for r in evidence):
-                errors.append(f"{aid}: blocker needs a reason and blocking receipt/outcome evidence_route_id")
+            problem = _blocker_error(action, document)
+            if problem:
+                errors.append(f"{aid}: {problem}")
             blocked_kinds.append(blocker["kind"])
             continue
         provider = action.get("provider")
@@ -942,6 +1118,10 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
             continue
         if provider == "public_web" and (bound != 0 or calls != 0):
             errors.append(f"{aid}: public_web actions must have zero provider cost and paid calls")
+            continue
+        if stalled and action.get("entity_type") != "tool_catalog" and (
+                not action.get("approach") or action["approach"] in stalled):
+            strategy_changes.append(aid)
             continue
         if bound == 0 and calls == 0:
             result["eligible_actions"].append(aid)
@@ -981,8 +1161,22 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
         result["eligible_actions"] = []
         return result
     missing = sorted(scopes - covered)
-    if result["eligible_actions"] or missing or needs_pricing:
+    missing_routes = []
+    for route in document.get("stop_audit", {}).get("route_frontier", []):
+        if route.get("state") not in ACTIONABLE_FRONTIER_STATES:
+            continue
+        candidates = [a for a in actions if not a.get("blocker") and (
+            a.get("id") == route.get("route_id") or a.get("id") in route.get("continuation_route_ids", [])
+            or (_route_scope(route) == a.get("scope") and (
+                not route.get("approach") or route["approach"] == a.get("approach"))))]
+        if not candidates:
+            missing_routes.append(route.get("route_id"))
+    result.update(strategy_change_required=bool(strategy_changes), stalled_approaches=sorted(stalled),
+                  missing_routes=missing_routes)
+    if result["eligible_actions"] or missing or missing_routes or needs_pricing or strategy_changes:
         result.update(decision="continue", missing_scopes=missing, pricing_required=needs_pricing)
+    elif missing_review := _missing_catalog_review(document, scopes):
+        result.update(decision="continue", catalog_review_required=missing_review)
     elif actions and len(blocked_kinds) == len(actions):
         result["decision"] = "input_or_configuration_stop" if any(k != "access_unavailable" for k in blocked_kinds) else "provider_stop"
     else:
@@ -1013,6 +1207,8 @@ def validate_run(document: Any, *, require_stop_check: bool = False, now: Option
         return ["request and summary must be objects"]
     if schema_version == "1.2":
         _validate_client_output(accepted, errors)
+    if require_stop_check or "stop_check" in document:
+        errors.extend(qualification_errors(document))
 
     target = request.get("target_count")
     if not isinstance(target, int) or isinstance(target, bool) or target < 1:
@@ -1201,34 +1397,7 @@ def validate_run(document: Any, *, require_stop_check: bool = False, now: Option
     if audit.get("frontier_complete") is not True:
         errors.append("stop_audit.frontier_complete must be true")
 
-    account_rows = _account_outcomes(document)
-    reviewed_keys = {
-        key
-        for key in [_company_key(row) for row in accepted + account_rows]
-        if key is not None
-    }
-    accepted_keys = {key for key in map(_company_key, accepted) if key is not None}
-    reasons_by_key: dict[str, set[str]] = {}
-    for row in account_rows:
-        key = _company_key(row)
-        reason = row.get("reason_code")
-        if key is not None and isinstance(reason, str):
-            reasons_by_key.setdefault(key, set()).add(reason)
-    exclusion_keys = {
-        key
-        for key, reasons in reasons_by_key.items()
-        if reasons == {"explicit_exclusion"} and key not in accepted_keys
-    }
-    duplicate_count = sum(
-        1 for row in account_rows if row.get("reason_code") == "duplicate_domain"
-    )
-    expected_counts = {
-        "candidate_companies_reviewed": len(reviewed_keys),
-        "exclusion_only_rejections": len(exclusion_keys),
-        "substantive_account_reviews": len(reviewed_keys - exclusion_keys),
-        "duplicate_candidates": duplicate_count,
-    }
-    for field, expected in expected_counts.items():
+    for field, expected in calculate_review_counts(document).items():
         if audit.get(field) != expected:
             errors.append(f"stop_audit.{field} must equal {expected}")
 

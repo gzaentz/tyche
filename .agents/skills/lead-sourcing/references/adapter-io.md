@@ -6,6 +6,72 @@ provider-specific inputs and statuses live in [Deepline](deepline-adapter.md)
 and [ScrapingDog](scrapingdog-adapter.md). Examples beginning with `.agents/`
 run from the repository root.
 
+## One attempt
+
+Use `scripts/run_attempt.py <results.json> --input-file <attempt.json>` for normal
+dispatch. It composes the existing wrappers, budget guard and route recorder;
+there is no new provider or orchestration service. Initialize the run and paid
+ledger below first. The attempt file contains one action and its wrapper input:
+
+```json
+{
+  "action": {
+    "id": "catalog-discovery-1",
+    "scope": "discovery",
+    "phase": "account_discovery",
+    "approach": "capability-discovery",
+    "description": "Find multilingual product-page and research capabilities",
+    "provider": "deepline",
+    "paid_calls": 0,
+    "cost_upper_bound_credits": 0
+  },
+  "request": {"operation": "search", "query": "multilingual niche webshop product research"}
+}
+```
+
+For provider execution, use a freshly described tool and its native payload.
+Every Deepline `execute` and ScrapingDog call sets `paid_calls: 1` and a priced
+whole-call bound, even if that bound is zero. The helper adds `spend`; do not
+provide a separate ledger or reset its limits. Put `phase` and `scope` on each
+action; contact phases require a non-excluded company with passing account
+evidence in accepted rows or contact-stage unresolved rows.
+
+Use stable `approach` labels describing the source family and search/evidence
+strategy, not tool names, batch numbers or cosmetic rewordings. The helper hashes
+the actual request, so changing a route ID or approach label cannot repeat a
+possibly billed request. Two completed substantive attempts without new verified
+milestones require a changed approach. Catalog reads do not count as progress.
+
+The helper saves `receipts/<action-id>.json` before updating run state. A crash
+leaves the route pending and retains any reservation. Resume a saved normalized
+response with `--complete <action-id>`; this only records it, never dispatches.
+It derives summary/review counts and cost totals from saved outcomes and receipts;
+unknown charges keep provider capacity unknown. It never marks the frontier complete.
+Each saved response also retains the action and redacted input in `attempt`,
+so recovering a damaged draft does not require inventing scope or approach labels.
+If only raw response bytes survived, normalize that receipt locally first. A
+pending/unknown remote outcome is not permission to retry. Async research jobs
+need their documented result-retrieval call, not another job submission.
+For a freshly described **free job-status getter only**, mark its action
+`status_read: true` with a zero cost bound. Repeated reads of the same job are
+allowed only after a saved `partial` status response with a zero cost bound;
+pending transport, failures and job submissions remain protected. Respect the
+provider's polling interval and applicable read limit; never label submission
+or enrichment as a status read. These calls still use the guarded ledger;
+missing actual charges remain unknown, even when the reserved bound is zero.
+
+For built-in public-web tools, set `provider: "public_web"`, zero cost/calls and
+use `--plan-only`. Execute the planned search/read through the available tool.
+Update the returned receipt file with the observed normalized `status`,
+`operation`, and `results` array, retaining the helper's provider, fingerprint,
+attempt and progress metadata, then use `--complete`. This path records evidence; it
+does not invent a browser, scrape or API response.
+
+The helper never accepts a lead or infers market exhaustion. Assess the returned
+evidence, preserve unknown required checks as unresolved, and add useful next
+actions. Use `record_route.py` to close reviewed exact routes or link continuations.
+Full strict validation is still required before delivery.
+
 ## Paid-call budget
 
 Before the first paid call, create `results.json` with the normalized request,

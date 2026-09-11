@@ -47,6 +47,41 @@ def news_event(company_relationships=None):
 
 
 class DeeplineDiscoveryTests(unittest.TestCase):
+    def test_successful_scraped_document_is_not_a_response_schema_error(self):
+        # Shape observed in the tablecloth replay's saved Firecrawl responses.
+        for content_format in ("markdown", "html"):
+            with self.subTest(content_format=content_format):
+                page = {"metadata": {"sourceURL": "https://shop.example/custom", "statusCode": 200},
+                        content_format: "<label>Length in cm</label>" if content_format == "html" else "Length in cm"}
+                parsed = {"status": "completed", "toolResponse": {"rawV2": {"data": page}, "raw": page},
+                          "billing": {"credits_charged": 0.02, "cost_usd": 0.002}}
+                body = DEEPLINE._execute_output(parsed, "firecrawl_scrape")
+                self.assertEqual(body["status"], "ok")
+                self.assertEqual(len(body["results"]), 1)
+                row = body["results"][0]
+                self.assertEqual(row["evidence_url"], page["metadata"]["sourceURL"])
+                self.assertEqual(row["evidence_text"], page[content_format])
+                self.assertEqual(row["content_format"], content_format)
+                self.assertEqual(row["signal"], "web_page")
+                self.assertIsNone(row["company"])
+                self.assertEqual(body["billing"], parsed["billing"])
+
+    def test_missing_failed_or_empty_scraped_page_does_not_supply_evidence(self):
+        for page in ({"html": "Content"},
+                     {"metadata": {"sourceURL": "https://shop.example", "statusCode": 403}, "html": "Denied"},
+                     {"metadata": {"sourceURL": "https://", "statusCode": 200}, "html": "Content"},
+                     {"metadata": {"sourceURL": "https://[broken", "statusCode": 200}, "html": "Content"},
+                     {"metadata": {"sourceURL": "https://shop.example", "statusCode": 200}, "markdown": ""}):
+            body = DEEPLINE._execute_output({"status": "completed", "toolResponse": {"rawV2": {"data": page}}}, "firecrawl_scrape")
+            self.assertNotIn(body["status"], {"ok", "partial"})
+            self.assertEqual(body["results"], [])
+
+    def test_outer_failure_is_not_overridden_by_scraped_content(self):
+        page = {"metadata": {"sourceURL": "https://shop.example", "statusCode": 200}, "html": "Content"}
+        for status in ("provider_error", "schema_error", "config_error"):
+            body = DEEPLINE._execute_output({"status": status, "toolResponse": {"rawV2": {"data": page}}}, "firecrawl_scrape")
+            self.assertEqual(body["status"], status)
+
     def test_jsonapi_news_resolves_one_company_and_linked_source(self):
         envelope = {
             "data": [news_event({"company1": relation("company", "acme")})],

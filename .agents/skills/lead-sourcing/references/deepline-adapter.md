@@ -107,6 +107,14 @@ Generic labels such as `search_result`, `web_page`, `company_profile`, and
 `hiring` are discovery labels only. For web-search rows, `domain` can be the
 source host; resolve the canonical company domain before acceptance.
 
+Successful scraped pages retain their metadata, source URL and Markdown/HTML
+content as `web_page` evidence with `content_format`. HTML remains HTML: inspect
+its actual fields before writing plain-language qualification evidence. A page
+is not a qualified company or buyer. Recover response-shape errors from saved
+raw responses without another provider call; preserve the original receipt and
+record any local normalization continuation with zero new calls and no duplicate
+charge.
+
 For recognized event and post envelopes, the wrapper retains optional
 top-level `pagination`, `meta`, and `links` metadata with secrets redacted.
 HarvestAPI's known `pagination.paginationToken` is exposed separately as
@@ -176,7 +184,9 @@ search or a deliverability verdict. Preserve this receipt. The model may
 discover and describe the single-status retrieval tool and, only after
 confirming it is free, retrieve that same job ID. Match the returned ID and
 email before using a successful final verdict; save the completion receipt
-separately and record the retrieval as a zero-paid-call route. The fallback
+separately with its zero cost bound and guarded dispatch count. Use the
+`status_read` action flag from [shared I/O](adapter-io.md#one-attempt); every
+`execute` is counted by the guard even when priced free. The fallback
 source still references the original paid verification route and tool.
 Respect `try_again_at`, allow at most three status reads with at least 30
 seconds between reads, and leave a still-pending job unresolved. Never create

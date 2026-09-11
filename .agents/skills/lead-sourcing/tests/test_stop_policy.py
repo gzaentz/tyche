@@ -16,6 +16,23 @@ NOW = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
 STARTED_AT = "2026-09-07T11:00:00+00:00"
 
 
+def add_catalog_review(document):
+    """Successful current capability review for fixtures testing genuine stops."""
+    route = dict(route_id="catalog-review", scope="discovery", phase="account_discovery",
+                 provider="deepline", operation="search", entity_type="tool_catalog", provider_status="ok",
+                 paid_calls=0, cost_basis="actual", cost_credits=0, cost_upper_bound_credits=0,
+                 rows_returned=1, rows_usable=0, request_summary="Alternative free and paid capabilities")
+    document["routes"].append(route)
+    document["stop_check"]["catalog_review_route_ids"] = [route["route_id"]]
+    if "stop_audit" in document:
+        for prior in document["stop_audit"]["route_frontier"]:
+            prior.setdefault("scope", "discovery")
+        document["stop_audit"]["route_frontier"].append(dict(
+            route_id=route["route_id"], scope="discovery", state="exhausted",
+            exhaustion_basis="no_new_unique_candidates", reason="Alternative capabilities reviewed."))
+    return document
+
+
 def action(
     action_id: str,
     *,
@@ -138,6 +155,7 @@ class StopPolicyTests(unittest.TestCase):
             limits={"deepline_credits": 1})
         document.update(budget=planned["budget"], stop_check=planned["stop_check"])
         document["routes"][0]["paid_calls"] = 0
+        add_catalog_review(document)
         self.assertEqual(VALIDATOR.evaluate_stop(document, now=NOW)["decision"], "budget_exhausted")
         self.assertEqual(VALIDATOR.validate_run(document, require_stop_check=True, now=NOW), [])
 
@@ -299,7 +317,8 @@ class StopPolicyTests(unittest.TestCase):
         self.assertEqual(result["eligible_actions"], [])
 
     def test_one_blocked_action_does_not_stop_another_available_action(self):
-        routes = [{"route_id": "timeout-1", "provider_status": "timeout", "paid_calls": 0}]
+        routes = [{"route_id": "timeout-1", "provider_status": "timeout", "paid_calls": 0,
+                   "provider": "public_web", "scope": "discovery"}]
         blocked = action(
             "blocked-source",
             blocker={
@@ -354,10 +373,12 @@ class StopPolicyTests(unittest.TestCase):
                     "reason_code": "route_not_connected",
                     "reason_text": "The provider is not connected.",
                     "provider_status": "config_error",
+                    "provider": "public_web", "scope": "discovery",
                 }
             ],
         )
 
+        add_catalog_review(document)
         result = VALIDATOR.evaluate_stop(document, now=NOW)
 
         self.assertEqual(result["errors"], [])

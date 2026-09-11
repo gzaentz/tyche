@@ -1,11 +1,10 @@
 ---
 name: lead-sourcing
-description: Source evidence-backed companies with current buying signals and requested-role contacts using the local Deepline and ScrapingDog wrappers; use for company-first account lists, not contact-only enrichment or outreach.
+description: Source evidence-backed companies with buying signals and requested-role contacts using local Deepline/ScrapingDog wrappers; for company-first lists, not contact-only enrichment or outreach.
 ---
 
 # TYCHE Lead Sourcing
 
-Find companies, then requested buyers, using Deepline/ScrapingDog wrappers.
 Do not add servers, databases, CRM writes, or outreach.
 
 ## Authorization
@@ -25,15 +24,21 @@ authorization does not override runtime restrictions, budget caps, or evidence.
 
 ## Continue or stop
 
-Before each action, update `stop_check` and run
-`python3 scripts/validate_run.py <results.json> --check-stop`.
+Keep trying relevant, materially different approaches while the target is unmet
+and useful, affordable actions remain. Use research, product pages and
+local-language sources early for niche businesses.
+
+Dispatch with `scripts/run_attempt.py` following the
+[attempt contract](references/adapter-io.md#one-attempt). For external research,
+maintain `stop_check` and run `python3 scripts/validate_run.py <results.json> --check-stop`
+before dispatch, not file reads or status updates.
 `continue` requires an `eligible_actions` execution in this turn; resolve missing
 coverage or prices first. `repair_state` requires repair and recheck. Neither
 permits a final response, even an honest partial delivery.
 
-Keep checkpoints and status answers in commentary, then resume without asking
-for "continue". Preserve the run, budget, authorization and receipts across
-interruptions; honor explicit user pauses, cancellation or redirection.
+Use commentary for checkpoints; continue without prompting. Preserve run, budget,
+authorization and receipts across interruptions. Honor explicit pauses,
+cancellation and redirection.
 
 Final delivery requires full strict `delivery_allowed: true`: target met, a
 verified limit, or evidenced blockers covering every remaining action. Never
@@ -42,24 +47,21 @@ invent limits or stop because a batch finished. Read the
 
 ## Workflow
 
-1. **Normalize and discover.** Record ICP, target, signal window, roles, fields,
-   start time, and limits. Default paid-provider budget is USD 0.50 per
-   requested lead, shared across providers. Apply [budget normalization](references/workflow-rules.md#default-run-budget).
-   Use spending and explicit time limits, never paid-call counts.
-   Load credentials through repository setup; an unloaded `.env` is not a
-   missing key. Use [tools.md](references/tools.md), then search and describe
-   the Deepline tool before every execution. Deepline calls need network access;
-   in a restricted environment, use the host's supported approval mechanism.
-   Before treating DNS or `NETWORK_ERROR` failures as provider outages, follow
-   [network access recovery](references/deepline-adapter.md#network-access).
+1. **Normalize and discover.** Record ICP, target, signals, roles, fields, start
+   time and limits. Default to USD 0.50 per requested lead, shared across
+   providers; apply [budget normalization](references/workflow-rules.md#default-run-budget).
+   Use spending/time limits, not call counts. Load credentials through repository
+   setup; an unloaded `.env` is not a missing key. Follow [tools.md](references/tools.md),
+   search/describe before execution, and [network recovery](references/deepline-adapter.md#network-access)
+   before treating restricted-network failures as provider outages.
 2. **Pilot within budget.** Use no-cost company sources first. Initialize the
    [paid-call ledger](references/adapter-io.md#paid-call-budget) before spending
-   and protect email verification. Start each discovery route with one paid
-   call and at most ten rows. Retrieve 1-3 relevant contacts per company still
-   missing a buyer. Every paid call needs a conservative max cost and unique
-   route ID. Never bypass the guard; save redacted responses with `--output-file`
-   and never retry an uncertain paid call.
-3. **Verify the company.** Deduplicate domains and owner groups. Read sources
+   and protect email verification. Pilot with one call and at most ten rows;
+   retrieve 1-3 contacts per missing buyer. Use a conservative whole-call cost
+   bound and unique route ID. Preserve redacted responses; never bypass the
+   guard or repeat an uncertain paid call.
+3. **Verify the company.** Apply exclusions and deduplicate domains, known aliases
+   and owner groups before contact lookup. Read sources
    for company fit and buying rationale separately. Snippets, keywords,
    and missing results are not qualification or rejection proof. Keep rejected
    companies, missing evidence, and provider failures separate. Follow the
@@ -71,10 +73,13 @@ invent limits or stop because a batch finished. Read the
    fallback for catch-all/unknown or a recorded [ZeroBounce service failure](references/deepline-adapter.md#bounceban-fallback).
    Preserve both receipts and costs; never override a hard negative. Otherwise
    try another address or buyer.
-5. **Persist, reassess and deliver.** Save evidence, receipts, costs, and next
-   actions as work proceeds. Keep discovery and recovery actions for unresolved
-   companies. Before a shortfall, search the live catalog for different or
-   gap-specific tools and test affordable options. When the stop check permits,
+5. **Persist, reassess and deliver.** Finish small batches through buyer/contact
+   checks before more discovery. Save evidence, receipts, costs, and next
+   actions while working. Keep discovery and recovery actions for unresolved
+   companies. After two batches without verified progress, change source family,
+   language/query strategy or evidence target, not just provider. Keep approach
+   labels stable; raw rows and catalog reads are not progress. Before a shortfall,
+   refresh the catalog and test useful affordable alternatives. When permitted,
    write `report.md`, `results.json`, and `leads.xlsx`; run
    `python3 scripts/validate_run.py <results.json> --show-progress` (strict by
    default). `--check-stop` is not full validation. Complete the [final-response checklist](references/output-contract.md#final-response-checklist).

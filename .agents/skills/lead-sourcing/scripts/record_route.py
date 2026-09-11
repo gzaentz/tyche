@@ -13,6 +13,7 @@ from validate_run import validate_continuations
 
 
 IDENTITY = ("route_id", "phase", "provider", "operation", "request_summary")
+AUDIT_IDENTITY = ("scope", "approach", "request_fingerprint", "entity_type", "status_read")
 STATES = {"untried", "continuable", "exhausted", "blocked"}
 COST_FIELDS = {"cost_credits", "cost_upper_bound_credits", "cost_basis"}
 
@@ -37,9 +38,13 @@ def record(document, frontier, receipt=None):
         raise ValueError("duplicate existing route ID")
     if matches and any(matches[0].get(key) != frontier[key] for key in IDENTITY):
         raise ValueError("continuations require a new route ID")
+    if matches and any(key in matches[0] and matches[0][key] != frontier.get(key) for key in AUDIT_IDENTITY):
+        raise ValueError("attempt scope, approach and request identity are immutable")
     if receipt is not None:
         if not isinstance(receipt, dict) or any(receipt.get(key) != frontier[key] for key in IDENTITY):
             raise ValueError("receipt must match the planned route")
+        if any(key in frontier and receipt.get(key) != frontier[key] for key in AUDIT_IDENTITY):
+            raise ValueError("receipt must match the planned attempt metadata")
         if previous and previous[0] != receipt:
             old = previous[0]
             amount = receipt.get("cost_credits")
@@ -84,7 +89,8 @@ def record(document, frontier, receipt=None):
     return result
 
 
-def persist(path, update):
+def mutate(path, update):
+    """Apply one state update under the existing lock and atomic-write checks."""
     path = Path(path)
     lock = path.with_name(path.name + ".lock")
     fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -95,7 +101,9 @@ def persist(path, update):
         if not stat.S_ISREG(original.st_mode):
             raise OSError("results must be a regular file, not a symlink")
         document = json.loads(path.read_text(encoding="utf-8"))
-        result = record(document, update["frontier"], update.get("receipt"))
+        result = update(document)
+        if not isinstance(result, dict):
+            raise ValueError("state update must return a results object; original file preserved")
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=str(path.parent), delete=False) as stream:
             temporary = Path(stream.name)
             json.dump(result, stream, indent=2, ensure_ascii=True, allow_nan=False)
@@ -112,6 +120,10 @@ def persist(path, update):
         if temporary is not None and temporary.exists():
             temporary.unlink()
         lock.unlink()
+
+
+def persist(path, update):
+    return mutate(path, lambda document: record(document, update["frontier"], update.get("receipt")))
 
 
 def main():

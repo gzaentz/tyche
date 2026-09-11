@@ -197,22 +197,15 @@ a boundary needs further verification, not automatic rejection.
    pilots. Record every attempted route, including public-web queries. Expand
    productive routes within the remaining provider caps and add useful new
    query or continuation paths to the frontier as they are discovered.
-   Initialize `stop_audit.route_frontier` with the planned paths. Use
-   `scripts/record_route.py <results.json> --input '<JSON>'` before each
-   execution with `{"frontier": <route-frontier item in state untried>}`.
-   Immediately afterward, call it with the same identity fields and
-   `{"frontier": <updated item>, "receipt": <route receipt>}`. The helper
-   persists both atomically and rejects changed attempts or reused query IDs.
-   It checks continuation links before saving and detects intervening file
-   edits. Reopen an exhausted parent before reopening its child; close the
-   child before closing the parent. All writers should use this helper's lock.
-   An estimated cost may settle once to a receipted actual cost within its
-   original bound; an actual charge cannot be rewritten through this helper.
-   It does not run providers, infer exhaustion, or attest audit completeness.
-   Check the live descriptor immediately before execution so input errors can
-   be distinguished from provider response errors; do not add a redundant
-   framework around the existing wrappers. Keep reviewed counts, budget and
-   cost summaries current separately. During
+   Initialize `stop_audit.route_frontier` with the planned paths. Dispatch through
+   [run_attempt.py](adapter-io.md#one-attempt), which uses the existing wrappers,
+   budget guard and atomic recorder. It records receipts, retires completed
+   actions and refreshes accounting without qualifying provider rows. Use the
+   recorder for evidence-backed route-state changes and continuation links;
+   preserve historical receipts. Reopen an exhausted parent before reopening
+   its child; close the child before closing the parent. All state writers use
+   the recorder's lock. Check the live descriptor before execution so input
+   errors can be distinguished from provider response errors. During
    work, completion validation should reject actionable routes. If an old
    receipt cannot be recovered, retain that path as blocked with the audit
    gap stated explicitly; never invent row counts or rerun paid work silently.
@@ -245,8 +238,8 @@ a boundary needs further verification, not automatic rejection.
    a gate. Continue while the accepted count is below the target and the
    frontier contains an `untried` or `continuable` route. Do not infer route
    exhaustion from one failed provider, one empty query, or an unchanged page.
-6. Apply the [stopping check](output-contract.md#stopping-check) before each next
-   action and before delivery. Reassess discovery and every unresolved company
+6. Apply the [stopping check](output-contract.md#stopping-check) before dispatch
+   and before delivery. Reassess discovery and every unresolved company
    using different useful tools/sources. A completed attempt is not an exhausted
    search strategy. Missing evidence does not prove failed fit. Preserve
    unfinished routes when a verified budget/time limit ends the run; never close
@@ -270,7 +263,12 @@ a boundary needs further verification, not automatic rejection.
 
 ## Qualification policy
 
-Keep one model and the existing outcomes; do not add scores or gates.
+Keep one qualification policy and the existing outcomes; research models supply
+evidence, not a separate acceptance standard. Do not add lead scores or gates.
+Work small batches through company, buyer and contact checks before broadening
+discovery. After a blocked or unproductive stage, record its recovery action and
+change source for that gap; do not leave promising qualified accounts untouched
+while repeatedly starting new country searches.
 
 - Separate user must-haves from preferences at normalization. Preserve explicit
   constraints, required signals and their windows; do not silently add them.
@@ -304,6 +302,8 @@ present, record each criterion as `pass`, `fail`, or `unknown` with its
 `required`/`preferred` importance and an evidence array. Reject only an
 explicit failure of a required criterion; keep an unknown required criterion
 as unresolved so missing evidence does not become a silent false negative.
+Save resolved criteria as evidence arrives; do not collapse several known facts
+and one missing field into a single unknown `complete_account_fit` check.
 
 The contact gate requires `full_name`, current title, requested-role match,
 company/domain match, a person-identifying URL, and evidence URL/date/text that

@@ -1,0 +1,419 @@
+{
+  "request": {
+    "target_count": 25
+  },
+  "summary": {
+    "target_count": 25,
+    "accepted_companies": 0,
+    "accepted_contacts": 0,
+    "backup_contacts": 0,
+    "rejected_rows": 29,
+    "unresolved_rows": 1
+  },
+  "accepted": [],
+  "rejected": [],
+  "unresolved": [],
+  "budget": {
+    "limits": {
+      "deepline_credits": 125,
+      "scrapingdog_credits": 0
+    },
+    "spent": {
+      "deepline_credits": null,
+      "scrapingdog_credits": 0
+    },
+    "paid_calls": 9,
+    "status": "unknown"
+  },
+  "routes": [
+    {
+      "route_id": "free-corpus-country-keywords-001",
+      "phase": "account_discovery",
+      "provider": "deepline",
+      "operation": "free_simple_company_search",
+      "request_summary": "Local-language tablecloth terms by target country in free company corpus",
+      "provider_status": "ok",
+      "paid_calls": 1,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 10,
+      "cost_credits": null,
+      "cost_upper_bound_credits": 0,
+      "cost_basis": "estimated",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/free-corpus-country-keywords-001.json",
+      "observation": "Returned 10 unrelated sports, real-estate, consulting, photography, tourism and furniture records; no product signal or candidate account."
+    },
+    {
+      "route_id": "aiark-niche-keywords-001",
+      "phase": "account_discovery",
+      "provider": "deepline",
+      "operation": "ai_ark_company_search",
+      "request_summary": "Niche product and made-to-measure keywords with target countries and headcount",
+      "provider_status": "ok",
+      "paid_calls": 1,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 5,
+      "cost_credits": 0.14,
+      "cost_upper_bound_credits": 0.14,
+      "cost_basis": "actual",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/aiark-niche-keywords-001.json",
+      "observation": "Normalized output contained unrelated industrial, meat distribution, catering, public park and environmental consulting companies; no target-country specialist tablecloth account."
+    },
+    {
+      "route_id": "crustdata-niche-keywords-001",
+      "phase": "account_discovery",
+      "provider": "deepline",
+      "operation": "crustdata_v3_company_search",
+      "request_summary": "Company discovery by geography, headcount and tablecloth/oilcloth keywords",
+      "provider_status": "provider_error",
+      "paid_calls": 1,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 0,
+      "cost_credits": null,
+      "cost_upper_bound_credits": 0.2,
+      "cost_basis": "estimated",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/crustdata-niche-keywords-001.json",
+      "observation": "Crustdata returned UPSTREAM_BAD_INPUT status 422 because the provider rejected the <= operator and group shape; no candidate rows were returned."
+    },
+    {
+      "route_id": "crustdata-niche-keywords-corrected-002",
+      "phase": "account_discovery",
+      "provider": "deepline",
+      "operation": "crustdata_v3_company_search",
+      "request_summary": "Corrected Crustdata filter syntax for target-country, 10–50 employee, textile and home-retail candidates",
+      "provider_status": "ok",
+      "paid_calls": 1,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 5,
+      "cost_credits": 0.12,
+      "cost_upper_bound_credits": 0.12,
+      "cost_basis": "actual",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/crustdata-niche-keywords-corrected-002.json",
+      "observation": "Returned five target-country/headcount rows, but the companies were real estate, professional services, luxury chocolate, bed linen and weather-risk software; none showed a specialist PVC/oilcloth tablecloth offer."
+    },
+    {
+      "route_id": "public-web-configurator-001",
+      "phase": "account_discovery",
+      "provider": "public_web",
+      "operation": "search",
+      "request_summary": "First-party made-to-measure configurator pages in French, German, Finnish and English",
+      "provider_status": "ok",
+      "paid_calls": 0,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 14,
+      "cost_credits": 0,
+      "cost_upper_bound_credits": 0,
+      "cost_basis": "actual",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/public-web-configurator-001.json",
+      "observation": "Public search surfaced a small French cluster with strong product evidence. Company size, independent ownership and current owner/founder email remain unverified for these candidates, so they are not yet accepted leads."
+    },
+    {
+      "route_id": "public-web-owner-size-001",
+      "phase": "account_verification",
+      "provider": "public_web",
+      "operation": "search",
+      "request_summary": "Owner/imprint and headcount verification for qualified candidate domains",
+      "provider_status": "ok",
+      "paid_calls": 0,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 6,
+      "cost_credits": 0,
+      "cost_upper_bound_credits": 0,
+      "cost_basis": "actual",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/public-web-owner-size-001.json",
+      "observation": "Only Tissage de Luz survives the country and size checks, and it remains unresolved on exact configurator and owner-specific email gates."
+    },
+    {
+      "route_id": "search-contact-tissage-001",
+      "phase": "contact_discovery",
+      "provider": "deepline",
+      "operation": "search_contact",
+      "request_summary": "Find one current owner/founder contact with work email for Tissage de Luz",
+      "provider_status": "provider_error",
+      "paid_calls": 1,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 0,
+      "cost_credits": null,
+      "cost_upper_bound_credits": 0.56,
+      "cost_basis": "estimated",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/search-contact-tissage-001.json",
+      "observation": "Deepline wrapper returned 'Unable to connect to https://code.deepline.com. fetch failed'; no contact rows were returned and no billing confirmation was received."
+    },
+    {
+      "route_id": "search-contact-tissage-escalated-002",
+      "phase": "contact_discovery",
+      "provider": "deepline",
+      "operation": "search_contact",
+      "request_summary": "Escalated retry for one current owner/founder contact with work email at Tissage de Luz",
+      "provider_status": "provider_error",
+      "paid_calls": 1,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 0,
+      "cost_credits": null,
+      "cost_upper_bound_credits": 0.56,
+      "cost_basis": "estimated",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/search-contact-tissage-escalated-002.json",
+      "observation": "Deepline returned UPSTREAM_BAD_INPUT HTTP 422 with message Bad request; no contact rows or billing confirmation were returned."
+    },
+    {
+      "route_id": "search-contact-tissage-minimal-004",
+      "phase": "contact_discovery",
+      "provider": "deepline",
+      "operation": "search_contact",
+      "request_summary": "Corrected minimal-schema owner/founder contact search for Tissage de Luz",
+      "provider_status": "ok",
+      "paid_calls": 1,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 0,
+      "cost_credits": null,
+      "cost_upper_bound_credits": 0.56,
+      "cost_basis": "estimated",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/search-contact-tissage-minimal-004.json",
+      "observation": "Deepline completed the provider-safe query and returned zero people; no owner/founder email was available for ZeroBounce validation."
+    },
+    {
+      "route_id": "quickenrich-localized-001",
+      "phase": "account_discovery",
+      "provider": "deepline",
+      "operation": "quickenrich_company_search",
+      "request_summary": "Country and localized keyword company search",
+      "provider_status": "ok",
+      "paid_calls": 1,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 10,
+      "cost_credits": 0.56,
+      "cost_upper_bound_credits": 0.56,
+      "cost_basis": "actual",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/quickenrich-localized-001.json",
+      "observation": "Ten rows returned; none qualified. Font-Ly is excluded and the other nine fail product-specialist, size, or business-model checks."
+    },
+    {
+      "route_id": "quickenrich-localized-002",
+      "phase": "account_discovery",
+      "provider": "deepline",
+      "operation": "quickenrich_company_search",
+      "request_summary": "Country and localized keyword company search, page two",
+      "provider_status": "ok",
+      "paid_calls": 1,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 6,
+      "cost_credits": 0.34,
+      "cost_upper_bound_credits": 0.34,
+      "cost_basis": "actual",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/quickenrich-localized-002.json",
+      "observation": "Six final-page rows returned; none qualified."
+    },
+    {
+      "route_id": "public-web-final-002",
+      "phase": "account_discovery",
+      "provider": "public_web",
+      "operation": "search",
+      "request_summary": "Final free public-web search across Austria, Switzerland, Finland, France and Ireland",
+      "provider_status": "ok",
+      "paid_calls": 0,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 0,
+      "cost_credits": 0,
+      "cost_upper_bound_credits": 0,
+      "cost_basis": "actual",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/public-web-final-002.json",
+      "observation": "No results for the four executed country queries; Ireland remains for the next explicit query."
+    },
+    {
+      "route_id": "public-web-final-003",
+      "phase": "account_discovery",
+      "provider": "public_web",
+      "operation": "search",
+      "request_summary": "Final free public-web search for Ireland",
+      "provider_status": "ok",
+      "paid_calls": 0,
+      "accepted_leads_before_call": 0,
+      "rows_returned": 3,
+      "cost_credits": 0,
+      "cost_upper_bound_credits": 0,
+      "cost_basis": "actual",
+      "output_file": "reports/2026-09-10-tablecloth-eu-25-refresh/receipts/public-web-final-003.json",
+      "observation": "Three result domains were found; all were excluded or failed ICP gates."
+    }
+  ],
+  "stop_audit": {
+    "target_shortfall": 25,
+    "candidate_companies_reviewed": 29,
+    "substantive_account_reviews": 25,
+    "exclusion_only_rejections": 4,
+    "duplicate_candidates": 0,
+    "frontier_complete": true,
+    "provider_call_capacity": {
+      "deepline": "unknown",
+      "scrapingdog": "unavailable"
+    },
+    "route_frontier": [
+      {
+        "route_id": "free-corpus-country-keywords-001",
+        "phase": "account_discovery",
+        "provider": "deepline",
+        "operation": "free_simple_company_search",
+        "request_summary": "Local-language tablecloth terms by target country in free company corpus",
+        "state": "exhausted",
+        "reason": "The free corpus preview returned only unrelated businesses; no new specialist tablecloth account was present.",
+        "exhaustion_basis": "no_new_unique_candidates"
+      },
+      {
+        "route_id": "aiark-niche-keywords-001",
+        "phase": "account_discovery",
+        "provider": "deepline",
+        "operation": "ai_ark_company_search",
+        "request_summary": "Niche product and made-to-measure keywords with target countries and headcount",
+        "state": "exhausted",
+        "reason": "AI Ark returned five normalized companies, all outside the target geography or product niche; no account-level candidate survived initial fit review.",
+        "exhaustion_basis": "irrelevant_results"
+      },
+      {
+        "route_id": "crustdata-niche-keywords-001",
+        "phase": "account_discovery",
+        "provider": "deepline",
+        "operation": "crustdata_v3_company_search",
+        "request_summary": "Company discovery by geography, headcount and tablecloth/oilcloth keywords",
+        "state": "blocked",
+        "reason": "Provider rejected the first payload with a 422 schema/input error; preserve the reservation and use a fresh route ID with corrected live operator syntax."
+      },
+      {
+        "route_id": "quickenrich-localized-001",
+        "phase": "account_discovery",
+        "provider": "deepline",
+        "operation": "quickenrich_company_search",
+        "request_summary": "Country and localized keyword company search",
+        "state": "exhausted",
+        "reason": "Both provider pages were reviewed; no new account met the specialist product, geography and size gates.",
+        "exhaustion_basis": "no_new_unique_candidates",
+        "continuation_route_ids": [
+          "quickenrich-localized-002"
+        ]
+      },
+      {
+        "route_id": "public-web-configurator-001",
+        "phase": "account_discovery",
+        "provider": "public_web",
+        "operation": "search",
+        "request_summary": "First-party made-to-measure configurator pages in French, German, Finnish and English",
+        "state": "exhausted",
+        "reason": "All product-signal candidates from the public pass were either excluded, outside geography/size, or unresolved after owner and size review.",
+        "exhaustion_basis": "no_new_unique_candidates",
+        "continuation_route_ids": [
+          "public-web-owner-size-001"
+        ]
+      },
+      {
+        "route_id": "public-web-owner-size-001",
+        "phase": "account_verification",
+        "provider": "public_web",
+        "operation": "search",
+        "request_summary": "Owner/imprint and headcount verification for qualified candidate domains",
+        "state": "exhausted",
+        "reason": "Tissage de Luz was the only account surviving geography and size checks, but the exact configurator and owner-specific contact gates remained unresolved after the terminal contact search.",
+        "exhaustion_basis": "no_new_unique_candidates",
+        "continuation_route_ids": [
+          "search-contact-tissage-minimal-004"
+        ]
+      },
+      {
+        "route_id": "crustdata-niche-keywords-corrected-002",
+        "phase": "account_discovery",
+        "provider": "deepline",
+        "operation": "crustdata_v3_company_search",
+        "request_summary": "Corrected Crustdata filter syntax for target-country, 10–50 employee, textile and home-retail candidates",
+        "state": "exhausted",
+        "reason": "Fresh route after the prior provider-level schema rejection; uses the accepted =< operator and shallower grouped filters.",
+        "exhaustion_basis": "irrelevant_results",
+        "observation": "Returned five target-country/headcount rows, but the companies were real estate, professional services, luxury chocolate, bed linen and weather-risk software; none showed a specialist PVC/oilcloth tablecloth offer."
+      },
+      {
+        "route_id": "search-contact-tissage-001",
+        "phase": "contact_discovery",
+        "provider": "deepline",
+        "operation": "search_contact",
+        "request_summary": "Find one current owner/founder contact with work email for Tissage de Luz",
+        "state": "blocked",
+        "reason": "The sandbox execution could not connect to Deepline before returning any provider result; preserve the attempt and use one escalated continuation."
+      },
+      {
+        "route_id": "search-contact-tissage-escalated-002",
+        "phase": "contact_discovery",
+        "provider": "deepline",
+        "operation": "search_contact",
+        "request_summary": "Escalated retry for one current owner/founder contact with work email at Tissage de Luz",
+        "state": "blocked",
+        "reason": "The escalated provider call reached Deepline but returned HTTP 422 Bad request; use one minimal live-schema continuation and then stop."
+      },
+      {
+        "route_id": "search-contact-tissage-minimal-003",
+        "phase": "contact_discovery",
+        "provider": "deepline",
+        "operation": "search_contact",
+        "request_summary": "Minimal-schema owner/founder contact search for Tissage de Luz",
+        "state": "blocked",
+        "reason": "The CLI rejected the request envelope before provider execution because it expected the raw search_contact payload; no provider call or billing confirmation occurred. Use one corrected raw-payload continuation and then stop."
+      },
+      {
+        "route_id": "search-contact-tissage-minimal-004",
+        "phase": "contact_discovery",
+        "provider": "deepline",
+        "operation": "search_contact",
+        "request_summary": "Corrected minimal-schema owner/founder contact search for Tissage de Luz",
+        "state": "exhausted",
+        "reason": "The supported raw payload completed successfully but returned zero people; no owner/founder email can be verified.",
+        "exhaustion_basis": "no_contact_rows"
+      },
+      {
+        "route_id": "quickenrich-localized-002",
+        "phase": "account_discovery",
+        "provider": "deepline",
+        "operation": "quickenrich_company_search",
+        "request_summary": "Country and localized keyword company search, page two",
+        "state": "exhausted",
+        "reason": "The provider-reported final page returned six rows with no new account meeting the specialist product, geography and size gates; one made-to-measure textile shop was below the 10-person floor.",
+        "exhaustion_basis": "no_new_unique_candidates"
+      },
+      {
+        "route_id": "public-web-final-002",
+        "phase": "account_discovery",
+        "provider": "public_web",
+        "operation": "search",
+        "request_summary": "Final free public-web search across Austria, Switzerland, Finland, France and Ireland",
+        "state": "exhausted",
+        "reason": "The remaining Ireland query was completed separately and found no new qualifying account.",
+        "exhaustion_basis": "no_new_unique_candidates",
+        "continuation_route_ids": [
+          "public-web-final-003"
+        ]
+      },
+      {
+        "route_id": "public-web-final-003",
+        "phase": "account_discovery",
+        "provider": "public_web",
+        "operation": "search",
+        "request_summary": "Final free public-web search for Ireland",
+        "state": "exhausted",
+        "reason": "The Ireland query returned only excluded or previously rejected broad retailers; no new specialist webshop met the product, size and owner-contact gates.",
+        "exhaustion_basis": "no_new_unique_candidates"
+      }
+    ]
+  },
+  "stop_check": {
+    "started_at": "2026-09-11T01:55:00Z",
+    "next_actions": [
+      {
+        "id": "discovery-provider-stop-001",
+        "scope": "discovery",
+        "description": "Repair the final route-outcome audit, then close the run after all covered discovery families returned no qualifying accounts.",
+        "provider": "public_web",
+        "paid_calls": 0,
+        "cost_upper_bound_credits": 0,
+        "blocker": {
+          "kind": "access_unavailable",
+          "reason": "All covered public/free and paid discovery families are exhausted; the remaining Crustdata fallback is blocked by the recorded 422 provider input failure. Continuing requires a new accessible source or an approved ICP expansion.",
+          "evidence_route_id": "crustdata-niche-keywords-001"
+        }
+      }
+    ]
+  }
+}

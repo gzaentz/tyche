@@ -122,6 +122,7 @@ class DeliveryGateTests(unittest.TestCase):
         self.assertEqual(output["stop_decision"]["decision"], "time_limit_reached")
 
     def test_valid_budget_stop_allows_shortfall(self):
+        from test_stop_policy import add_catalog_review
         document = shortfall_result(frontier_state="continuable", stop_reason="budget_exhausted")
         planned = stop_document(
             [action("paid", provider="deepline", paid_calls=1, cost_upper_bound_credits=2)],
@@ -129,6 +130,7 @@ class DeliveryGateTests(unittest.TestCase):
         )
         document.update(budget=planned["budget"], stop_check=planned["stop_check"])
         document["routes"][0]["paid_calls"] = 0
+        add_catalog_review(document)
         code, output = self.run_cli(document)
         self.assertEqual(code, 0, output)
         self.assertTrue(output["delivery_allowed"])

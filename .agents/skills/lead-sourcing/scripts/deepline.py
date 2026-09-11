@@ -166,6 +166,29 @@ def _scalar_result(value: Any) -> Optional[Dict[str, Any]]:
     return value
 
 
+def _scraped_document(value: Any) -> Optional[Dict[str, Any]]:
+    """Recognize a successful Firecrawl-style page, not a company or buyer."""
+    if not isinstance(value, dict) or not isinstance(value.get("metadata"), dict):
+        return None
+    metadata = value["metadata"]
+    status = metadata.get("statusCode")
+    url = metadata.get("sourceURL") or metadata.get("url")
+    if (type(status) is not int or not 200 <= status < 300
+            or not isinstance(url, str) or not url.startswith(("https://", "http://"))):
+        return None
+    try:
+        if not urlparse(url).hostname:
+            return None
+    except ValueError:
+        return None
+    for content_format in ("markdown", "html"):
+        content = value.get(content_format)
+        if isinstance(content, str) and content.strip():
+            return dict(value, evidence_url=url, evidence_text=content,
+                        content_format=content_format, signal="web_page")
+    return None
+
+
 class InputError(ValueError):
     """An invalid local request."""
 
@@ -848,6 +871,9 @@ def _records(value: Any) -> List[Any]:
         return value
     if not isinstance(value, dict):
         return []
+    document = _scraped_document(value)
+    if document is not None:
+        return [document]
     empty_direct: Optional[List[Any]] = None
     for key in (
         "evidence",
@@ -1099,7 +1125,7 @@ def _known_envelope(value: Any) -> bool:
             except ValueError:
                 return False
         return False
-    if _scalar_result(value) is not None:
+    if _scalar_result(value) is not None or _scraped_document(value) is not None:
         return True
     if any(
         key in value
@@ -1435,7 +1461,7 @@ def _execute_output(
             body["provider_response"] = redact(parsed)
         body.update(metadata)
         return body
-    if status in _PROVIDER_ERROR_STATUSES or status == "schema_error":
+    if status in _FAILURE_STATUSES:
         final_status = status
     elif status == "partial":
         final_status = "partial"
