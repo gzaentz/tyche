@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Execute one chosen sourcing action, preserving budgets, receipts and resumability."""
+"""Execute a sourcing action or up to three independent company checks."""
 
 import argparse
 import copy
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import importlib
 import json
@@ -211,8 +212,7 @@ def finish_attempt(run_file, route_id, body):
     return evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))
 
 
-def run_attempt(run_file, spec, *, execute=None, plan_only=False):
-    run_file = Path(run_file).resolve(strict=True)
+def _start_attempt(run_file, spec, *, plan_only=False):
     if spec["action"]["provider"] == "public_web" and not plan_only:
         raise ValueError("public web: use --plan-only, then record the observed result with --complete")
     if plan_only and spec["action"]["provider"] != "public_web":
@@ -228,16 +228,79 @@ def run_attempt(run_file, spec, *, execute=None, plan_only=False):
     metadata["attempt"] = copy.deepcopy({"action": prepared["action"],
                            "request": {k: v for k, v in request.items() if k != "spend"}})
     capture = ResponseFile(output, redact, metadata=metadata)
+    return adapter, request, capture
+
+
+def _dispatch(adapter, request, capture, *, execute=None, plan_only=False):
+    metadata = capture.metadata
     if plan_only:
-        capture.finish(dict(metadata, status="pending"))
-        return {"pending": True, "receipt_file": str(output), **metadata}
+        if not capture.finish(dict(metadata, status="pending")):
+            raise OSError("public-web plan could not be saved; recover its receipt before dispatch")
+        return {"pending": True, "receipt_file": str(capture.path), **metadata}
     body, code = (execute or adapter.run)(request, capture.capture)
     body.update(metadata)
     if not capture.finish(body):
         raise OSError("response could not be saved; recover the captured response, do not repeat the provider call")
-    decision = finish_attempt(run_file, prepared["action"]["id"], body)
-    return {"receipt_file": str(output), "provider_status": body.get("status"), "exit_code": code,
-            "stop_decision": decision, "result": body}
+    return {"receipt_file": str(capture.path), "provider_status": body.get("status"),
+            "exit_code": code, "result": body}
+
+
+def run_attempt(run_file, spec, *, execute=None, plan_only=False):
+    run_file = Path(run_file).resolve(strict=True)
+    prepared = _start_attempt(run_file, spec, plan_only=plan_only)
+    result = _dispatch(*prepared, execute=execute, plan_only=plan_only)
+    if not plan_only:
+        result["stop_decision"] = finish_attempt(run_file, spec["action"]["id"], result["result"])
+    return result
+
+
+def run_batch(run_file, specs, *, execute=None, plan_only=False):
+    """One writer plans/records; at most three workers dispatch to their own receipts."""
+    run_file = Path(run_file).resolve(strict=True)
+    if not isinstance(specs, list) or not 1 <= len(specs) <= 3:
+        raise ValueError("a batch requires 1-3 independent company checks")
+    ids, scopes = set(), set()
+    for spec in specs:
+        action = spec["action"]
+        rid, scope = action["id"], action["scope"]
+        if not isinstance(rid, str) or not isinstance(scope, str):
+            raise ValueError("batch route IDs and company scopes must be strings")
+        scope = scope.strip().lower()
+        if rid in ids or scope in scopes:
+            raise ValueError("batch actions need unique route IDs and distinct canonical company scopes")
+        if action["phase"] not in {"account_verification", "contact_discovery", "contact_verification", "email_validation"}:
+            raise ValueError("batch mode is for company checks; run discovery pilots separately")
+        if (action["provider"] == "public_web") != plan_only:
+            raise ValueError("public-web batches require --plan-only; provider batches cannot use it")
+        ids.add(rid)
+        scopes.add(scope)
+
+    results, prepared = [], []
+    # Save every plan before any network work. A refused member does not discard
+    # its siblings, and a failed dispatch is never automatically resubmitted.
+    for spec in specs:
+        result = {"route_id": spec["action"]["id"], "exit_code": 0}
+        results.append(result)
+        try:
+            prepared.append((result, _start_attempt(run_file, spec, plan_only=plan_only)))
+        except Exception as exc:
+            result.update(exit_code=2, error=str(exc), error_stage="prepare")
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(_dispatch, *args, execute=execute, plan_only=plan_only): result
+                   for result, args in prepared}
+        for future in as_completed(futures):
+            result = futures[future]
+            stage = "dispatch"
+            try:
+                result.update(future.result())
+                if not plan_only:
+                    stage = "record"
+                    finish_attempt(run_file, result["route_id"], result["result"])
+            except Exception as exc:
+                result.update(exit_code=2, error=str(exc), error_stage=stage,
+                              receipt_file=str(run_file.parent / "receipts" / (result["route_id"] + ".json")))
+    return {"attempts": results, "exit_code": 2 if any(r["exit_code"] for r in results) else 0}
 
 
 def main():
@@ -245,6 +308,7 @@ def main():
     parser.add_argument("results", type=Path)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--input-file", type=Path, help="JSON containing action and wrapper request")
+    mode.add_argument("--batch-files", type=Path, nargs="+", help="1-3 attempt files for distinct company checks")
     mode.add_argument("--complete", help="record this route's saved normalized receipt, without dispatch")
     parser.add_argument("--plan-only", action="store_true", help="reserve public-web work before using the browser/search tool")
     args = parser.parse_args()
@@ -254,12 +318,17 @@ def main():
                 raise ValueError("invalid route ID")
             body = load_json((args.results.parent / "receipts" / (args.complete + ".json")).read_text())
             result = finish_attempt(args.results, args.complete, body)
+        elif args.batch_files:
+            result = run_batch(args.results, [load_json(path.read_text()) for path in args.batch_files],
+                               plan_only=args.plan_only)
         else:
             result = run_attempt(args.results, load_json(args.input_file.read_text()), plan_only=args.plan_only)
         print(json.dumps(result, ensure_ascii=True, allow_nan=False))
+        if args.batch_files:
+            return result["exit_code"]
     except (ValueError, OSError, KeyError, TypeError, StopIteration) as exc:
         parser.exit(2, str(exc) + "\n")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

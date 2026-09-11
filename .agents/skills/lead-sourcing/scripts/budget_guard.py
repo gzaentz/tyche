@@ -9,9 +9,11 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+import threading
 
 
 PROVIDERS = ("deepline", "scrapingdog")
+_TRANSACTION_LOCK = threading.Lock()
 
 
 class BudgetError(ValueError):
@@ -59,6 +61,15 @@ def load_ledger(run_file):
 
 @contextmanager
 def transaction(path):
+    # Batch workers share this process. Serialize only ledger writes, never I/O
+    # to a provider. Keep the existing fail-closed lock for other processes.
+    with _TRANSACTION_LOCK:
+        with _file_transaction(path) as state:
+            yield state
+
+
+@contextmanager
+def _file_transaction(path):
     # Use the route writer's fail-closed lock convention; never expire a lock.
     lock = path.with_name(path.name + ".lock")
     fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)

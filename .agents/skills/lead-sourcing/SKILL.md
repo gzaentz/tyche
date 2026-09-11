@@ -28,8 +28,9 @@ Keep trying relevant, materially different approaches while the target is unmet
 and useful, affordable actions remain. Use research, product pages and
 local-language sources early for niche businesses.
 
-Dispatch with `scripts/run_attempt.py` following the
-[attempt contract](references/adapter-io.md#one-attempt). For external research,
+Use `scripts/run_attempt.py`: [pilots](references/adapter-io.md#one-attempt),
+then [up to three concurrent checks](references/adapter-io.md#concurrent-company-checks)
+with one agent. For external research,
 maintain `stop_check` and run `python3 scripts/validate_run.py <results.json> --check-stop`
 before dispatch, not file reads or status updates.
 `continue` requires an `eligible_actions` execution in this turn; resolve missing
@@ -57,7 +58,7 @@ invent limits or stop because a batch finished. Read the
 2. **Pilot within budget.** Use no-cost company sources first. Initialize the
    [paid-call ledger](references/adapter-io.md#paid-call-budget) before spending
    and protect email verification. Pilot with one call and at most ten rows;
-   retrieve 1-3 contacts per missing buyer. Use a conservative whole-call cost
+   retrieve 1-3 contacts per buyer. Use a conservative whole-call cost
    bound and unique route ID. Preserve redacted responses; never bypass the
    guard or repeat an uncertain paid call.
 3. **Verify the company.** Apply exclusions and deduplicate domains, known aliases
@@ -73,9 +74,9 @@ invent limits or stop because a batch finished. Read the
    fallback for catch-all/unknown or a recorded [ZeroBounce service failure](references/deepline-adapter.md#bounceban-fallback).
    Preserve both receipts and costs; never override a hard negative. Otherwise
    try another address or buyer.
-5. **Persist, reassess and deliver.** Finish small batches through buyer/contact
-   checks before more discovery. Save evidence, receipts, costs, and next
-   actions while working. Keep discovery and recovery actions for unresolved
+5. **Persist, reassess and deliver.** Finish each batch before more discovery.
+   Save evidence, receipts, costs, and next
+   actions. Keep discovery and recovery actions for unresolved
    companies. After two batches without verified progress, change source family,
    language/query strategy or evidence target, not just provider. Keep approach
    labels stable; raw rows and catalog reads are not progress. Before a shortfall,

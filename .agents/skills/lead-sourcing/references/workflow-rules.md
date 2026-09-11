@@ -18,8 +18,11 @@ Command paths below are relative to the skill directory, not this reference.
   different hypotheses (for example hiring, funding/news, paid activity,
   patents, facilities, official video, or firmographic fit) and change route
   when rows repeat or lack evidence.
-- Source companies sequentially. Resolve and deduplicate canonical domains at
-  the account stage. Contact lookup may use accepted company/domain rows only.
+- Use one agent to check up to three independent companies concurrently via
+  [bounded batches](adapter-io.md#concurrent-company-checks). Resolve and
+  deduplicate canonical domains, aliases and owner groups before batching.
+  Keep each company's account, buyer and email steps in order; contact lookup
+  requires passing account evidence for that company.
 - Discover live Deepline capabilities with `search`, inspect a chosen tool with
   `describe`, and confirm its live input and price before every `execute`.
   Never invent or pin a Deepline tool ID. Optional provider hypotheses such as
@@ -71,9 +74,9 @@ Command paths below are relative to the skill directory, not this reference.
   an input error, response error, timeout, or uncertain response is not
   `no_results` and remains unresolved or blocked as appropriate.
 - Treat `target_count` as the completion condition. While accepted companies
-  remain below it, refill one company or contact candidate at a time from a
-  changed route, query, page, tool, or provider. Do not use a fixed 5x
-  multiplier or any other fixed over-fetch.
+  remain below it, refill from a changed route, query, page, tool, or provider.
+  Check at most three companies at once, reducing the batch to the remaining
+  lead shortfall. Do not use a fixed 5x multiplier or any other fixed over-fetch.
 - If `contact_role_groups` is present, search and rank its `primary` roles
   first. Use `secondary` roles as valid fallbacks when no primary-role contact
   passes; a secondary-role contact may fill `primary_contact` and must not be
@@ -215,8 +218,9 @@ a boundary needs further verification, not automatic rejection.
 4. As each company passes the account gate, look up contacts only for that
    accepted company/domain. If role groups are present, search and rank the
    primary group first, then search the secondary group if no primary-role
-   contact passes. Retrieve 1-3 relevant candidates with a provider-native limit,
-   finishing one missing company before purchasing another contact batch. Select
+   contact passes. Retrieve 1-3 relevant candidates per company with a
+   provider-native limit. Finish the current company batch before purchasing
+   more contacts; never parallelize dependent steps for the same company. Select
    one output primary, and retain up to two others as backups. A valid secondary-role
    contact can be the output primary when no primary-role contact passes; mark
    it with `role_group: "secondary"` when known. If only one current contact

@@ -1,10 +1,13 @@
 import copy
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
+import threading
 import unittest
 import sys
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from test_stop_policy import NOW, action, stop_document
 from test_output_contract import VALIDATOR
@@ -138,6 +141,191 @@ class AttemptExecutionTests(unittest.TestCase):
         return budget_guard.guarded_call(request, "deepline", lambda: (
             {"provider": "deepline", "operation": "execute", "status": "no_results", "results": [],
              "billing": {"credits_charged": 0.1, "cost_usd": 0.01}}, 0))
+
+    def company_specs(self):
+        specs = [self.spec(f"check-{i}", query=f"company-{i}.example", paid=True) for i in range(3)]
+        for i, spec in enumerate(specs):
+            spec["action"].update(phase="account_verification", scope=f"company-{i}.example")
+        return specs
+
+    def test_three_provider_calls_overlap_with_one_result_writer(self):
+        gate = threading.Barrier(3, timeout=5)
+        writers, providers = set(), set()
+        mutate = runner.mutate
+
+        def write(*args):
+            writers.add(threading.get_ident())
+            return mutate(*args)
+
+        def execute(request, capture):
+            def remote():
+                providers.add(threading.get_ident())
+                gate.wait()  # Fails if network work is serialized with the ledger.
+                return {"status": "no_results", "results": [],
+                        "billing": {"credits_charged": 0.1, "cost_usd": 0.01}}, 0
+            return budget_guard.guarded_call(request, "deepline", remote)
+
+        with patch.object(runner, "mutate", side_effect=write):
+            result = runner.run_batch(self.path, self.company_specs(), execute=execute)
+        self.assertEqual(result["exit_code"], 0, result)
+        self.assertEqual(len(providers), 3)
+        self.assertEqual(writers, {threading.get_ident()})
+        doc = json.loads(self.path.read_text())
+        self.assertEqual(len(doc["routes"]), 3)
+        self.assertEqual(doc["stop_check"]["next_actions"], [])
+        self.assertAlmostEqual(doc["budget"]["spent"]["deepline_credits"], 0.3)
+        self.assertEqual(budget_guard.audit_ledger(self.path, doc), [])
+
+    def test_batch_shape_and_dependent_checks_refused_before_any_dispatch(self):
+        specs = self.company_specs()
+        same_company, same_id, discovery, invalid = [copy.deepcopy(specs) for _ in range(4)]
+        same_company[1]["action"].update(scope=specs[0]["action"]["scope"], phase="contact_discovery")
+        same_id[1]["action"]["id"] = specs[0]["action"]["id"]
+        discovery[1]["action"]["phase"] = "account_discovery"
+        invalid[1]["action"]["scope"] = None
+        before = self.path.read_bytes()
+        execute = Mock()
+        for batch in ([], specs + [specs[0]], same_company, same_id, discovery, invalid):
+            with self.subTest(batch=batch), self.assertRaises(ValueError):
+                runner.run_batch(self.path, batch, execute=execute)
+        execute.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(budget_guard.load_ledger(self.path)["calls"], {})
+
+    def test_pending_calls_cannot_spend_siblings_budget_or_verification_reserve(self):
+        for name, limits, usd, verification in (
+            ("credits", {"deepline_credits": 0.3}, 2, 0),
+            ("dollars-and-verification", {}, 0.05, 0.2),
+        ):
+            with self.subTest(cap=name):
+                folder = self.path.parent / name
+                folder.mkdir()
+                path = folder / "results.json"
+                doc = copy.deepcopy(self.doc)
+                doc["budget"]["limits"].update(limits)
+                path.write_text(json.dumps(doc))
+                budget_guard.initialize(path, max_usd=usd, scrapingdog_usd_per_credit=0.1,
+                                        verification_reserve_credits=verification)
+                ready, refused = threading.Barrier(3, timeout=5), threading.Barrier(3, timeout=5)
+                sent = []
+
+                def execute(request, capture):
+                    ready.wait()
+                    def remote():
+                        sent.append(request["spend"]["route_id"])
+                        refused.wait()  # Hold the reservation until both siblings are refused.
+                        return {"status": "no_results", "results": [],
+                                "billing": {"credits_charged": 0.1, "cost_usd": 0.01}}, 0
+                    body, code = budget_guard.guarded_call(request, "deepline", remote)
+                    if body.get("request_sent") is False:
+                        refused.wait()
+                    return body, code
+
+                result = runner.run_batch(path, self.company_specs(), execute=execute)
+                self.assertEqual(len(sent), 1, result)
+                self.assertEqual(result["exit_code"], 2)
+                self.assertEqual(sum(r.get("provider_status") == "quota_exceeded" for r in result["attempts"]), 2)
+                doc = json.loads(path.read_text())
+                self.assertEqual(doc["budget"]["paid_calls"], 1)
+                self.assertEqual(len(doc["routes"]), 3)
+                self.assertEqual(budget_guard.audit_ledger(path, doc), [])
+
+    def test_failed_member_preserves_siblings_and_prevents_redispatch(self):
+        def execute(request, capture):
+            if request["spend"]["route_id"] == "check-1":
+                budget_guard.reserve(request["spend"], "deepline")
+                capture({"job_id": "uncertain-job"})
+                raise RuntimeError("remote outcome unknown")
+            return self.paid_response(request, capture)
+
+        result = runner.run_batch(self.path, self.company_specs(), execute=execute)
+        self.assertEqual(result["exit_code"], 2)
+        self.assertEqual(result["attempts"][1]["error_stage"], "dispatch")
+        self.assertEqual(len(json.loads(self.path.read_text())["routes"]), 2)
+        ledger = budget_guard.load_ledger(self.path)
+        self.assertEqual(len(ledger["calls"]), 3)
+        self.assertIsNone(ledger["calls"]["check-1"]["actual_credits"])
+        specs = self.company_specs()
+        for spec in specs:
+            spec["action"]["id"] += "-retry"
+        replay = Mock()
+        repeated = runner.run_batch(self.path, specs, execute=replay)
+        replay.assert_not_called()
+        self.assertEqual(repeated["exit_code"], 2)
+        saved = json.loads(Path(result["attempts"][1]["receipt_file"]).read_text())
+        self.assertEqual(saved["provider_response"]["job_id"], "uncertain-job")
+        saved.update(status="timeout", results=[])
+        runner.finish_attempt(self.path, "check-1", saved)
+        self.assertEqual(budget_guard.load_ledger(self.path), ledger)
+        self.assertEqual(budget_guard.audit_ledger(self.path, json.loads(self.path.read_text())), [])
+
+    def test_record_failure_can_complete_without_repeating_successful_siblings(self):
+        finish = runner.finish_attempt
+        def interrupted(path, rid, body):
+            if rid == "check-1":
+                raise OSError("interrupted state write")
+            return finish(path, rid, body)
+        with patch.object(runner, "finish_attempt", side_effect=interrupted):
+            result = runner.run_batch(self.path, self.company_specs(), execute=self.paid_response)
+        self.assertEqual(result["exit_code"], 2)
+        self.assertEqual(result["attempts"][1]["error_stage"], "record")
+        self.assertEqual(len(json.loads(self.path.read_text())["routes"]), 2)
+        ledger = budget_guard.load_ledger(self.path)
+        saved = json.loads(Path(result["attempts"][1]["receipt_file"]).read_text())
+        runner.finish_attempt(self.path, "check-1", saved)
+        runner.finish_attempt(self.path, "check-1", saved)
+        self.assertEqual(budget_guard.load_ledger(self.path), ledger)
+        self.assertEqual(budget_guard.audit_ledger(self.path, json.loads(self.path.read_text())), [])
+
+    def test_batch_keeps_company_qualification_gate_and_saves_other_checks(self):
+        specs = self.company_specs()
+        specs[1]["action"]["phase"] = "contact_discovery"
+        result = runner.run_batch(self.path, specs, execute=self.paid_response)
+        self.assertEqual(result["attempts"][1]["error_stage"], "prepare")
+        self.assertIn("account-qualified", result["attempts"][1]["error"])
+        self.assertEqual(len(budget_guard.load_ledger(self.path)["calls"]), 2)
+        self.assertEqual(budget_guard.audit_ledger(self.path, json.loads(self.path.read_text())), [])
+
+    def test_batch_cli_saves_actual_wrapper_receipts_and_passes_stop_check(self):
+        stub = self.path.parent / "fake-deepline"
+        stub.write_text(f"#!{sys.executable}\nimport json\n"
+                        "print(json.dumps({'status': 'no_results', 'results': [], "
+                        "'billing': {'credits_charged': 0.1, 'cost_usd': 0.01}}))\n")
+        stub.chmod(0o700)
+        files = []
+        for spec in self.company_specs():
+            path = self.path.parent / (spec["action"]["id"] + ".json")
+            path.write_text(json.dumps(spec))
+            files.append(str(path))
+        result = subprocess.run([sys.executable, runner.__file__, str(self.path), "--batch-files", *files],
+                                env=dict(os.environ, DEEPLINE_BIN=str(stub)), capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        attempts = json.loads(result.stdout)["attempts"]
+        self.assertEqual(len(attempts), 3)
+        for attempt in attempts:
+            receipt = json.loads(Path(attempt["receipt_file"]).read_text())
+            self.assertEqual(receipt["receipt_status"], "complete")
+            self.assertEqual(receipt["spend_receipt"]["state"], "settled")
+        checked = subprocess.run([sys.executable, str(Path(runner.__file__).with_name("validate_run.py")),
+                                  str(self.path), "--check-stop"], capture_output=True, text=True, timeout=15)
+        self.assertEqual(checked.returncode, 0, checked.stderr + checked.stdout)
+        self.assertFalse(json.loads(checked.stdout)["delivery_allowed"])
+
+    def test_public_web_batch_plans_then_completes_without_provider_dispatch(self):
+        specs = self.company_specs()
+        for spec in specs:
+            spec["action"].update(provider="public_web", paid_calls=0, cost_upper_bound_credits=0)
+            spec["request"] = {"operation": "search", "query": spec["action"]["scope"]}
+        execute = Mock()
+        result = runner.run_batch(self.path, specs, execute=execute, plan_only=True)
+        execute.assert_not_called()
+        self.assertEqual(result["exit_code"], 0)
+        for attempt in result["attempts"]:
+            saved = json.loads(Path(attempt["receipt_file"]).read_text())
+            saved.update(status="ok", operation="search", results=[{"url": "https://example.org"}])
+            runner.finish_attempt(self.path, attempt["route_id"], saved)
+        self.assertEqual(len(json.loads(self.path.read_text())["routes"]), 3)
+        self.assertEqual(budget_guard.load_ledger(self.path)["calls"], {})
 
     def test_records_receipt_cost_and_retires_action(self):
         result = runner.run_attempt(self.path, self.spec(paid=True), execute=self.paid_response)

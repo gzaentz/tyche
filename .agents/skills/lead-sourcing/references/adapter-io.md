@@ -72,6 +72,47 @@ evidence, preserve unknown required checks as unresolved, and add useful next
 actions. Use `record_route.py` to close reviewed exact routes or link continuations.
 Full strict validation is still required before delivery.
 
+## Concurrent company checks
+
+After the pilot, use one agent and up to three ready checks for different
+companies. Use fewer when fewer checks are ready or the remaining lead shortfall
+is smaller. Each file uses the same `action`/`request` format above:
+
+```bash
+python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
+  reports/<run-id>/results.json --batch-files \
+  reports/<run-id>/check-a.json reports/<run-id>/check-b.json reports/<run-id>/check-c.json
+```
+
+Give each action a unique route ID and its canonical company domain as `scope`.
+Batch mode accepts account verification, contact discovery, contact verification
+and email validation. Keep discovery pilots on the single-attempt path. Choose
+only independent work: a company's buyer lookup waits for saved passing account
+evidence, and email validation waits for its buyer/address checks. Deduplicate
+aliases and owner groups before choosing the batch; do not run redundant provider
+requests for the same company at once.
+
+The helper plans serially, runs up to three provider calls concurrently, and
+records results serially. Each call has its own receipt. Budget reservations and
+settlements share the existing ledger and are serialized; pending costs still
+count against all caps and the verification reserve. A refused or failed member
+does not discard successful siblings. The batch returns all outcomes and exits
+nonzero if any member fails; recover saved receipts with `--complete`, never
+rerun the whole batch or retry an uncertain billed request.
+
+For built-in public-web checks, add `--plan-only` to prepare up to three receipts,
+then execute those independent searches/reads together through the available
+tool's parallel-call facility. Python only plans and records this work; it does
+not invoke the built-in browser. Save observed responses to their own receipts
+and run `--complete` for each serially.
+
+Wait for the batch to finish before changing shared `results.json`, qualifying
+rows, validating, or starting another batch. Assess the returned evidence and
+save outcomes serially, then recheck the stop policy and choose the next ready
+checks. Batch completion alone does not mean leads are qualified or deliverable.
+Use one check when only one is ready or a provider requires serial access; a
+rate limit is a reason to reduce concurrency, never to increase retries.
+
 ## Paid-call budget
 
 Before the first paid call, create `results.json` with the normalized request,
@@ -125,8 +166,8 @@ count, and actual cost or retained upper bound in the usual result fields.
 Mark email-validation `next_actions` with the same `entity_type` so the stopping
 check can distinguish verification from other spending.
 Both validator CLI modes cross-check these routes against the ledger when it
-is present. Record every dispatched call before checking the next action or
-delivering results; `--check-stop` alone is still not full output validation.
+is present. Record every dispatched call in the batch before checking the next
+batch or delivering results; `--check-stop` alone is still not full output validation.
 
 A finite Deepline billing receipt on a determinate response settles the reported
 currency, including an explicit zero charge. A USD-only receipt releases the
@@ -135,8 +176,9 @@ never infer actual credits from dollar pricing. Missing billing, uncertain
 outcomes and ScrapingDog calls retain their bounds. Success or `no_results`
 alone never releases money.
 A charge above its bound is preserved and blocks further paid work. A reused
-route ID is refused, even after a crash. A lock conflict fails without sending;
-retry that local refusal only after the active writer finishes. Never expire a
+route ID is refused, even after a crash. Batch workers serialize ledger writes
+within one process. A lock conflict with another process still fails without
+sending; retry that local refusal only after the active writer finishes. Never expire a
 lock automatically: after an interrupted write, inspect the ledger and receipts
 and confirm there is no writer before removing its stale `.lock` file.
 
