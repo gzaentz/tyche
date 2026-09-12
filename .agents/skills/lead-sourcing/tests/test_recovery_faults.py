@@ -171,7 +171,8 @@ class CliBoundaryTests(unittest.TestCase):
 
     def test_timeout_preserves_partial_output_without_promoting_valid_email(self):
         raw = '{"toolResponse":{"raw":{"email":"owner@example.test","status":"valid"}},"billing":{"credits_charged":0.28}}'
-        result = self.run_cli(raw, sleep=3, timeout=1)
+        # Allow interpreter startup before testing a timeout with partial output.
+        result = self.run_cli(raw, sleep=6, timeout=3)
         body = json.loads(result.stdout)
         self.assertEqual(body["status"], "timeout")
         self.assertEqual(body.get("results", []), [])
