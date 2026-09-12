@@ -142,6 +142,39 @@ def _route_scope(route: dict) -> Optional[str]:
     return route.get("scope") or ("discovery" if route.get("phase") == "account_discovery" else _company_key(route))
 
 
+def _approach_key(value: str) -> str:
+    """A new version label does not make a new research strategy."""
+    value = re.sub(r"(^|[-_\s])v\d+(?=$|[-_\s])", r"\1", value.casefold())
+    return re.sub(r"[-_\s]+", "-", value).strip("-")
+
+
+def _reviewed_company_scopes(document: dict) -> set[str]:
+    """Park reviewed gaps using existing receipts and frontier, without a new state."""
+    frontier = document.get("stop_audit", {}).get("route_frontier", [])
+    completed = {r.get("route_id") for r in frontier if isinstance(r, dict)
+                 and _nonempty_text(r.get("route_id")) and r.get("state") == "exhausted"
+                 and _nonempty_text(r.get("reason")) and _nonempty_text(r.get("exhaustion_basis"))}
+    latest = {}
+    for route in document.get("routes", []):
+        if (isinstance(route, dict) and route.get("entity_type") != "tool_catalog"
+                and _nonempty_text(_route_scope(route))):
+            latest[_route_scope(route)] = route
+    rows_by_scope = {}
+    for row in document.get("unresolved", []):
+        if isinstance(row, dict) and row.get("stage") in {"account", "contact"} and (scope := _company_key(row)):
+            rows_by_scope.setdefault(scope, []).append(row)
+    reviewed = set()
+    for scope, rows in rows_by_scope.items():
+        route = latest.get(scope, {})
+        phases = ({"account_discovery", "account_verification"} if any(r["stage"] == "account" for r in rows)
+                  else {"contact_discovery", "contact_verification", "email_validation"})
+        if (all(_nonempty_text(r.get("reason_text")) for r in rows) and route.get("phase") in phases
+                and _nonempty_text(route.get("route_id")) and route["route_id"] in completed
+                and route.get("provider_status") in {"ok", "no_results"}):
+            reviewed.add(scope)
+    return reviewed
+
+
 def _missing_exhaustion_review(document: dict, scopes: set[str]) -> list[str]:
     """Review discovery saturation and the remaining company gaps.
 
@@ -157,18 +190,13 @@ def _missing_exhaustion_review(document: dict, scopes: set[str]) -> list[str]:
                  if _nonempty_text(r.get("route_id")) and r.get("state") == "exhausted" and _nonempty_text(r.get("reason"))
                  and _nonempty_text(r.get("exhaustion_basis"))}
     current = progress_snapshot(document)
+    reviewed = _reviewed_company_scopes(document)
     missing = []
     for scope in sorted(scopes):
         attempts = [r for r in document.get("routes", []) if isinstance(r, dict)
                     and _route_scope(r) == scope and r.get("entity_type") != "tool_catalog"]
         if scope != "discovery":
-            # A completed company review may add useful facts yet leave the
-            # requested buyer unprovable. Do not demand two more empty calls.
-            rows = [r for r in document.get("unresolved", []) if _company_key(r) == scope]
-            latest = attempts[-1] if attempts else {}
-            if (not _nonempty_text(latest.get("route_id")) or latest["route_id"] not in completed
-                    or latest.get("provider_status") not in {"ok", "no_results"}
-                    or not rows or any(not _nonempty_text(r.get("reason_text")) for r in rows)):
+            if scope not in reviewed:
                 missing.append(scope)
             continue
         pair = attempts[-2:]
@@ -179,7 +207,7 @@ def _missing_exhaustion_review(document: dict, scopes: set[str]) -> list[str]:
                 or not re.fullmatch(r"[0-9a-f]{64}", r["request_fingerprint"])
                 or not isinstance(r.get("progress_before"), list)
                 or not all(isinstance(f, str) for f in r["progress_before"]) for r in pair)
-                or pair[0]["approach"] == pair[1]["approach"]
+                or _approach_key(pair[0]["approach"]) == _approach_key(pair[1]["approach"])
                 or pair[0]["request_fingerprint"] == pair[1]["request_fingerprint"]):
             missing.append(scope)
             continue
@@ -1103,7 +1131,9 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
             key = _company_key(row)
             if key:
                 scopes.add(key)
-    covered: set[str] = set()
+    reviewed = _reviewed_company_scopes(document)
+    covered: set[str] = set(reviewed)
+    result["parked_scopes"] = sorted(reviewed)
     ids: set[str] = set()
     budget = document.get("budget", {})
     limits = budget.get("limits", {}) if isinstance(budget, dict) else {}
@@ -1115,6 +1145,7 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
     blocked_kinds: list[str] = []
     needs_pricing = False
     stalled = stalled_approaches(document)
+    stalled_keys = {_approach_key(a) for a in stalled}
     strategy_changes = []
     for action in actions:
         if not isinstance(action, dict):
@@ -1154,8 +1185,19 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
         if provider == "public_web" and (bound != 0 or calls != 0):
             errors.append(f"{aid}: public_web actions must have zero provider cost and paid calls")
             continue
-        if stalled and action.get("entity_type") != "tool_catalog" and (
-                not action.get("approach") or action["approach"] in stalled):
+        approach = action.get("approach")
+        repeated_recovery = scope in reviewed and any(
+            _route_scope(r) == scope and r.get("entity_type") != "tool_catalog"
+            and r.get("provider_status") in {"ok", "no_results"}
+            and ((isinstance(approach, str) and isinstance(r.get("approach"), str)
+                  and _approach_key(approach) == _approach_key(r["approach"]))
+                 or (action.get("request_fingerprint")
+                     and action["request_fingerprint"] == r.get("request_fingerprint")))
+            for r in document.get("routes", []) if isinstance(r, dict))
+        if action.get("entity_type") != "tool_catalog" and (
+                ((stalled or scope in reviewed) and not _nonempty_text(approach))
+                or repeated_recovery
+                or (isinstance(approach, str) and _approach_key(approach) in stalled_keys)):
             strategy_changes.append(aid)
             continue
         if bound == 0 and calls == 0:

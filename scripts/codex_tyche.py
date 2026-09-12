@@ -154,7 +154,10 @@ def main():
             source = source_home / name
             if source.exists():
                 (tyche_codex_home / name).symlink_to(source, target_is_directory=source.is_dir())
-        env = dict(os.environ, CODEX_HOME=profile, TYCHE_ISOLATED_RUN='1')
+        # Research uses the installed CLI and project skill. CLI self-updates
+        # and global skill sync can contact npm or alter context mid-run.
+        env = dict(os.environ, CODEX_HOME=profile, TYCHE_ISOLATED_RUN='1',
+                   DEEPLINE_NO_AUTO_UPDATE='1', DEEPLINE_SKIP_SKILLS_SYNC='1')
         # Pin the isolated runner's model selection instead of inheriting the
         # user's current Codex default.  `xhigh` is the UI's Extra High effort;
         # `fast` selects the accelerated service tier when available.

@@ -59,6 +59,12 @@ starting. Repository instructions and `.codex/config.toml` still apply. The
 launcher pins `gpt-5.6-luna` with `xhigh` (Extra High) reasoning and the `fast`
 service tier (the accelerated 1.5× mode when the account exposes it).
 
+The child disables Deepline CLI self-updates and global skill synchronization
+using `DEEPLINE_NO_AUTO_UPDATE=1` and `DEEPLINE_SKIP_SKILLS_SYNC=1`. This keeps
+research on the installed runtime without npm downloads during provider calls.
+CLI compatibility checks remain enabled; install any required CLI update
+through normal host setup before starting a new run.
+
 Your global configuration is not edited. Codex's built-in system instructions
 and managed permissions remain in force. This isolates supplied context; it is
 not a filesystem security boundary preventing all possible external reads.

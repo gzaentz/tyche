@@ -881,14 +881,24 @@ For an email-validation action, also set `entity_type: "email_validation"`,
 matching its adapter request so the protected verification balance is usable.
 Use `scope: "discovery"` for finding additional companies and the canonical
 domain for each unresolved account/contact (or its normalized `name:` key when
-no domain exists). Cover both new discovery and every unresolved company.
-Retire completed actions and add the next useful action; completing a batch or
-marking all attempt routes exhausted is not proof that no next action exists.
+no domain exists). Cover discovery and active company checks. A company can be
+parked without another action when its latest substantive attempt is `ok` or
+`no_results`, its frontier entry is `exhausted` with a reason and exhaustion
+basis, and every unresolved `reason_text` for it records the remaining gaps.
+Account gaps require an account discovery/verification review; contact gaps
+require a contact discovery/verification or email-validation review. Retain all
+receipts and qualification checks. Parking does not qualify or reject a company,
+hide an actionable frontier entry, or establish whole-run exhaustion.
+Remove speculative follow-ups; reopen only for a concrete new source or
+capability with a different stable approach, explained in the action description.
 
 The attempt helper adds optional audit metadata without changing client output:
 `scope`, stable `approach`, `request_fingerprint`, and verified `progress_before`
 milestones. Two completed non-catalog attempts without new verified milestones
 require a different approach. A provider switch alone is not a strategy change.
+Version labels such as `-v117` do not change the approach. Parked-company actions
+cannot repeat a completed approach or request fingerprint; discovering new
+evidence requires an actual source/target change, not a rephrased label.
 Actionable frontier entries must retain a matching next action or continuation;
 covering only the generic discovery scope cannot hide an untried research path.
 
@@ -911,7 +921,7 @@ Blocker receipts must match the action's provider, scope and tool when specified
 A successful later call on that same route/tool or its continuation invalidates
 the old error as a stopping reason. Before a budget/provider/input shortfall,
 `catalog_review_route_ids` must reference live catalog search attempt receipts
-after the last substantive attempt. One run-wide discovery review can cover
+from this run; reuse an applicable saved review. One discovery review can cover
 all remaining evidence gaps; do not repeat identical catalog queries per company.
 Recovery actions and blockers still need company-specific coverage.
 The helper tags catalog calls `entity_type: "tool_catalog"`. Review the returned

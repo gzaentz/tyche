@@ -32,6 +32,7 @@ def add_attempts(doc, scope):
     for approach in ("localized-product-pages", "specialist-directory"):
         rid = scope + "-" + approach
         doc["routes"].append(dict(route_id=rid, scope=scope, approach=approach,
+            phase="account_discovery" if scope == "discovery" else "account_verification",
             provider="public_web", operation="search", paid_calls=0, cost_basis="actual",
             request_fingerprint=hashlib.sha256(rid.encode()).hexdigest(),
             cost_credits=0, cost_upper_bound_credits=0, provider_status="no_results",
@@ -85,6 +86,71 @@ class ScopedResearchTests(unittest.TestCase):
 
 
 class ExhaustionReviewTests(unittest.TestCase):
+    def test_parked_company_stays_unresolved_while_fresh_discovery_runs(self):
+        doc = exhausted_result()
+        doc["unresolved"] = [dict(stage="account", candidate={"domain": "pending.example"},
+            reason_text="Dated steel-project evidence is still missing after the saved source review.")]
+        add_attempts(doc, "pending.example")
+        doc["stop_check"]["next_actions"] = [dict(action("fresh"), approach="dated-planning-news")]
+        before = copy.deepcopy(doc)
+        decision = VALIDATOR.evaluate_stop(doc, now=NOW)
+        self.assertEqual(decision["decision"], "continue")
+        self.assertEqual(decision["eligible_actions"], ["fresh"])
+        self.assertEqual(decision["parked_scopes"], ["pending.example"])
+        self.assertEqual(decision["missing_scopes"], [])
+        self.assertEqual(doc, before)
+        # A useful new source can reopen the company, but changing the version
+        # of an exhausted approach or relabeling the same request cannot.
+        for approach, fingerprint, allowed in (
+                ("SPECIALIST_directory-v117", None, False),
+                ("new-label", doc["routes"][-1]["request_fingerprint"], False),
+                ("dated-project-drawings", None, True)):
+            recovery = dict(action("recover", scope="pending.example"), approach=approach,
+                description="Check the newly discovered council drawings for this named project.")
+            if fingerprint:
+                recovery["request_fingerprint"] = fingerprint
+            doc["stop_check"]["next_actions"] = [before["stop_check"]["next_actions"][0], recovery]
+            decision = VALIDATOR.evaluate_stop(doc, now=NOW)
+            self.assertEqual("recover" in decision["eligible_actions"], allowed)
+            self.assertIn("fresh", decision["eligible_actions"])
+
+    def test_parked_company_does_not_hide_pending_work_or_provider_failures(self):
+        doc = exhausted_result()
+        doc["unresolved"] = [dict(stage="account", candidate={"domain": "pending.example"},
+            reason_text="Size is unknown.")]
+        add_attempts(doc, "pending.example")
+        doc["stop_check"]["next_actions"] = [dict(action("fresh"), approach="dated-planning-news")]
+        doc["stop_audit"]["route_frontier"].append(dict(route_id="unchecked-drawings",
+            scope="pending.example", state="untried", approach="project-drawings"))
+        decision = VALIDATOR.evaluate_stop(doc, now=NOW)
+        self.assertIn("unchecked-drawings", decision["missing_routes"])
+        doc["routes"][-1]["provider_status"] = "timeout"
+        decision = VALIDATOR.evaluate_stop(doc, now=NOW)
+        self.assertEqual(decision["parked_scopes"], [])
+        self.assertIn("pending.example", decision["missing_scopes"])
+
+    def test_version_only_strategy_change_cannot_authorize_work_or_exhaustion(self):
+        doc = exhausted_result()
+        doc["stop_check"]["next_actions"] = [dict(action("renamed"), approach="specialist-directory-v118")]
+        self.assertEqual(VALIDATOR.evaluate_stop(doc, now=NOW)["eligible_actions"], [])
+        doc["stop_check"]["next_actions"] = []
+        doc["routes"][1]["approach"] = doc["routes"][0]["approach"] + "-v118"
+        self.assertEqual(VALIDATOR.evaluate_stop(doc, now=NOW)["decision"], "continue")
+
+    def test_parking_reviews_every_gap_and_the_correct_research_stage(self):
+        doc = exhausted_result()
+        doc["unresolved"] = [dict(stage="account", candidate={"domain": "pending.example"},
+            reason_text="Steel-project evidence is missing after review.")]
+        add_attempts(doc, "pending.example")
+        self.assertEqual(VALIDATOR._reviewed_company_scopes(doc), {"pending.example"})
+        doc["unresolved"].append(dict(stage="contact", candidate={"domain": "pending.example"}))
+        self.assertEqual(VALIDATOR._reviewed_company_scopes(doc), set())
+        doc["unresolved"].pop()
+        doc["routes"][-1]["phase"] = "email_validation"
+        self.assertEqual(VALIDATOR._reviewed_company_scopes(doc), set())
+        doc["unresolved"][0].update(stage="contact", reason_text="The account qualifies; no valid buyer email was found.")
+        self.assertEqual(VALIDATOR._reviewed_company_scopes(doc), {"pending.example"})
+
     def test_full_strict_cli_delivers_honest_shortfall_without_using_up_budget(self):
         doc = exhausted_result()
         with tempfile.TemporaryDirectory() as directory:

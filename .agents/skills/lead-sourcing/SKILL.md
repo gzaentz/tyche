@@ -71,7 +71,10 @@ claiming an empty market or inventing limits. Read the
    Preserve both receipts and costs; never override a hard negative. Otherwise
    try another address or buyer.
 5. **Persist, reassess and deliver.** Finish each batch before more discovery.
-   Save evidence, receipts, costs and next actions. After two batches without
+   Save evidence, receipts, costs and useful next actions. Park reviewed companies
+   with gaps; retain unresolved reasons and exhausted receipts. Reopen only for
+   a concrete new source, not renamed queries. Prioritize fresh signals and
+   qualified accounts missing contacts. After two batches without
    progress, change source family, query strategy or evidence target. Keep
    approach labels stable; raw rows and catalog reads are not progress. Then
    write `report.md`, `results.json`, and `leads.xlsx`; run
