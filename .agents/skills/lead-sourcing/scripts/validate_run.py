@@ -83,6 +83,24 @@ def qualification_errors(document: dict) -> list[str]:
                 errors.append(f"{path}.qualification_checks must be an array")
                 continue
             required = [c for c in checks if isinstance(c, dict) and c.get("importance") == "required"]
+            # Compare structured facts to the saved ICP, never to a new band
+            # improvised in a row's prose (e.g. rejecting 3 against 1-200).
+            request = document.get("request", {})
+            icp = request.get("icp", {}) if isinstance(request, dict) else {}
+            band = icp.get("company_size", {}) if isinstance(icp, dict) else {}
+            company = row.get("company", row.get("candidate", {}))
+            count = company.get("employee_count") if isinstance(company, dict) else None
+            if count is not None and (type(count) is not int or count < 0):
+                errors.append(f"{path}: employee_count must be a nonnegative integer")
+            elif count is not None and isinstance(band, dict) and band:
+                lower, upper = band.get("min_employees", 0), band.get("max_employees")
+                if type(lower) is int and (upper is None or type(upper) is int):
+                    fits = count >= lower and (upper is None or count <= upper)
+                    size_checks = [c for c in required if _identity(c.get("criterion")) in {"companysize", "employeecount"}]
+                    if any(c.get("status") in {"pass", "fail"} and (c["status"] == "pass") != fits for c in size_checks):
+                        errors.append(f"{path}: company_size decision contradicts request.icp.company_size")
+                    if not fits and (state == "accepted" or (state == "unresolved" and row.get("stage") == "contact")):
+                        errors.append(f"{path}: employee_count is outside request.icp.company_size")
             failed = [c for c in required if c.get("status") == "fail" and c.get("evidence")]
             if state == "accepted" or (state == "unresolved" and row.get("stage") == "contact"):
                 if excluded_company(document.get("request", {}), row):
@@ -1071,6 +1089,159 @@ def _validate_client_output(accepted: list, errors: list[str]) -> None:
         ):
             errors.append(f"{path}.company requires an exact canonical industry/sub_industry pair")
 
+def accepted_errors(document: dict) -> list[str]:
+    """Shared accepted-lead contract for saving a review and final delivery."""
+    errors = []
+    request, accepted = document.get("request", {}), document.get("accepted", [])
+    if document.get("schema_version") == "1.2":
+        _validate_client_output(accepted, errors)
+    grouped_roles = request.get("contact_role_groups")
+    normalized_groups: dict[str, set[str]] = {}
+    if grouped_roles is not None:
+        if not isinstance(grouped_roles, dict):
+            errors.append("request.contact_role_groups must be an object")
+        else:
+            flattened: list[str] = []
+            for group_name in ("primary", "secondary"):
+                values = grouped_roles.get(group_name)
+                if not isinstance(values, list):
+                    errors.append(
+                        f"request.contact_role_groups.{group_name} must be an array"
+                    )
+                    normalized_groups[group_name] = set()
+                    continue
+                normalized = [
+                    role for role in map(_normalized_role, values) if role is not None
+                ]
+                if len(normalized) != len(set(normalized)):
+                    errors.append(
+                        f"request.contact_role_groups.{group_name} contains duplicate roles"
+                    )
+                normalized_groups[group_name] = set(normalized)
+                flattened.extend(normalized)
+
+            if len(flattened) != len(set(flattened)):
+                errors.append(
+                    "request.contact_role_groups must not repeat a role across groups"
+                )
+            requested_roles = request.get("requested_roles")
+            if not isinstance(requested_roles, list):
+                errors.append(
+                    "request.requested_roles must be an array when contact_role_groups is present"
+                )
+            else:
+                normalized_requested = [
+                    role
+                    for role in map(_normalized_role, requested_roles)
+                    if role is not None
+                ]
+                if len(normalized_requested) != len(set(normalized_requested)):
+                    errors.append("request.requested_roles contains duplicate roles")
+                if set(normalized_requested) != set(flattened):
+                    errors.append(
+                        "request.requested_roles must equal the contact_role_groups union"
+                    )
+
+    accepted_domains: list[str] = []
+    requested_fields = _effective_contact_fields(request, errors)
+    route_rows = document.get("routes", [])
+    routes_by_id: dict[str, list[dict[str, Any]]] = {}
+    if isinstance(route_rows, list):
+        for route in route_rows:
+            if not isinstance(route, dict):
+                continue
+            route_id = route.get("route_id")
+            if isinstance(route_id, str) and route_id.strip():
+                routes_by_id.setdefault(route_id.strip(), []).append(route)
+    requested_roles = request.get("requested_roles")
+    normalized_requested_roles = {
+        role
+        for role in map(_normalized_role, requested_roles)
+        if role is not None
+    } if isinstance(requested_roles, list) else set()
+    for index, row in enumerate(accepted):
+        if not isinstance(row, dict):
+            errors.append(f"accepted[{index}] must be an object")
+            continue
+        company = row.get("company")
+        domain = company.get("domain") if isinstance(company, dict) else None
+        if not isinstance(domain, str) or not domain.strip():
+            errors.append(f"accepted[{index}] requires a canonical company domain")
+        else:
+            canonical = domain.strip().lower()
+            accepted_domains.append(
+                canonical[4:] if canonical.startswith("www.") else canonical
+            )
+
+        primary = row.get("primary_contact")
+        if not isinstance(primary, dict):
+            errors.append(f"accepted[{index}] requires primary_contact")
+            continue
+        contacts_to_validate: list[tuple[str, dict[str, Any]]] = [
+            (f"accepted[{index}].primary_contact", primary)
+        ]
+        for collection_name in ("backup_contacts",):
+            collection = row.get(collection_name)
+            if collection is None:
+                continue
+            if not isinstance(collection, list):
+                errors.append(f"accepted[{index}].{collection_name} must be an array")
+                continue
+            for contact_index, contact in enumerate(collection):
+                if not isinstance(contact, dict):
+                    errors.append(
+                        f"accepted[{index}].{collection_name}[{contact_index}] must be an object"
+                    )
+                    continue
+                contacts_to_validate.append(
+                    (f"accepted[{index}].{collection_name}[{contact_index}]", contact)
+                )
+        for contact_path, contact in contacts_to_validate:
+            requested_role = _normalized_role(contact.get("requested_role"))
+            if normalized_requested_roles and requested_role not in normalized_requested_roles:
+                errors.append(
+                    f"{contact_path}.requested_role is not in request.requested_roles"
+                )
+            role_group = contact.get("role_group")
+            if role_group is not None:
+                if role_group not in {"primary", "secondary"}:
+                    errors.append(f"{contact_path}.role_group is invalid")
+                elif grouped_roles is not None and requested_role not in normalized_groups.get(
+                    role_group, set()
+                ):
+                    errors.append(
+                        f"{contact_path} requested_role does not match role_group"
+                    )
+            if "email" in contact or "email_validation" in contact:
+                _validate_email_receipt(
+                    contact, contact_path, routes_by_id, errors
+                )
+        for field in requested_fields:
+            value = primary.get(field)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(
+                    f"accepted[{index}].primary_contact requires requested {field}"
+                )
+            elif field == "email" and (
+                "@" not in value
+                or " " in value
+                or value.startswith("@")
+                or value.endswith("@")
+            ):
+                errors.append(f"accepted[{index}].primary_contact.email is invalid")
+
+    duplicate_domains = sorted(
+        domain for domain in set(accepted_domains) if accepted_domains.count(domain) > 1
+    )
+    if duplicate_domains:
+        errors.append(
+            "accepted companies contain duplicate canonical domains: "
+            + ", ".join(duplicate_domains)
+        )
+
+    return errors
+
+
 def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_budget=None) -> dict[str, Any]:
     """Check next actions independently of self-declared exhausted route labels."""
     errors: list[str] = []
@@ -1290,8 +1461,6 @@ def validate_run(document: Any, *, require_stop_check: bool = False, now: Option
     accepted = document.get("accepted", [])
     if not isinstance(request, dict) or not isinstance(summary, dict):
         return ["request and summary must be objects"]
-    if schema_version == "1.2":
-        _validate_client_output(accepted, errors)
     if require_stop_check or "stop_check" in document:
         errors.extend(qualification_errors(document))
 
@@ -1303,149 +1472,7 @@ def validate_run(document: Any, *, require_stop_check: bool = False, now: Option
     if summary.get("accepted_companies") != accepted_count:
         errors.append("summary.accepted_companies must equal len(accepted)")
 
-    grouped_roles = request.get("contact_role_groups")
-    normalized_groups: dict[str, set[str]] = {}
-    if grouped_roles is not None:
-        if not isinstance(grouped_roles, dict):
-            errors.append("request.contact_role_groups must be an object")
-        else:
-            flattened: list[str] = []
-            for group_name in ("primary", "secondary"):
-                values = grouped_roles.get(group_name)
-                if not isinstance(values, list):
-                    errors.append(
-                        f"request.contact_role_groups.{group_name} must be an array"
-                    )
-                    normalized_groups[group_name] = set()
-                    continue
-                normalized = [
-                    role for role in map(_normalized_role, values) if role is not None
-                ]
-                if len(normalized) != len(set(normalized)):
-                    errors.append(
-                        f"request.contact_role_groups.{group_name} contains duplicate roles"
-                    )
-                normalized_groups[group_name] = set(normalized)
-                flattened.extend(normalized)
-
-            if len(flattened) != len(set(flattened)):
-                errors.append(
-                    "request.contact_role_groups must not repeat a role across groups"
-                )
-            requested_roles = request.get("requested_roles")
-            if not isinstance(requested_roles, list):
-                errors.append(
-                    "request.requested_roles must be an array when contact_role_groups is present"
-                )
-            else:
-                normalized_requested = [
-                    role
-                    for role in map(_normalized_role, requested_roles)
-                    if role is not None
-                ]
-                if len(normalized_requested) != len(set(normalized_requested)):
-                    errors.append("request.requested_roles contains duplicate roles")
-                if set(normalized_requested) != set(flattened):
-                    errors.append(
-                        "request.requested_roles must equal the contact_role_groups union"
-                    )
-
-    accepted_domains: list[str] = []
-    requested_fields = _effective_contact_fields(request, errors)
-    route_rows = document.get("routes", [])
-    routes_by_id: dict[str, list[dict[str, Any]]] = {}
-    if isinstance(route_rows, list):
-        for route in route_rows:
-            if not isinstance(route, dict):
-                continue
-            route_id = route.get("route_id")
-            if isinstance(route_id, str) and route_id.strip():
-                routes_by_id.setdefault(route_id.strip(), []).append(route)
-    requested_roles = request.get("requested_roles")
-    normalized_requested_roles = {
-        role
-        for role in map(_normalized_role, requested_roles)
-        if role is not None
-    } if isinstance(requested_roles, list) else set()
-    for index, row in enumerate(accepted):
-        if not isinstance(row, dict):
-            errors.append(f"accepted[{index}] must be an object")
-            continue
-        company = row.get("company")
-        domain = company.get("domain") if isinstance(company, dict) else None
-        if not isinstance(domain, str) or not domain.strip():
-            errors.append(f"accepted[{index}] requires a canonical company domain")
-        else:
-            canonical = domain.strip().lower()
-            accepted_domains.append(
-                canonical[4:] if canonical.startswith("www.") else canonical
-            )
-
-        primary = row.get("primary_contact")
-        if not isinstance(primary, dict):
-            errors.append(f"accepted[{index}] requires primary_contact")
-            continue
-        contacts_to_validate: list[tuple[str, dict[str, Any]]] = [
-            (f"accepted[{index}].primary_contact", primary)
-        ]
-        for collection_name in ("backup_contacts",):
-            collection = row.get(collection_name)
-            if collection is None:
-                continue
-            if not isinstance(collection, list):
-                errors.append(f"accepted[{index}].{collection_name} must be an array")
-                continue
-            for contact_index, contact in enumerate(collection):
-                if not isinstance(contact, dict):
-                    errors.append(
-                        f"accepted[{index}].{collection_name}[{contact_index}] must be an object"
-                    )
-                    continue
-                contacts_to_validate.append(
-                    (f"accepted[{index}].{collection_name}[{contact_index}]", contact)
-                )
-        for contact_path, contact in contacts_to_validate:
-            requested_role = _normalized_role(contact.get("requested_role"))
-            if normalized_requested_roles and requested_role not in normalized_requested_roles:
-                errors.append(
-                    f"{contact_path}.requested_role is not in request.requested_roles"
-                )
-            role_group = contact.get("role_group")
-            if role_group is not None:
-                if role_group not in {"primary", "secondary"}:
-                    errors.append(f"{contact_path}.role_group is invalid")
-                elif grouped_roles is not None and requested_role not in normalized_groups.get(
-                    role_group, set()
-                ):
-                    errors.append(
-                        f"{contact_path} requested_role does not match role_group"
-                    )
-            if "email" in contact or "email_validation" in contact:
-                _validate_email_receipt(
-                    contact, contact_path, routes_by_id, errors
-                )
-        for field in requested_fields:
-            value = primary.get(field)
-            if not isinstance(value, str) or not value.strip():
-                errors.append(
-                    f"accepted[{index}].primary_contact requires requested {field}"
-                )
-            elif field == "email" and (
-                "@" not in value
-                or " " in value
-                or value.startswith("@")
-                or value.endswith("@")
-            ):
-                errors.append(f"accepted[{index}].primary_contact.email is invalid")
-
-    duplicate_domains = sorted(
-        domain for domain in set(accepted_domains) if accepted_domains.count(domain) > 1
-    )
-    if duplicate_domains:
-        errors.append(
-            "accepted companies contain duplicate canonical domains: "
-            + ", ".join(duplicate_domains)
-        )
+    errors.extend(accepted_errors(document))
 
     _validate_budget_accounting(document, errors)
     _validate_cost_accounting(document, errors)

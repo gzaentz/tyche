@@ -8,7 +8,7 @@ only that adapter's required sections. Read the exact input, output, and Excel
 contracts by the phases in [output-contract.md](output-contract.md#read-by-phase),
 not as an upfront bundle.
 
-The main workflow is the five steps in [SKILL.md](../SKILL.md). This reference
+The main workflow is the research loop in [SKILL.md](../SKILL.md). This reference
 preserves the detailed qualification, spending, receipt, and completion rules.
 Command paths below are relative to the skill directory, not this reference.
 
@@ -66,8 +66,9 @@ Command paths below are relative to the skill directory, not this reference.
   caps; retain the execution count for audit only.
 - Keep accepted, rejected, and unresolved output states separate from provider
   statuses. Reuse the existing `stage`, `reason_code`, and
-  `qualification_checks` fields. Every unresolved company must state a
-  concrete next action or blocker in `reason_text`; a contact-stage unresolved
+  `qualification_checks` fields. Every unresolved company must state its
+  missing evidence in `reason_text`; park reviewed gaps without inventing another
+  action. A contact-stage unresolved
   result keeps the account evidence that already passed. Provider failures are not
   companies and must not be counted in reviewed or accepted company totals.
   Keep buyer-role gaps in contact evidence and `reason_text`; do not add them
@@ -203,78 +204,32 @@ provider bucket that overlaps the requested range. For acceptance, one credible
 count or range wholly within the requested bounds suffices. A bucket crossing
 a boundary needs further verification, not automatic rejection.
 
-1. Record the request, assumptions, signal hypotheses, route frontier, and
-   budget. Seed the frontier with materially different discovery paths for the
-   requested signals, including available first-party, broad-discovery, and
-   provider routes; one route may cover several signals.
-2. Discover live provider capabilities and run bounded, materially different
-   pilots. Record every attempted route, including public-web queries. Expand
-   productive routes within the remaining provider caps and add useful new
-   query or continuation paths to the frontier as they are discovered.
-   Initialize `stop_audit.route_frontier` with the planned paths. Dispatch through
-   [run_attempt.py](adapter-io.md#one-attempt), which uses the existing wrappers,
-   budget guard and atomic recorder. It records receipts, retires completed
-   actions and refreshes accounting without qualifying provider rows. Use the
-   recorder for evidence-backed route-state changes and continuation links;
-   preserve historical receipts. Reopen an exhausted parent before reopening
-   its child; close the child before closing the parent. All state writers use
-   the recorder's lock. Check the live descriptor before execution so input
-   errors can be distinguished from provider response errors. During
-   work, completion validation should reject actionable routes. If an old
-   receipt cannot be recovered, retain that path as blocked with the audit
-   gap stated explicitly; never invent row counts or rerun paid work silently.
-3. Verify account fit and signal evidence, then deduplicate by canonical domain.
-   Keep failed candidates with a stable rejection reason and provider failures
-   as unresolved; never turn either into a silent miss.
-4. As each company passes the account gate, look up contacts only for that
-   accepted company/domain. If role groups are present, search and rank the
-   primary group first, then search the secondary group if no primary-role
-   contact passes. Retrieve 1-3 relevant candidates per company with a
-   provider-native limit. Finish the current company batch before purchasing
-   more contacts; never parallelize dependent steps for the same company. Select
-   one output primary, and retain up to two others as backups. A valid secondary-role
-   contact can be the output primary when no primary-role contact passes; mark
-   it with `role_group: "secondary"` when known. If only one current contact
-   passes, keep the company accepted and record the backup shortfall. If no
-   approved role passes, record the company as unresolved. After a contact
-   passes, retrieve each requested contact field. For every email, search the
-   live Deepline catalog for ZeroBounce validation, describe the selected tool,
-   and execute it once against the exact address. Store the status and source
-   receipt. Accept `valid` directly. Reject `invalid`, `do_not_mail`, `spamtrap`,
-   and `abuse`; try another discovered address or current-role contact. For
-  catch-all/unknown or an eligible recorded service failure, check once with a freshly discovered/described
-  BounceBan tool within budget. Accept only successful deliverable with both
-  receipts. Risky/unknown stays unresolved; undeliverable is rejected. If
-  validation has another verdict, lacks a receipt, or remains uncertain, keep the
-  contact unresolved and change route; do not accept it or retry the uncertain
-  paid call automatically. Store an email on a backup only after the same
-  validation gate passes.
-5. Refill from a changed route whenever an account or contact candidate fails
-   a gate. Continue while the accepted count is below the target and the
-   frontier contains an `untried` or `continuable` route. Do not infer route
-   exhaustion from one failed provider, one empty query, or an unchanged page.
-6. Apply the [stopping check](output-contract.md#stopping-check) before dispatch
-   and before delivery. Reassess discovery and every unresolved company
-   using different useful tools/sources. A completed attempt is not an exhausted
-   search strategy. Missing evidence does not prove failed fit. Preserve
-   unfinished routes when a verified budget/time limit ends the run; never close
-   them merely to pass validation. No implicit timeout or minimum-spend target.
-7. Write version `1.2` `results.json`. Follow the output contract's client-writing
-   and taxonomy rules. Every route must include actual,
-   estimated, or unknown cost fields. Run
-   `python3 scripts/validate_run.py <path-to-results.json> --show-cost-summary`,
-   copy `calculated_cost_summary` into the top-level `cost_summary`, and use the
-   same exact or bounded values in the report. Load the harness workspace
-   dependencies and generate
-   `leads.xlsx` with the returned Node and node_modules paths:
-   `<node> scripts/export_xlsx.mjs <results.json> <leads.xlsx> --node-modules
-   <node_modules>`. Write the report. The workbook library is supplied by the
-   Codex harness; do not add it as a project dependency. Do not hand-build the
-   XLSX archive or reorder columns. Validate all artifacts against the full
-   output contract. Then run the separate completion validator with
-   `python3 scripts/validate_run.py <path-to-results.json>` from this skill
-   directory. If validation reports an actionable frontier item or incomplete
-   stop audit, continue the run instead of presenting it as complete.
+### Review and delivery details
+
+Use the [research loop](../SKILL.md#research-loop) and
+[review helper](adapter-io.md#save-a-review). The helper records company decisions,
+closes reviewed sources and refreshes totals; do not maintain a second plan or
+copy calculated summaries by hand. Preserve historical receipts. With existing
+continuation links, close children before parents; reopen the parent before a
+child. An unrecoverable receipt stays blocked with the audit gap stated.
+
+For role groups, search and rank the primary group first, then valid secondary
+fallbacks when no primary-role contact passes. Select one output primary and
+up to two backups. A valid secondary contact can be the output primary; record
+`role_group: "secondary"` when known. One qualified contact is sufficient unless
+the user explicitly requires more. Record any backup shortfall. Every stored
+backup email must pass the same validation gate as the primary email.
+
+Use the [stopping contract](output-contract.md#stopping-check) for final delivery.
+Keep unfinished routes open when an actual budget/time limit ends work. A
+reviewed company can remain parked while fresh discovery continues; do not
+invent another action to satisfy a checklist. Missing evidence never proves
+failed fit. No implicit timeout or minimum-spend target applies.
+
+Write version `1.2` results and use the helper's calculated costs in the report.
+Generate the workbook with the [documented exporter](output-contract.md#leadsxlsx-contract)
+and bundled dependencies. Run full strict validation on the finished artifacts;
+a successful helper call alone is not permission to deliver them.
 
 ## Qualification policy
 
@@ -313,6 +268,16 @@ while repeatedly starting new country searches.
   or buyer does not reject the company. Do not count unresolved rows as qualified.
 
 ## Gates, statuses, and artifacts
+
+`results.json.request` is the authoritative normalized ICP. Check decisions
+against it, not an earlier candidate's band or a rewritten interpretation.
+Do not turn a service area into an office requirement or a preferred signal
+into a requirement. Save an exact sourced employee count in
+`company.employee_count` (accepted) or `candidate.employee_count` (unresolved or
+rejected). The validator compares it to `request.icp.company_size`; an in-range
+count cannot fail that gate. Retain evidence for the count. When only a range
+or an uncertain estimate is known, preserve that uncertainty in the check;
+do not invent an exact count. Missing intent remains unknown even when size passes.
 
 The account gate requires canonical `company` and `domain`, an evidenced
 `account_fit`, and separate `signal_evidence`. Apply the qualification policy:

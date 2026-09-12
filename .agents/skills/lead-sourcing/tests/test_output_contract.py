@@ -306,11 +306,11 @@ class OutputContractExtensionTests(unittest.TestCase):
         self.assertIn("rejected only because it is secondary", skill_text)
         self.assertIn('role_group: "secondary"', skill_text)
 
-    def test_main_skill_has_five_steps_and_links_required_rules(self):
+    def test_main_skill_has_one_short_research_loop_and_links_required_rules(self):
         text = SKILL.read_text(encoding="utf-8")
         steps = re.findall(r"^\d+\. \*\*(.*?)\*\*", text, re.M)
-        self.assertEqual(len(steps), 5)
-        self.assertLessEqual(len(text.split()), 750)
+        self.assertEqual(len(steps), 3)
+        self.assertLessEqual(len(text.split()), 650)
         for target in re.findall(r"\]\((references/[^)]+)\)", text):
             self.assertTrue((ROOT / target.split("#", 1)[0]).is_file(), target)
 

@@ -67,10 +67,49 @@ Update the returned receipt file with the observed normalized `status`,
 attempt and progress metadata, then use `--complete`. This path records evidence; it
 does not invent a browser, scrape or API response.
 
-The helper never accepts a lead or infers market exhaustion. Assess the returned
-evidence, preserve unknown required checks as unresolved, and add useful next
-actions. Use `record_route.py` to close reviewed exact routes or link continuations.
-Full strict validation is still required before delivery.
+The helper never infers qualification or market exhaustion. Assess the saved
+evidence and submit company/route decisions together with `--review-file` below.
+Full strict validation remains required before delivery.
+
+## Save a review
+
+After a completed batch, write one review file. Use existing company rows and
+their full evidence; `state` is `accepted`, `unresolved` or `rejected`. Unresolved
+rows retain `stage: "account"` or `"contact"` and the missing facts in
+`reason_text`. A route review needs only its ID and your reason that this exact
+source has been checked. For example, closing a search without new candidates:
+
+```json
+{
+  "routes": [{"route_id": "checked-search", "reason": "All saved results were reviewed; none establishes the requested recent project signal."}]
+}
+```
+
+Add company decisions as `"companies": [{"state": "unresolved", "row": <full row>}]`
+and concrete new actions in `next_actions` when needed. These keys are optional;
+omitted companies and routes are untouched. Then run:
+
+```bash
+python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
+  reports/<run-id>/results.json --review-file reports/<run-id>/review.json
+```
+
+One atomic update saves the selected company rows, closes reviewed routes,
+retires their completed actions, removes speculative follow-ups for reviewed
+parked/terminal companies, and refreshes counts and cost summaries. Receipts,
+ledger charges and the saved request remain intact. The response includes the
+authoritative request and next decision. No separate route-closing script,
+manual summary edits or duplicate stop check is needed. `--status` returns the
+same compact view without a write.
+
+Routes default to `exhausted`; the helper derives the existing exhaustion basis
+from the saved receipt. Use `state: "continuable"` for genuinely unfinished
+work, or `"blocked"` for an evidenced provider failure. Existing continuation
+links are preserved; supply `continuation_route_ids` only to add actual links.
+Never close a pending/unknown response. The helper refuses missing receipts,
+failed calls presented as exhausted, or decisions contradicting the saved
+employee range. It does not infer source credibility or qualify companies for
+you. Full strict output validation still checks delivery.
 
 ## Concurrent company checks
 
@@ -106,10 +145,8 @@ tool's parallel-call facility. Python only plans and records this work; it does
 not invoke the built-in browser. Save observed responses to their own receipts
 and run `--complete` for each serially.
 
-Wait for the batch to finish before changing shared `results.json`, qualifying
-rows, validating, or starting another batch. Assess the returned evidence and
-save outcomes serially, then recheck the stop policy and choose the next ready
-checks. Batch completion alone does not mean leads are qualified or deliverable.
+Wait for the batch to finish, then save its decisions with `--review-file` and
+use the returned next step. Batch completion alone does not qualify leads.
 Use one check when only one is ready or a provider requires serial access; a
 rate limit is a reason to reduce concurrency, never to increase retries.
 

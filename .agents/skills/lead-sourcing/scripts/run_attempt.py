@@ -15,7 +15,7 @@ from provider_output import ResponseFile, load_json
 from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
 from validate_run import (DETERMINATE_PROVIDER_STATUSES, _company_key,
                           calculate_cost_summary, calculate_review_counts, evaluate_stop, excluded_company,
-                          progress_snapshot, qualification_errors)
+                          progress_snapshot, qualification_errors, _reviewed_company_scopes, accepted_errors)
 
 
 def refresh(document):
@@ -70,6 +70,107 @@ def _contact_gate(document, action):
                 or (fit.get("evidence_url") and fit.get("evidence_text"))):
             return
     raise ValueError("contact lookup requires passing account evidence; unknown stays unresolved")
+
+
+def run_status(document, decision):
+    """The saved request and actionable work, without replaying the entire audit."""
+    return {"request": document["request"], "summary": document.get("summary", {}),
+            "next_actions": document.get("stop_check", {}).get("next_actions", []),
+            "pending_routes": [{k: r.get(k) for k in ("route_id", "scope", "state", "reason")}
+                               for r in document.get("stop_audit", {}).get("route_frontier", [])
+                               if r.get("state") in {"untried", "continuable"}],
+            "stop_decision": decision}
+
+
+def save_review(run_file, review):
+    """Save explicit company/route judgments in one transaction; never dispatch."""
+    if not isinstance(review, dict) or set(review) - {"companies", "routes", "next_actions"}:
+        raise ValueError("review accepts only companies, routes and next_actions; the saved request is authoritative")
+    for key in ("companies", "routes", "next_actions"):
+        if not isinstance(review.get(key, []), list):
+            raise ValueError(f"review.{key} must be an array")
+    result = {}
+
+    def update(document):
+        changed = set()
+        for item in review.get("companies", []):
+            state, row = item["state"], copy.deepcopy(item["row"])
+            if state not in {"accepted", "unresolved", "rejected"} or not isinstance(row, dict):
+                raise ValueError("company review requires an accepted, unresolved or rejected row")
+            if state != "accepted" and row.get("stage") not in {"account", "contact"}:
+                raise ValueError("company review requires an account or contact stage")
+            scope = _company_key(row)
+            if not scope or scope in changed:
+                raise ValueError("review each canonical company once")
+            changed.add(scope)
+            for collection in ("accepted", "unresolved", "rejected"):
+                document[collection] = [r for r in document.get(collection, [])
+                    if not (_company_key(r) == scope and (collection == "accepted" or r.get("stage") in {"account", "contact"}))]
+            document[state].append(row)
+        scoped = dict(document)
+        for state in ("accepted", "unresolved", "rejected"):
+            scoped[state] = [r for r in document.get(state, []) if _company_key(r) in changed]
+        problems = qualification_errors(scoped) + accepted_errors(scoped)
+        if problems:
+            raise ValueError("; ".join(problems))
+
+        closed, reviewed_scopes = set(), set(changed)
+        for item in review.get("routes", []):
+            if not isinstance(item, dict) or set(item) - {"route_id", "reason", "state", "continuation_route_ids"}:
+                raise ValueError("route review accepts route_id, reason, state and continuation_route_ids")
+            rid = item["route_id"]
+            entry = next(r for r in document["stop_audit"]["route_frontier"] if r["route_id"] == rid)
+            receipt = next(r for r in document["routes"] if r["route_id"] == rid)
+            reviewed_scopes.add(entry.get("scope"))
+            state = item.get("state", "exhausted")
+            if state == "exhausted" and receipt.get("provider_status") == "partial":
+                saved = budget_guard.read_object(Path(run_file).parent / "receipts" / (rid + ".json"))
+                if saved.get("pending_verification"):
+                    raise ValueError("pending verification needs its saved job's status continuation")
+            if state not in {"exhausted", "continuable", "blocked"}:
+                raise ValueError("review a completed attempt, not an untried route")
+            if state == "blocked" and receipt.get("provider_status") in DETERMINATE_PROVIDER_STATUSES:
+                raise ValueError("a successful receipt cannot become a provider blocker")
+            if not isinstance(item.get("reason"), str) or not item["reason"].strip():
+                raise ValueError("route review requires the reason this source is complete or still open")
+            links = list(dict.fromkeys(entry.get("continuation_route_ids", []) + item.get("continuation_route_ids", [])))
+            entry = {**entry, **item, "state": state}
+            if links:
+                entry["continuation_route_ids"] = links
+            if state == "exhausted":
+                entry["exhaustion_basis"] = ("continuation_exhausted" if entry.get("continuation_route_ids") else
+                    "no_results" if receipt.get("provider_status") == "no_results" and not receipt.get("rows_returned")
+                    else "no_new_unique_candidates")
+                closed.add(rid)
+            else:
+                entry.pop("exhaustion_basis", None)
+            document = record(document, entry)
+
+        actions = document["stop_check"]["next_actions"]
+        parked = _reviewed_company_scopes(document)
+        terminal = {_company_key(r) for state in ("accepted", "rejected") for r in document.get(state, [])
+                    if state == "accepted" or r.get("stage") == "account"}
+        supplied = review.get("next_actions", [])
+        supplied_ids = {a["id"] for a in supplied}
+        active_ids = {rid for r in document["stop_audit"]["route_frontier"]
+                      if r.get("state") in {"untried", "continuable"}
+                      for rid in [r["route_id"], *r.get("continuation_route_ids", [])]}
+        # Retire only completed work and the reviewed companies' speculative
+        # follow-ups. Explicit new actions below can reopen a concrete source.
+        actions[:] = [a for a in actions if a["id"] not in closed | supplied_ids
+                      and (a["id"] in active_ids or a.get("scope") not in reviewed_scopes & (parked | terminal))] + copy.deepcopy(supplied)
+        refresh(document)
+        problems = budget_guard.audit_ledger(run_file, document)
+        if problems:
+            raise ValueError("; ".join(problems))
+        decision = evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))
+        if decision["errors"]:
+            raise ValueError("; ".join(decision["errors"]))
+        result.update(run_status(document, decision))
+        return document
+
+    mutate(run_file, update)
+    return result
 
 
 def _fingerprint(provider, request):
@@ -316,10 +417,17 @@ def main():
     mode.add_argument("--input-file", type=Path, help="JSON containing action and wrapper request")
     mode.add_argument("--batch-files", type=Path, nargs="+", help="1-3 attempt files for distinct company checks")
     mode.add_argument("--complete", help="record this route's saved normalized receipt, without dispatch")
+    mode.add_argument("--review-file", type=Path, help="save company decisions and close reviewed routes together")
+    mode.add_argument("--status", action="store_true", help="show the authoritative request and compact current work")
     parser.add_argument("--plan-only", action="store_true", help="reserve public-web work before using the browser/search tool")
     args = parser.parse_args()
     try:
-        if args.complete:
+        if args.status:
+            document = budget_guard.read_object(args.results)
+            result = run_status(document, evaluate_stop(document, execution_budget=budget_guard.load_ledger(args.results)))
+        elif args.review_file:
+            result = save_review(args.results, load_json(args.review_file.read_text()))
+        elif args.complete:
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", args.complete):
                 raise ValueError("invalid route ID")
             body = load_json((args.results.parent / "receipts" / (args.complete + ".json")).read_text())

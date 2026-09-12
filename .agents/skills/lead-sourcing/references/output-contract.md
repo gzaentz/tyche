@@ -946,8 +946,9 @@ email-validation denial does not block company discovery or other permitted
 work. The validator checks the recorded blocker structure and references; it
 cannot independently verify user authorization or a runtime denial.
 
-Run `python3 scripts/validate_run.py <results.json> --check-stop` before the next
-action. Draft results are allowed; budget/cost receipts must reconcile. The
+The attempt and review helpers return the current stop decision; use that result.
+Run `python3 scripts/validate_run.py <results.json> --check-stop` only for work
+outside those helpers or recovery. Draft results are allowed; budget/cost receipts must reconcile. The
 decision uses qualified accepted rows, the actual current UTC time, confirmed
 charges plus uncertain reservations, and each next action's maximum cost/calls.
 When an execution ledger is present, this uses the same shared-USD and

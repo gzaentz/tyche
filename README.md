@@ -59,7 +59,10 @@ index is [tools.md](.agents/skills/lead-sourcing/references/tools.md); it links
 shared I/O and provider-specific contracts for reading only when needed. The exact input,
 JSON, and Excel workbook contracts are in
 [output-contract.md](.agents/skills/lead-sourcing/references/output-contract.md).
-The main skill uses five steps; detailed safeguards and audit procedures are
+The main skill uses one loop: discover, check up to three companies, save a
+review and repeat. `run_attempt.py --review-file` saves decisions and updates
+bookkeeping together; `--status` returns the saved ICP and pending work.
+Detailed safeguards and audit procedures are
 in [workflow-rules.md](.agents/skills/lead-sourcing/references/workflow-rules.md).
 Follow the skill's phase-specific reading links rather than loading every
 reference upfront. Full artifact validation remains required.
