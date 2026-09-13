@@ -14,7 +14,7 @@ import threading
 
 
 PROVIDERS = ("deepline", "scrapingdog")
-_TRANSACTION_LOCK = threading.Lock()
+_TRANSACTION_LOCK = threading.RLock()
 
 
 class BudgetError(ValueError):
@@ -117,9 +117,8 @@ def _file_transaction(path):
         lock.unlink()
 
 
-def initialize(run_file, *, max_usd=None, scrapingdog_usd_per_credit=None, verification_reserve_credits=None):
-    path = ledger_path(run_file)
-    document = read_object(Path(run_file).resolve(strict=True))
+def _initial_state(run_file, document, *, max_usd=None, scrapingdog_usd_per_credit=None, verification_reserve_credits=None):
+    """Validate initialization before writing either the run or its ledger."""
     request = document["request"]
     target = count(request["target_count"], "target_count")
     if target == 0:
@@ -146,16 +145,61 @@ def initialize(run_file, *, max_usd=None, scrapingdog_usd_per_credit=None, verif
     if reserve > Decimal(credits["deepline"]) or reserve * Decimal(rates["deepline"]) > cap:
         raise BudgetError("verification reserve exceeds the run budget")
     next_lead = limits.get("max_deepline_credits_per_next_lead")
+    canonical = str(Path(run_file).resolve())
+    state = dict(version=1, run_file=canonical,
+                 run_fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                 credit_limits=credits, usd_limit=str(cap), usd_per_credit=rates,
+                 next_lead_limit=None if next_lead is None else str(amount(next_lead, "next-lead cap")),
+                 verification_reserve_credits=str(reserve), calls={}, blocked=None)
+    check_limits(document, state)
+    return state
+
+
+def initialize(run_file, **options):
+    path = ledger_path(run_file)
+    document = read_object(Path(run_file).resolve(strict=True))
+    initial = _initial_state(run_file, document, **options)
     with transaction(path) as state:
         if state or path.exists():
             raise BudgetError("budget ledger already exists; resume it instead of resetting spend")
-        state.update(version=1, run_file=str(Path(run_file).resolve()),
-                     run_fingerprint=run_fingerprint(run_file), credit_limits=credits,
-                     usd_limit=str(cap), usd_per_credit=rates,
-                     next_lead_limit=None if next_lead is None else str(amount(next_lead, "next-lead cap")),
-                     verification_reserve_credits=str(reserve), calls={}, blocked=None)
-        check_limits(document, state)
+        state.update(initial)
     return path
+
+
+def create_run(run_file, document, **options):
+    """Create a run and ledger recoverably; never reset an existing ledger.
+
+    The run lock covers both writes. Ledger-first persistence lets a retry
+    verify its original caps after interruption before the run file was saved.
+    No provider can dispatch until both files exist.
+    """
+    run_file = Path(run_file).resolve()
+    ledger = run_file.with_name(run_file.name + ".budget.json")
+    initial = _initial_state(run_file, document, **options)
+    initial["initial_request_fingerprint"] = hashlib.sha256(json.dumps(document["request"], sort_keys=True, allow_nan=False).encode()).hexdigest()
+    initial["initial_started_at"] = document["stop_check"]["started_at"]
+    with transaction(run_file) as saved:
+        if run_file.exists() and not saved:
+            raise BudgetError("existing run state is empty; reconcile it instead of reinitializing")
+        if saved and saved.get("request") != document["request"]:
+            raise BudgetError("run already exists with another request; resume its saved criteria")
+        with transaction(ledger) as state:
+            if (ledger.exists() and not state) or (not saved and state.get("calls")):
+                raise BudgetError("existing ledger needs its saved run; reconcile missing state before continuing")
+            if state:
+                # Older ledgers have no initialization metadata; the existing
+                # run's request above is authoritative for their resume.
+                compare = {key: value for key, value in initial.items() if key not in {"calls", "blocked"}
+                           and not (saved and key.startswith("initial_") and key not in state)}
+                if any(state.get(key) != value for key, value in compare.items()):
+                    raise BudgetError("initialization settings differ from the saved ledger; preserve its original caps")
+            else:
+                if saved and (saved.get("routes") or saved.get("budget", {}).get("paid_calls")):
+                    raise BudgetError("existing research has no ledger; reconcile it before continuing")
+                state.update(initial)
+        if not saved:
+            saved.update(document)
+    return run_file
 
 
 def check_limits(document, state):

@@ -59,9 +59,21 @@ index is [tools.md](.agents/skills/lead-sourcing/references/tools.md); it links
 shared I/O and provider-specific contracts for reading only when needed. The exact input,
 JSON, and Excel workbook contracts are in
 [output-contract.md](.agents/skills/lead-sourcing/references/output-contract.md).
-The main skill uses one loop: discover, check up to three companies, save a
-review and repeat. `run_attempt.py --review-file` saves decisions and updates
-bookkeeping together; `--status` returns the saved ICP and pending work.
+The LLM chooses candidates, sources, tools, queries, follow-ups and qualification
+judgments. The existing helpers handle the mechanical work:
+
+- `run_attempt.py --start-file`: create the run and ledger from the interpreted
+  request; `--status` restores the saved ICP and pending work.
+- `--lookup-file`: run the chosen lookup or up to three independent checks,
+  supplying IDs, request metadata, budget reservations and saved receipts.
+- `--review-file`: save incremental company facts and explicit judgments,
+  preserving unrelated evidence and updating counts.
+- `export_xlsx.mjs`: validate reviewed results, export and check the saved workbook.
+
+These are capabilities the agent chooses when needed, not a provider waterfall
+or fixed research sequence. The [helper interface](.agents/skills/lead-sourcing/references/adapter-io.md)
+reuses the current providers, ledger, validators and exporter; no new service,
+database or dependency is required. Existing action/request inputs still work.
 Detailed safeguards and audit procedures are
 in [workflow-rules.md](.agents/skills/lead-sourcing/references/workflow-rules.md).
 Follow the skill's phase-specific reading links rather than loading every

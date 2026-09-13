@@ -93,13 +93,13 @@ Command paths below are relative to the skill directory, not this reference.
   rejected only because it is secondary. Set the optional contact
   `role_group` to `primary` or `secondary` when the group is known. The output
   slot name `primary_contact` is separate from this role group.
-- Maintain a route frontier for paid and no-cost public-web work. Each concrete
+- The lookup helper maintains the frontier for paid and no-cost public-web work. Each concrete
   route/query path is `untried`, `continuable`, `exhausted`, or `blocked`. A
   failed or uncertain provider call blocks automatic retry of that call, but it
   does not end the run while another route is untried or continuable. Mark a
   provider error or uncertain outcome as `blocked`, never `exhausted`. Keep the
   frontier append-only: add paths and update states, but never remove a path.
-- Give each concrete attempt or continuation a unique route ID. A failed
+- Use the unique route ID returned by the helper for each attempt or continuation. A failed
   attempt receipt may share its ID only with the outcome for that same failure;
   a later continuation always needs a new ID. Store
   `continuation_route_ids` on a route to cross-link future searches to the
@@ -161,8 +161,8 @@ use a priced alternative or public sources. Do not assume prepaid credits are
 free. Reallocation may use only the unspent balance, including reservations for
 uncertain calls, and must preserve explicit provider caps and prior receipts.
 
-Initialize the [paid-call ledger](adapter-io.md#paid-call-budget) once before
-the first paid call. It persists the shared USD cap, provider credit limits and
+The [start helper](adapter-io.md#start-or-resume) initializes the paid-call ledger
+with the run. It persists the shared USD cap, provider credit limits and
 verification reserve independently of editable report totals. Missing prices,
 missing ledger state, and repeated route IDs block dispatch. Resume the same
 ledger after interruptions; do not reset it or execute the raw CLI/HTTP to

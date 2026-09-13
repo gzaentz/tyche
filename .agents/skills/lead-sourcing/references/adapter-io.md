@@ -6,36 +6,68 @@ provider-specific inputs and statuses live in [Deepline](deepline-adapter.md)
 and [ScrapingDog](scrapingdog-adapter.md). Examples beginning with `.agents/`
 run from the repository root.
 
+## Start or resume
+
+The LLM interprets the ICP, signals and role priorities. Put that
+[input request](output-contract.md#input-contract) under `request` in a setup
+object; use `--start-file setup.json` (or `-` for UTF-8 JSON on stdin):
+
+```bash
+python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
+  reports/<run-id>/results.json --start-file reports/<run-id>/setup.json
+```
+
+Optional setup fields are `max_usd`, `scrapingdog_usd_per_credit`,
+`verification_reserve_credits` and `started_at`. Supply the priced verification
+reserve for email-required runs; never guess prices. Free catalog inspection
+through the Deepline wrapper can establish that price before initialization.
+The helper supplies defaults, the run ID, original clock, empty result records
+and ledger. It validates before writing and preserves existing criteria,
+evidence, reservations and spending on an identical retry. Interrupted writes
+retain the original initialization settings. A leftover lock still requires
+checking that its writer has stopped; locks are never expired automatically.
+
+Use `--status` to resume an existing run without resubmitting its request. Do
+not manually construct result bookkeeping or run `budget_guard.py` afterward.
+The ledger's existing initialization command remains for legacy callers.
+
 ## One attempt
 
-Use `scripts/run_attempt.py <results.json> --input-file <attempt.json>` for normal
-dispatch, using one object or an array of independent company checks. It composes the existing wrappers, budget guard and route recorder;
-there is no new provider or orchestration service. Initialize the run and paid
-ledger below first. The attempt file contains one action and its wrapper input:
+Use `--lookup-file lookup.json` with one research lookup or an array of up to
+three independent lookups. This composes the existing wrappers, budget guard
+and recorder; it does not choose a research strategy. For free catalog search:
+
+```json
+{"request": {"operation": "search", "query": "multilingual product-page research"}}
+```
+
+For a chosen provider tool, supply `scope` (canonical company domain or
+`discovery`), `phase`, `purpose`, `approach`, `request` and a verified whole-call
+`max_cost_credits`. `provider` defaults to `deepline`; `scrapingdog` and
+`public_web` use their existing wrapper inputs. For example:
 
 ```json
 {
-  "action": {
-    "id": "catalog-discovery-1",
-    "scope": "discovery",
-    "phase": "account_discovery",
-    "approach": "capability-discovery",
-    "description": "Find multilingual product-page and research capabilities",
-    "provider": "deepline",
-    "paid_calls": 0,
-    "cost_upper_bound_credits": 0
-  },
-  "request": {"operation": "search", "query": "multilingual niche webshop product research"}
+  "scope": "example.com",
+  "phase": "account_verification",
+  "purpose": "Check the current business and funding stage",
+  "approach": "current-company-profile",
+  "max_cost_credits": null,
+  "request": {"operation": "execute", "tool": "<live-described-tool>", "payload": {}}
 }
 ```
 
-For provider execution, use a tool described in this run and its native payload.
-Reuse saved descriptions until changed schemas, pricing or access require a refresh.
-Every Deepline `execute` and ScrapingDog call sets `paid_calls: 1` and a priced
-whole-call bound, even if that bound is zero. The helper adds `spend`; do not
-provide a separate ledger or reset its limits. Put `phase` and `scope` on each
-action; contact phases require a non-excluded company with passing account
-evidence in accepted rows or contact-stage unresolved rows.
+The null price and empty payload above are placeholders, not dispatchable inputs.
+Use a live-described tool and its native payload. The helper checks its saved
+same-run description for availability, required top-level fields and primitive
+types; the provider still owns the full native schema. Reuse descriptions until
+schema, pricing or access changes. Unknown pricing blocks paid dispatch.
+
+Code generates route IDs, fingerprints, receipt paths, paid-call flags and
+`spend` metadata. Catalog reads receive their own scope/phase automatically.
+Contact phases retain the existing passing-account-evidence gate. The legacy
+`--input-file` action/request envelope and `--batch-files` remain compatible;
+new work should use `--lookup-file` rather than reconstruct those envelopes.
 
 Use stable `approach` labels describing the source family and search/evidence
 strategy, not tool names, batch numbers or cosmetic rewordings. The helper hashes
@@ -71,8 +103,8 @@ provider's polling interval and applicable read limit; never label submission
 or enrichment as a status read. These calls still use the guarded ledger;
 missing actual charges remain unknown, even when the reserved bound is zero.
 
-For built-in public-web tools, set `provider: "public_web"`, zero cost/calls and
-use `--plan-only`. Execute the planned search/read through the available tool.
+For built-in public-web tools, set `provider: "public_web"` and use
+`--lookup-file` with `--plan-only`; code supplies zero cost/calls. Execute the planned search/read through the available tool.
 Write only the observed response to a separate UTF-8 JSON file, for example
 `{"status":"ok","results":[{"url":"https://example.com/news","text":"Observed source text"}]}`,
 then attach it to the planned route:
@@ -117,27 +149,48 @@ raw fields only for a missing fact or contradiction; full receipts remain saved.
 
 ## Save a review
 
-After each completed batch, save reviewed contact facts and fully qualified
-leads without waiting for the remaining companies. Write one review file using existing company rows and
-their full evidence; `state` is `accepted`, `unresolved` or `rejected`. Unresolved
-rows retain `stage: "account"` or `"contact"` and the missing facts in
-`reason_text`. A route review needs only its ID and your reason that this exact
-source has been checked. For example, closing a search without new candidates:
+Save findings as they become available; do not rebuild the full company row.
+A `companies` item identifies `scope` and only the fields being updated:
 
 ```json
 {
-  "routes": [{"route_id": "checked-search", "reason": "All saved results were reviewed; none establishes the requested recent project signal."}]
+  "companies": [{
+    "scope": "example.com",
+    "state": "unresolved",
+    "company": {"canonical_name": "Example"},
+    "reason_text": "The business fits; the announcement date remains unknown.",
+    "qualification_checks": [{
+      "criterion": "recent_intent", "importance": "required", "status": "unknown",
+      "claim": "The announcement has no verified date yet.", "evidence": []
+    }]
+  }],
+  "routes": [{"route_id": "<returned-route-id>", "reason": "Reviewed the saved announcement; its date is not established."}]
 }
 ```
 
-Add company decisions as `"companies": [{"state": "unresolved", "row": <full row>}]`
-and concrete new actions in `next_actions` when needed. These keys are optional;
-omitted companies and routes are untouched. Then run:
+`company` updates the supplied factual fields. `qualification_checks` updates
+one judgment per exact `criterion` name, retaining earlier supporting evidence
+and unrelated checks. Supply importance, status, claim and evidence explicitly;
+code does not decide fit. Use the same criterion name when refining a judgment.
+
+`account_fit`, `signal_evidence`, `intent_details`, `primary_contact` and
+`backup_contacts` are complete replacements when supplied, and untouched when
+omitted. Review new contacts and source identities before replacing them.
+State defaults to the saved state (new companies start unresolved); set
+`state: "accepted"` or `"rejected"` explicitly. Acceptance retains all existing
+evidence/contact gates; a missing fact cannot become a rejection without an
+evidenced required mismatch. Set `stage: "contact"` after account review passes,
+with remaining buyer gaps in `reason_text`.
 
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
   reports/<run-id>/results.json --review-file reports/<run-id>/review.json
 ```
+
+`--review-file -` accepts stdin. The old `{state, row}` form remains available
+for complete replacements. `companies`, `routes` and `next_actions` are optional;
+omitted records remain intact. Usually execute your next choice directly with
+`--lookup-file`; supply `next_actions` only for concrete work that needs saving.
 
 One atomic update saves the selected company rows, closes reviewed routes,
 retires their completed actions, removes speculative follow-ups for reviewed
@@ -164,11 +217,11 @@ After the pilot, use one agent and up to three ready checks for different
 companies. Use fewer when fewer checks are ready or the remaining lead shortfall
 is smaller. Batch ready checks instead of calling them one by one; different
 companies may be at different phases. Do not wait to fill a batch.
-Save the same `action`/`request` objects above as an array in `batch.json`:
+Save the same concise lookup objects above as an array in `batch.json`:
 
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
-  reports/<run-id>/results.json --input-file reports/<run-id>/batch.json
+  reports/<run-id>/results.json --lookup-file reports/<run-id>/batch.json
 ```
 
 The existing `--batch-files` option remains compatible with one array file or
@@ -177,9 +230,10 @@ and budget checks. The helper validates every input with the existing provider
 validators before planning or spending. Malformed fields identify their batch item
 and stop the entire batch without changing run state.
 
-Give each action a unique route ID and its canonical company domain as `scope`.
+Give each lookup its canonical company domain as `scope`; code assigns IDs.
 Batch mode accepts account verification, contact discovery, contact verification
-and email validation. Keep discovery pilots on the single-attempt path. Choose
+and email validation. Free catalog lookups may share discovery scope in a batch.
+Keep substantive discovery pilots on the single-attempt path. Choose
 only independent work: a company's buyer lookup waits for saved passing account
 evidence, and email validation waits for its buyer/address checks. Deduplicate
 aliases and owner groups before choosing the batch; do not run redundant provider
@@ -214,20 +268,13 @@ rate limit is a reason to reduce concurrency, never to increase retries.
 
 ## Paid-call budget
 
-Before the first paid call, create `results.json` with the normalized request,
-empty `accepted`/`routes`, and the existing `budget.limits` and `budget.paid_calls`.
-Initialize its ledger once:
+Use [start/resume](#start-or-resume) to initialize both records before paid
+research. Keep the same results path throughout the run.
 
-```bash
-python3 .agents/skills/lead-sourcing/scripts/budget_guard.py \
-  reports/<run-id>/results.json \
-  --verification-reserve-credits <priced-total-verification-allowance>
-```
-
-The shared cap defaults to USD 0.50 per requested lead. Supply `--max-usd` for
+The shared cap defaults to USD 0.50 per requested lead. Supply setup `max_usd` for
 an explicit user cap, including zero. Deepline uses the configured USD 0.10 per
 credit. An enabled ScrapingDog allocation also requires
-`--scrapingdog-usd-per-credit` from the current plan; zero allocation disables
+`scrapingdog_usd_per_credit` from the current plan; zero allocation disables
 that provider. Existing provider and optional per-next-lead spending caps
 remain independent. Email-required runs need an explicit verification reserve,
 priced for the remaining leads and any planned fallback. Email opt-outs do not.
@@ -236,23 +283,12 @@ Paid-call counts are audit data, not limits. New runs omit `max_paid_calls`.
 Legacy request, result, and ledger fields are ignored without rewriting the
 ledger or resetting charges, pending reservations, or monetary limits.
 
-Every Deepline `execute` and every ScrapingDog request now requires this
-wrapper-only object alongside `operation`/`payload` or the other native inputs:
-
-```json
-{
-  "spend": {
-    "run_file": "reports/<run-id>/results.json",
-    "route_id": "company-1-contact-1",
-    "max_cost_credits": 1
-  }
-}
-```
-
-The number above is illustrative, not a price. Obtain a conservative **whole
-call** bound from the live descriptor and bound provider-native rows/pages.
-The wrapper output `limit` only truncates the preview; it does not limit billing.
-Catalog `search`/`describe` stay unguarded because they do not execute providers.
+Every Deepline `execute` and ScrapingDog request uses a guarded reservation.
+The lookup helper supplies its `spend` object; do not assemble it manually.
+Supply a conservative **whole-call** `max_cost_credits` from the live descriptor
+and bound provider-native rows/pages. The wrapper output `limit` only truncates
+the preview; it does not limit billing. Catalog `search`/`describe` do not execute
+providers and need no paid reservation.
 
 The adapters atomically persist reservations in `results.json.budget.json`
 before dispatch. All callers for a run must use the same results file. Confirmed
@@ -260,10 +296,9 @@ charges plus outstanding maximum costs plus the next call and protected
 verification balance must fit every cap. Only Deepline requests marked
 `entity_type: "email_validation"` consume the verification allowance. Use that
 metadata only for a validation tool described in this run, never for discovery.
-`spend_receipt` identifies the ledger entry; record its route ID, accepted-lead
-count, and actual cost or retained upper bound in the usual result fields.
-Mark email-validation `next_actions` with the same `entity_type` so the stopping
-check can distinguish verification from other spending.
+`spend_receipt` identifies the ledger entry. The helper records its route ID,
+accepted-lead count and actual cost or retained bound, and marks email-validation
+actions so the stopping check distinguishes verification from other spending.
 Both validator CLI modes cross-check these routes against the ledger when it
 is present. Record every dispatched call in the batch before checking the next
 batch or delivering results; `--check-stop` alone is still not full output validation.

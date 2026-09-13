@@ -9,8 +9,10 @@ import importlib
 import json
 from pathlib import Path
 import re
+import sys
 
 import budget_guard
+import research_input
 from email_receipts import check_fallback, validator_for_tool, verification_finished
 from provider_output import ResponseFile, load_json
 from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
@@ -20,6 +22,43 @@ from validate_run import (BLOCKING_PROVIDER_STATUSES, DETERMINATE_PROVIDER_STATU
                           validate_run)
 
 ATTEMPT_STATUSES = DETERMINATE_PROVIDER_STATUSES | BLOCKING_PROVIDER_STATUSES
+
+
+def start_run(run_file, setup):
+    """Initialize or resume the existing records from one interpreted request."""
+    run_file = Path(run_file).resolve()
+    existing = budget_guard.read_object(run_file) if run_file.exists() else None
+    ledger_file = run_file.with_name(run_file.name + ".budget.json")
+    ledger = budget_guard.read_object(ledger_file) if ledger_file.exists() else None
+    document, options = research_input.start_document(run_file, setup, existing=existing, ledger=ledger)
+    refresh(document)
+    run_file.parent.mkdir(parents=True, exist_ok=True)
+    budget_guard.create_run(run_file, document, **options)
+    saved = budget_guard.read_object(run_file)
+    return run_status(saved, evaluate_stop(saved, execution_budget=budget_guard.load_ledger(run_file)))
+
+
+def run_lookup(run_file, lookup, *, execute=None, plan_only=False):
+    """Adapt research choices to the one existing dispatch/recovery path."""
+    is_batch = isinstance(lookup, list)
+    values = lookup if is_batch else [lookup]
+    if not 1 <= len(values) <= 3:
+        raise ValueError("provide one lookup or at most three independent lookups")
+    specs = [research_input.prepare_lookup(value) for value in values]
+    # Validate every envelope before reading contracts or creating state.
+    for index, spec in enumerate(specs):
+        adapter, action, request = _validate_spec(spec, f"lookup[{index}]", plan_only=plan_only)
+        if action["provider"] == "deepline" and request["operation"] == "execute":
+            document = budget_guard.read_object(Path(run_file))
+            route = next((r for r in reversed(document.get("routes", [])) if r.get("provider") == "deepline"
+                          and r.get("operation") == "describe" and r.get("tool") == request["tool"]
+                          and r.get("provider_status") == "ok"), None)
+            if route is None:
+                raise ValueError(f"Describe {request['tool']} in this run before execution")
+            receipt = read_receipt(run_file, route["route_id"])["result"]
+            research_input.check_tool_contract(receipt, request)
+    return (run_batch(run_file, specs, execute=execute, plan_only=plan_only) if is_batch else
+            run_attempt(run_file, specs[0], execute=execute, plan_only=plan_only))
 
 
 def refresh(document):
@@ -133,6 +172,8 @@ def save_review(run_file, review):
     def update(document):
         changed = set()
         for item in review.get("companies", []):
+            if "row" not in item:
+                item = research_input.company_update(document, item)
             state, row = item["state"], copy.deepcopy(item["row"])
             if state not in {"accepted", "unresolved", "rejected"} or not isinstance(row, dict):
                 raise ValueError("company review requires an accepted, unresolved or rejected row")
@@ -236,7 +277,7 @@ def _validate_spec(spec, label="input", *, plan_only=False):
         raise ValueError(f"{label} must be an object containing action and request objects")
     for field in ("action", "request"):
         if not isinstance(spec.get(field), dict):
-            raise ValueError(f"{label}.{field} must be an object")
+            raise ValueError(f'{label}.{field} must be an object; legacy attempts use {{"action": {{...}}, "request": {{...}}}}. Use --lookup-file for research inputs without an action envelope.')
     action, request = copy.deepcopy(spec["action"]), copy.deepcopy(spec["request"])
     if not isinstance(action.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", action["id"]):
         raise ValueError(f"{label}.action.id must be a safe unique route ID")
@@ -467,12 +508,14 @@ def run_batch(run_file, specs, *, execute=None, plan_only=False):
         action = validated[1]
         rid, scope = action["id"], action["scope"]
         scope = scope.strip().lower()
-        if rid in ids or scope in scopes:
+        catalog = action.get("entity_type") == "tool_catalog"
+        if rid in ids or not catalog and scope in scopes:
             raise ValueError("batch actions need unique route IDs and distinct canonical company scopes")
-        if action["phase"] not in {"account_verification", "contact_discovery", "contact_verification", "email_validation"}:
+        if not catalog and action["phase"] not in {"account_verification", "contact_discovery", "contact_verification", "email_validation"}:
             raise ValueError("batch mode is for company checks; run discovery pilots separately")
         ids.add(rid)
-        scopes.add(scope)
+        if not catalog:
+            scopes.add(scope)
         inputs.append(validated)
 
     results, prepared = [], []
@@ -599,6 +642,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", type=Path)
     mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--start-file", type=Path, help="initialize/resume from {request, max_usd, verification_reserve_credits}; - reads stdin")
+    mode.add_argument("--lookup-file", type=Path, help="research target/purpose/provider request, or up to three; - reads stdin")
     mode.add_argument("--input-file", type=Path, help="one action/request object or an array of 1-3 independent company checks")
     mode.add_argument("--batch-files", type=Path, nargs="+", help="1-3 company checks, as attempt files or one JSON array")
     mode.add_argument("--complete", help="record this route's saved normalized receipt, without dispatch")
@@ -611,17 +656,24 @@ def main():
     args = parser.parse_args()
     if args.response_file and (not args.complete or args.plan_only):
         parser.error("--response-file requires --complete and cannot be used with --plan-only")
+    if args.plan_only and not (args.lookup_file or args.input_file or args.batch_files):
+        parser.error("--plan-only requires a lookup or attempt input")
     try:
-        if args.finalize:
+        read_input = lambda path: load_json(sys.stdin.read() if str(path) == "-" else path.read_text(encoding="utf-8"))
+        if args.start_file:
+            result = start_run(args.results, read_input(args.start_file))
+        elif args.lookup_file:
+            result = run_lookup(args.results, read_input(args.lookup_file), plan_only=args.plan_only)
+        elif args.finalize:
             result = finalize_run(args.results)
         elif args.status:
             document = budget_guard.read_object(args.results)
             result = run_status(document, evaluate_stop(document, execution_budget=budget_guard.load_ledger(args.results)))
         elif args.review_file:
-            result = save_review(args.results, load_json(args.review_file.read_text()))
+            result = save_review(args.results, read_input(args.review_file))
             result = {"request_file": str(args.results), **{k: v for k, v in result.items() if k != "request"}}
         elif args.complete:
-            result = (complete_public_web(args.results, args.complete, load_json(args.response_file.read_text(encoding="utf-8")))
+            result = (complete_public_web(args.results, args.complete, read_input(args.response_file))
                       if args.response_file else
                       finish_attempt(args.results, args.complete, read_receipt(args.results, args.complete)["result"]))
         elif args.receipt:
@@ -636,7 +688,7 @@ def main():
             execute = run_batch if isinstance(spec, list) else run_attempt
             result = execute(args.results, spec, plan_only=args.plan_only)
         print(json.dumps(cli_output(result), ensure_ascii=True, allow_nan=False))
-        if args.batch_files or args.input_file:
+        if args.batch_files or args.input_file or args.lookup_file:
             return result.get("exit_code", 0)
     except (ValueError, OSError, KeyError, TypeError, StopIteration) as exc:
         parser.exit(2, str(exc) + "\n")
