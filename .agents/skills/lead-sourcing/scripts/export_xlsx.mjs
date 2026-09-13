@@ -74,11 +74,7 @@ function validateClientRow(row, index) {
   if ("classification_note" in company && (typeof company.classification_note !== "string" || !company.classification_note.trim())) {
     throw new ExportError(`accepted[${index}].company.classification_note must be a non-empty string`);
   }
-  if (!("industry" in company) && !("sub_industry" in company)) {
-    if (typeof company.classification_note !== "string" || !company.classification_note.trim()) {
-      throw new ExportError(`accepted[${index}].company.classification_note is required for unresolved classification`);
-    }
-  } else if (
+  if (
     typeof company.industry !== "string" || typeof company.sub_industry !== "string"
     || !TAXONOMY.parent_industries.includes(company.industry)
     || !Object.hasOwn(TAXONOMY.subindustry_parents, company.sub_industry)

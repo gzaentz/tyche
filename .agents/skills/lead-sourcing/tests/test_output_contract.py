@@ -168,6 +168,13 @@ def cost_result(routes, accepted_contacts=1):
 
 
 class OutputContractExtensionTests(unittest.TestCase):
+    def test_client_schema_requires_taxonomy_even_with_a_classification_note(self):
+        _, schema = load_schemas()
+        rule = next(r for r in schema["allOf"] if r["if"]["properties"]["schema_version"].get("const") == "1.2")
+        company = rule["then"]["properties"]["accepted"]["items"]["properties"]["company"]
+        self.assertEqual(set(company["required"]), {"description", "industry", "sub_industry"})
+        self.assertNotIn("anyOf", company)
+
     def test_schemas_do_not_require_legacy_call_limits(self):
         request_schema, result_schema = load_schemas()
         budgets = [schema["$defs"]["input_budget"] for schema in (request_schema, result_schema)]

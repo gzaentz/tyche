@@ -1085,10 +1085,7 @@ def _validate_client_output(accepted: list, errors: list[str]) -> None:
         if "classification_note" in company and (not isinstance(note, str) or not note.strip()):
             errors.append(f"{path}.company.classification_note must be a non-empty string")
         industry, subindustry = company.get("industry"), company.get("sub_industry")
-        if "industry" not in company and "sub_industry" not in company:
-            if not isinstance(note, str) or not note.strip():
-                errors.append(f"{path}.company.classification_note is required for unresolved classification")
-        elif (
+        if (
             not isinstance(industry, str)
             or not isinstance(subindustry, str)
             or industry not in taxonomy["parent_industries"]

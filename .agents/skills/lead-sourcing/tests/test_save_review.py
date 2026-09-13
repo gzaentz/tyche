@@ -87,6 +87,28 @@ class SaveReviewTests(unittest.TestCase):
                 runner.save_review(self.path, review)
             self.assertEqual(self.path.read_bytes(), before)
 
+    def test_unclassified_company_stays_unresolved_and_acceptance_is_atomic(self):
+        from test_client_output import client_document
+        document = copy.deepcopy(self.doc)
+        document["schema_version"] = "1.2"
+        accepted = client_document()["accepted"][0]
+        domain = accepted["company"]["domain"]
+        accepted["company"].pop("industry")
+        accepted["company"].pop("sub_industry")
+        accepted["company"]["classification_note"] = "More product evidence is needed."
+        self.path.write_text(json.dumps(document))
+        pending = {"stage": "account", "candidate": accepted["company"],
+                   "reason_code": "missing_account_evidence",
+                   "reason_text": "Canonical industry and subindustry need supporting product evidence."}
+        runner.save_review(self.path, {"companies": [{"state": "unresolved", "row": pending}]})
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved["accepted"], [])
+        self.assertTrue(any(r["candidate"]["domain"] == domain for r in saved["unresolved"]))
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, "industry/sub_industry"):
+            runner.save_review(self.path, {"companies": [{"state": "accepted", "row": accepted}]})
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_cannot_close_failed_or_pending_attempts_as_exhausted(self):
         self.attempt()
         doc = json.loads(self.path.read_text())

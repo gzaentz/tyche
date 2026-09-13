@@ -315,14 +315,7 @@ top-level result list or hide rejected/unresolved rows in a count.
               "required": ["intent_details"],
               "properties": {
                 "company": {
-                  "required": ["description"],
-                  "anyOf": [
-                    {"required": ["industry", "sub_industry"]},
-                    {
-                      "required": ["classification_note"],
-                      "not": {"anyOf": [{"required": ["industry"]}, {"required": ["sub_industry"]}]}
-                    }
-                  ]
+                  "required": ["description", "industry", "sub_industry"]
                 }
               }
             }
@@ -1371,8 +1364,8 @@ route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 | `LinkedIn` | `primary_contact.linkedin_url`; use `contact_url` only when it is a LinkedIn URL |
 | `Website` | `company.website`; otherwise `https://` plus the canonical `company.domain` |
 | `Company LinkedIn` | `company.linkedin_url`, otherwise blank |
-| `Industry` | `company.industry`, otherwise blank |
-| `Sub Industry` | `company.sub_industry`, otherwise blank |
+| `Industry` | `company.industry`, required canonical label for version `1.2` |
+| `Sub Industry` | `company.sub_industry`, required canonical child for version `1.2` |
 | `Contact City` | `primary_contact.city`, otherwise blank |
 | `Contact State` | `primary_contact.state`, otherwise blank |
 | `Contact Country` | required `primary_contact.country` from LinkedIn through HarvestAPI |
@@ -1393,8 +1386,8 @@ Observed On,Source URL,Evidence Text`. `Evidence Date` is the stored published,
 posted or updated date, not necessarily the event date. For `observed_current`,
 leave `Evidence Date` blank and put the original evidence date in `Observed On`.
 Otherwise use the run's retrieval date for `Observed On`. Export dates as typed
-Excel dates. An unresolved classification note gets an `Industry` source row
-with blank URL and dates; it is a limitation, not a verification receipt.
+Excel dates. A classification note gets an `Industry` source row with blank URL
+and dates; it explains the selected pair and does not replace source evidence.
 The `Signals` cell uses one block per signal/source, labels observation dates
 `Observed on` and other evidence dates `Source date`, and omits missing values.
 It does not infer event dates. Store additional signals in the existing
@@ -1423,10 +1416,18 @@ unverified optional values as empty cells rather than placeholder text.
   "It serves...". These openings are examples, not fixed templates. Support both
   sentences with account-fit or qualification evidence. Keep signals, inferred
   needs, contact-validation warnings, scoring and internal diagnostics out of it.
-- Write `intent_details` as one natural paragraph. Describe what the company
-  did with specific facts and supported dates. Explain what that activity shows
-  about its needs and why it is relevant. Close with a sentence tying the evidence
-  together to explain why the company matters now in terms of its own situation.
+- Write `intent_details` as one natural paragraph covering every distinct,
+  verified signal relevant to the request, including verified preferred signals.
+  For each signal, describe what the company did with specific facts and supported
+  dates, then explain its relevance to the company's likely needs and the
+  requested product/service using supporting business or qualification evidence.
+  Usually give that explanation in the next sentence. Close with one sentence
+  connecting the signals, likely need and requested product/service to explain
+  why the company matters now in terms of its own situation. Synthesize the
+  evidence rather than repeating the events or merely describing expansion.
+  One signal will often take three sentences and two signals five; these are
+  examples, not sentence-count requirements. Combine related evidence naturally,
+  and do not repeat one event just because it has multiple sources or labels.
   Focus on the company's activity, not a pitch for our product. Keep inferred
   needs conditional and material uncertainty clear; do not invent urgency,
   purchasing intent or an event date from an observation date. Use `Signals` for
@@ -1442,20 +1443,28 @@ unverified optional values as empty cells rather than placeholder text.
   supported by the saved signal or qualification evidence for that company.
   Save additional supporting sources as existing qualification-check evidence;
   do not combine unsupported events into a more persuasive story.
-- Before export, review both authored fields against their saved evidence and
-  check the two-sentence description and paragraph structure. The helpers require
+- Before export, use the existing source review to check both authored fields:
+  the description has two factual sentences; each distinct verified signal has
+  a supported relevance explanation; and the closing sentence connects the
+  evidence, likely need and requested product/service. Unknown or failed preferred
+  signals are not affirmative intent; mention a caveat only when material.
+  The helpers require
   these fields and preserve the authored text; factual accuracy and natural prose
   are sourcing-agent review responsibilities, not regex or extra model-call gates.
 - Use `assets/leadpoet_industry_taxonomy.json`, a versioned PP snapshot with
   pinned provenance. Select the company's business activity from evidence, not
   the customer's industry or the technology merely mentioned in a job posting.
-  Every populated `industry`/`sub_industry` pair must use exact canonical labels
+  Every accepted company requires an `industry`/`sub_industry` pair using exact canonical labels
   and a permitted parent-child relationship. Some children have multiple parents;
   choose the evidence-supported one. Membership alone does not prove accuracy.
-- When classification cannot be supported, omit both fields and supply
-  `company.classification_note` explaining the gap. Leave the workbook cells
-  blank. Do not invent a default pair or reject an otherwise qualified account
-  merely for this metadata gap. Required ICP industry evidence still applies.
+- Classify during company review using evidence already collected. A broad
+  LinkedIn category does not prevent classification from verified product facts.
+  When the pair cannot be supported, keep the company in `unresolved` with the
+  gap in `reason_text` and an evidence-driven next action when one is available.
+  Use the existing retry and budget limits; do not research indefinitely or invent
+  a default pair. A `classification_note` may explain a selected pair but cannot
+  substitute for either field. Acceptance and export require both fields.
+  Required ICP industry evidence still applies.
   Raw provider classifications stay in the saved receipts. Do not import PP's
   heuristic fallback rules or add another AI call to format the output.
 

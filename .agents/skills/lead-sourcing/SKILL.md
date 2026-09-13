@@ -39,6 +39,7 @@ once. The default shared provider budget is USD 0.50 per requested lead.
    Apply the [qualification policy](references/workflow-rules.md#qualification-policy).
    Required unknown facts stay unresolved; evidenced mismatches reject; preferred
    signals only rank. Corroborate sources for the same project, preserving dates.
+   Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
    Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size)
    for company size and contact location. Every accepted contact needs a country;
    every accepted company needs its published employee range and saved source.
@@ -72,7 +73,6 @@ only for eligible failures or catch-all/unknown. Never override a hard negative.
 
 Generate the report and workbook after source review, then regenerate only
 when corrections change their content. Keep structured results current throughout.
-Follow [client writing](references/output-contract.md#client-writing-and-taxonomy-version-12).
 Before delivery, write `report.md`, `results.json` and `leads.xlsx`, then run
 `python3 scripts/validate_run.py <results.json> --show-progress`. Full strict
 `delivery_allowed: true` is required. Follow the [stopping contract](references/output-contract.md#stopping-check)

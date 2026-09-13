@@ -274,11 +274,14 @@ class ClientOutputTests(unittest.TestCase):
     def test_validator_accepts_exact_taxonomy_pair(self):
         self.assertEqual(VALIDATOR.validate_run(client_document()), [])
 
-    def test_validator_accepts_absent_taxonomy_with_nonempty_classification_note(self):
+    def test_classification_note_cannot_replace_required_pair(self):
         document = client_document()
         document["accepted"][0]["company"].pop("industry")
         document["accepted"][0]["company"].pop("sub_industry")
-        self.assertEqual(VALIDATOR.validate_run(document), [])
+        self.assertTrue(any("industry/sub_industry" in error for error in VALIDATOR.validate_run(document)))
+        result = self.run_rows_json(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("industry/sub_industry", result.stderr)
 
     def test_validator_rejects_unknown_pair_and_guesses(self):
         document = client_document()
@@ -288,6 +291,10 @@ class ClientOutputTests(unittest.TestCase):
 
     def test_exporter_rejects_unknown_and_partial_taxonomy_pairs(self):
         for company_update in (
+            {},
+            {"industry": "", "sub_industry": ""},
+            {"industry": "   ", "sub_industry": "   "},
+            {"industry": None, "sub_industry": None},
             {"industry": "Manufacturing", "sub_industry": "Textiles-ish"},
             {"industry": "Manufacturing"},
             {"sub_industry": "Textiles"},
@@ -298,6 +305,7 @@ class ClientOutputTests(unittest.TestCase):
                 company.pop("industry", None)
                 company.pop("sub_industry", None)
                 company.update(company_update)
+                self.assertTrue(any("industry/sub_industry" in error for error in VALIDATOR.validate_run(document)))
                 result = self.run_rows_json(document)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("industry", result.stderr)
@@ -324,13 +332,11 @@ class ClientOutputTests(unittest.TestCase):
                 mutate(document["accepted"][0]["company"])
                 self.assertTrue(VALIDATOR.validate_run(document))
 
-    def test_missing_taxonomy_requires_nonempty_string_classification_note(self):
+    def test_optional_classification_note_must_be_nonempty_text(self):
         for note in (None, "", "   ", 42):
             with self.subTest(note=note):
                 document = client_document()
                 company = document["accepted"][0]["company"]
-                company.pop("industry")
-                company.pop("sub_industry")
                 company["classification_note"] = note
                 errors = VALIDATOR.validate_run(document)
                 self.assertTrue(any("classification_note" in error for error in errors))
