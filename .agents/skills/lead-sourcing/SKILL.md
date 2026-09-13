@@ -7,8 +7,8 @@ description: Source evidence-backed companies with buying signals and requested-
 
 Use one research agent and existing helpers. The LLM chooses candidates, sources,
 queries, tools, follow-ups and qualification judgments. Code handles persistence,
-IDs, receipts, accounting and validation. Helpers are capabilities, not a fixed
-research sequence. No additional services, databases, CRM writes or outreach.
+IDs, receipts, accounting and validation. No additional services, databases,
+CRM writes or outreach.
 
 ## Setup
 
@@ -20,7 +20,8 @@ ledger from the interpreted request. Code defaults to one contact per company.
 Only the user can change criteria.
 Resume the saved plan with `run_attempt.py <results.json> --status`.
 Keep all artifacts in the original run directory. Never import another run.
-Run helpers from the repository root; inspect code only for concrete errors.
+Run helpers from the repository root. Supply JSON on stdin with `-`;
+use field-specific error hints before inspecting code.
 
 Read the [workflow rules](references/workflow-rules.md), [input contract](references/output-contract.md#input-contract),
 [lifecycle invariants](references/output-contract.md#lifecycle-invariants) and
@@ -51,10 +52,11 @@ Default provider budget: USD 0.50 per requested lead.
    Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
    Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size):
    accepted contacts need country; companies need published employee range and source.
-3. **Save the review and repeat.** After each batch, use [one review file](references/adapter-io.md#save-a-review)
-   for incremental facts, judgments and checked routes. Accept fully
-   qualified leads immediately; keep incomplete candidates unresolved. The helper
-   updates counts and retires completed work. After two comparable research attempts
+3. **Save decisions as made.** Use [review](references/adapter-io.md#save-a-review)
+   with `--review-file -` for findings, observed web responses and checked routes.
+   Save supported rejections and unresolved gaps immediately; refine later.
+   Accept qualified leads promptly. `review_due` reminds you of outstanding reviews.
+   After two comparable research attempts
    within the same company and phase without verified progress, change strategy.
    Reopen reviewed evidence only for a specific gap, contradiction or useful new source.
    Independent profile/email checks remain eligible; never repeat an uncertain call.

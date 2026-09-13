@@ -16,8 +16,12 @@ import budget_guard
 
 
 def object_fields(value, allowed, label):
-    if not isinstance(value, dict) or set(value) - set(allowed):
-        raise ValueError(f"{label} accepts only: {', '.join(sorted(allowed))}")
+    hint = f"{label} accepts only: {', '.join(sorted(allowed))}"
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object; {hint}")
+    unexpected = set(value) - set(allowed)
+    if unexpected:
+        raise ValueError(f"{label} has unexpected fields: {', '.join(sorted(map(str, unexpected)))}; {hint}")
 
 
 def text(value, label):
@@ -166,7 +170,7 @@ def start_document(run_file, setup, *, existing=None, ledger=None):
 def normalize_provider_request(provider, request, label):
     """Use the existing adapter contract for both research and legacy inputs."""
     if provider not in ("deepline", "scrapingdog", "public_web"):
-        raise ValueError(f"{label}.provider must use an existing provider wrapper")
+        raise ValueError(f"{label}.provider must use an existing provider wrapper: deepline, scrapingdog, public_web")
     if not isinstance(request, dict):
         raise ValueError(f"{label}.request must contain the provider operation and inputs")
     request = copy.deepcopy(request)
@@ -179,19 +183,19 @@ def normalize_provider_request(provider, request, label):
     return adapter, request
 
 
-def prepare_lookup(value):
+def prepare_lookup(value, label="lookup"):
     """The agent selects target, purpose and request; derive bookkeeping only."""
     object_fields(value, {"provider", "request", "scope", "phase", "purpose", "approach",
-                          "max_cost_credits", "status_read"}, "lookup")
+                          "max_cost_credits", "status_read"}, label)
     provider = value.get("provider", "deepline")
-    _, request = normalize_provider_request(provider, value.get("request"), "lookup")
+    _, request = normalize_provider_request(provider, value.get("request"), label)
     catalog = provider == "deepline" and request.get("operation") in {"search", "describe"}
     paid = provider == "scrapingdog" or provider == "deepline" and request.get("operation") == "execute"
     purpose = value.get("purpose", f"Inspect {request.get('tool') or request.get('query', '')}" if catalog else None)
     phase = "account_discovery" if catalog else value.get("phase")
-    scope = "discovery" if catalog else text(value.get("scope"), "lookup.scope").casefold().removeprefix("www.")
+    scope = "discovery" if catalog else text(value.get("scope"), label + ".scope").casefold().removeprefix("www.")
     action = dict(id="lookup-" + uuid.uuid4().hex[:24], scope=scope, phase=phase,
-        description=text(purpose, "lookup.purpose"), approach=value.get("approach", "capability-discovery" if catalog else purpose),
+        description=text(purpose, label + ".purpose"), approach=value.get("approach", "capability-discovery" if catalog else purpose),
         provider=provider, paid_calls=int(paid), cost_upper_bound_credits=value.get("max_cost_credits") if paid else 0)
     if "status_read" in value:
         action["status_read"] = value["status_read"]

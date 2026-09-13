@@ -6,15 +6,20 @@ provider-specific inputs and statuses live in [Deepline](deepline-adapter.md)
 and [ScrapingDog](scrapingdog-adapter.md). Examples beginning with `.agents/`
 run from the repository root.
 
+Use `-` to supply JSON directly on stdin, normally with a quoted heredoc as
+shown below. The helper saves durable records; routine lookups and reviews
+do not need temporary input files. Correct the named field in an error before
+reading implementation code.
+
 ## Start or resume
 
 The LLM interprets the ICP, signals and role priorities. Put that
 [input request](output-contract.md#input-contract) under `request` in a setup
-object; use `--start-file setup.json` (or `-` for UTF-8 JSON on stdin):
+object; supply it as UTF-8 JSON on stdin with `--start-file -`:
 
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
-  reports/<run-id>/results.json --start-file reports/<run-id>/setup.json
+  reports/<run-id>/results.json --start-file -
 ```
 
 Optional setup fields are `max_usd`, `scrapingdog_usd_per_credit`,
@@ -33,12 +38,15 @@ The ledger's existing initialization command remains for legacy callers.
 
 ## One attempt
 
-Use `--lookup-file lookup.json` with one research lookup or an array of up to
+Use `--lookup-file -` with one research lookup or an array of up to
 three independent lookups. This composes the existing wrappers, budget guard
 and recorder; it does not choose a research strategy. For free catalog search:
 
-```json
+```bash
+python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
+  reports/<run-id>/results.json --lookup-file - <<'JSON'
 {"request": {"operation": "search", "query": "multilingual product-page research"}}
+JSON
 ```
 
 For a chosen provider tool, supply `scope` (canonical company domain or
@@ -65,9 +73,9 @@ schema, pricing or access changes. Unknown pricing blocks paid dispatch.
 
 Code generates route IDs, fingerprints, receipt paths, paid-call flags and
 `spend` metadata. Catalog reads receive their own scope/phase automatically.
-Contact phases retain the existing passing-account-evidence gate. The legacy
-`--input-file` action/request envelope and `--batch-files` remain compatible;
-new work should use `--lookup-file` rather than reconstruct those envelopes.
+Contact phases retain the existing passing-account-evidence gate.
+`review_due` returns a count and up to three company scopes with completed
+research awaiting review. It is a reminder, not another qualification rule.
 
 Use stable `approach` labels describing the source family and search/evidence
 strategy, not tool names, batch numbers or cosmetic rewordings. The helper hashes
@@ -103,24 +111,24 @@ provider's polling interval and applicable read limit; never label submission
 or enrichment as a status read. These calls still use the guarded ledger;
 missing actual charges remain unknown, even when the reserved bound is zero.
 
-For built-in public-web tools, set `provider: "public_web"` and use
-`--lookup-file` with `--plan-only`; code supplies zero cost/calls. Execute the planned search/read through the available tool.
-Write only the observed response to a separate UTF-8 JSON file, for example
-`{"status":"ok","results":[{"url":"https://example.com/news","text":"Observed source text"}]}`,
-then attach it to the planned route:
+For built-in public-web tools, plan a single discovery pilot as an object:
 
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
-  reports/<run-id>/results.json --complete <route-id> \
-  --response-file reports/<run-id>/web-response.json
+  reports/<run-id>/results.json --lookup-file - --plan-only <<'JSON'
+{"provider":"public_web","scope":"discovery","phase":"account_discovery",
+ "purpose":"Find recent payments partnerships","approach":"official-announcements",
+ "request":{"operation":"search_query","query":"Singapore payments partnership announcements"}}
+JSON
 ```
 
-The helper retains run/route identity and progress metadata, saves the response,
-then records it. `operation` is optional but must match the plan; `error` may
-describe an observed failure. Do not label a failed check `no_results` or a pending
-outcome complete. Do not edit receipt metadata. A saved response cannot be
-replaced; recover an interrupted update using `--complete <route-id>` alone.
-This path records observed evidence and never invokes a browser or paid provider.
+Code supplies zero cost/calls and the route ID. Execute the planned search/read
+through the available web tool. Include its observed response in the route's
+`response` when [saving your review](#save-a-review), together with company
+findings. Supply observed status/results only; receipt metadata comes from code.
+`operation` is optional but must match the plan; `error` may describe a failure.
+Never label a failure `no_results` or a pending outcome complete. Saving a review
+does not invoke a browser or provider.
 
 The helper never infers qualification or market exhaustion. Assess the saved
 evidence and submit company/route decisions together with `--review-file` below.
@@ -149,10 +157,14 @@ raw fields only for a missing fact or contradiction; full receipts remain saved.
 
 ## Save a review
 
-Save findings as they become available; do not rebuild the full company row.
-A `companies` item identifies `scope` and only the fields being updated:
+Save each company decision when made, including supported rejections and
+unresolved gaps. Refine the record as new facts arrive. A `companies` item
+identifies `scope` and only the fields being updated. One call can also save
+the observed web response and close its reviewed route:
 
-```json
+```bash
+python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
+  reports/<run-id>/results.json --review-file - <<'JSON'
 {
   "companies": [{
     "scope": "example.com",
@@ -164,8 +176,11 @@ A `companies` item identifies `scope` and only the fields being updated:
       "claim": "The announcement has no verified date yet.", "evidence": []
     }]
   }],
-  "routes": [{"route_id": "<returned-route-id>", "reason": "Reviewed the saved announcement; its date is not established."}]
+  "routes": [{"route_id": "<returned-route-id>",
+    "response": {"status":"ok","results":[{"url":"https://example.com/news","text":"Observed announcement text without a date."}]},
+    "reason": "Reviewed the announcement; its date is not established."}]
 }
+JSON
 ```
 
 `company` updates the supplied factual fields. `qualification_checks` updates
@@ -185,15 +200,14 @@ evidence/contact gates; a missing fact cannot become a rejection without an
 evidenced required mismatch. Set `stage: "contact"` after account review passes,
 with remaining buyer gaps in `reason_text`.
 
-```bash
-python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
-  reports/<run-id>/results.json --review-file reports/<run-id>/review.json
-```
-
-`--review-file -` accepts stdin. The old `{state, row}` form remains available
-for complete replacements. `companies`, `routes` and `next_actions` are optional;
-omitted records remain intact. Usually execute your next choice directly with
-`--lookup-file`; supply `next_actions` only for concrete work that needs saving.
+`response` is optional and only for observed public-web results; provider
+responses are already saved by their lookup. All attached responses are checked
+before any are written. Responses persist before the company/route review:
+if that review fails or is interrupted, correct and resubmit the same review.
+Already saved responses stay immutable; never repeat research or a paid call
+to repair a save. `companies`, `routes` and `next_actions` are optional;
+omitted records remain intact. Execute your next choice with `--lookup-file -`;
+supply `next_actions` only for concrete work that needs saving.
 
 One atomic update saves the selected company rows, closes reviewed routes,
 retires their completed actions, removes speculative follow-ups for reviewed
@@ -214,22 +228,31 @@ failed calls presented as exhausted, or decisions contradicting the saved
 employee range. It does not infer source credibility or qualify companies for
 you. Full strict output validation still checks delivery.
 
+### Compatibility and recovery
+
+File paths remain supported instead of `-`. Existing `--input-file`
+action/request envelopes, `--batch-files` and complete `{state, row}` reviews
+remain available for older callers. Use the concise forms above for new work.
+`--complete <route-id>` recovers an already saved response without dispatch;
+`--complete <route-id> --response-file -` can attach an observed web response
+alone. Neither recovery path can replace an existing response or change its
+run identity.
+
 ## Concurrent company checks
 
 After the pilot, use one agent and up to three ready checks for different
 companies. Use fewer when fewer checks are ready or the remaining lead shortfall
 is smaller. Batch ready checks instead of calling them one by one; different
 companies may be at different phases. Do not wait to fill a batch.
-Save the same concise lookup objects above as an array in `batch.json`:
+Supply the same concise lookup objects above as an array on stdin:
 
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
-  reports/<run-id>/results.json --lookup-file reports/<run-id>/batch.json
+  reports/<run-id>/results.json --lookup-file -
 ```
 
-The existing `--batch-files` option remains compatible with one array file or
-multiple individual attempt files. All paths use the same execution, independence
-and budget checks. The helper validates every input with the existing provider
+All paths use the same execution, independence and budget checks.
+The helper validates every input with the existing provider
 validators before planning or spending. Malformed fields identify their batch item
 and stop the entire batch without changing run state.
 

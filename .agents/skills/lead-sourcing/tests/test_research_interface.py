@@ -237,6 +237,30 @@ class LookupTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(), before)
             self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
 
+    def test_input_errors_name_the_batch_item_and_the_correction(self):
+        cases = [(dict(lookup(), provider="web"), r"lookup\[1\].provider.*deepline, scrapingdog, public_web"),
+                 (dict(lookup(), scope=""), r"lookup\[1\].scope must be a non-empty string"),
+                 (dict(lookup(), action={}), r"lookup\[1\] has unexpected fields: action")]
+        before, ledger = self.path.read_bytes(), guard.ledger_path(self.path).read_bytes()
+        for bad, message in cases:
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                runner.run_lookup(self.path, [lookup("other.example"), bad], execute=lambda *_: self.fail("dispatched"))
+            self.assertEqual(self.path.read_bytes(), before)
+            self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
+
+    def test_review_reminder_is_derived_and_does_not_block_new_research(self):
+        self.describe()
+        result = runner.run_lookup(self.path, lookup(), execute=self.fixture.paid_response)
+        self.assertEqual(result["review_due"], {"count": 1, "scopes": ["builder.example"]})
+        result = runner.run_lookup(self.path, lookup("other.example", query="other"), execute=self.fixture.paid_response)
+        self.assertEqual(result["review_due"]["count"], 2)
+        doc = json.loads(self.path.read_text())
+        self.assertEqual(doc["unresolved"], [])  # Code did not invent a qualification judgment.
+        builder_route = next(r["route_id"] for r in doc["routes"] if r.get("scope") == "builder.example")
+        result = runner.save_review(self.path, {"companies": [{"state": "unresolved", "row": company("builder.example")}],
+            "routes": [{"route_id": builder_route, "reason": "Reviewed; the dated signal remains unknown"}]})
+        self.assertEqual(result["review_due"], {"count": 1, "scopes": ["other.example"]})
+
     def test_missing_description_and_unknown_price_never_dispatch(self):
         with self.assertRaisesRegex(ValueError, "Describe"):
             runner.run_lookup(self.path, lookup(), execute=lambda *_: self.fail("dispatched"))
@@ -357,6 +381,100 @@ class IncrementalReviewTests(unittest.TestCase):
             self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
 
 
+class CombinedWebReviewTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = fixtures.AttemptExecutionTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.path = self.fixture.path
+
+    def review(self, rid="web"):
+        return {"companies": [{"scope": "builder.example", "reason_text": "Recent date remains unverified",
+            "qualification_checks": [{"criterion": "recent_intent", "importance": "required", "status": "unknown",
+                "claim": "A project is described without a verified date", "evidence": []}]}],
+            "routes": [{"route_id": rid, "reason": "Reviewed the observed project page",
+                "response": {"status": "ok", "results": [{"url": "https://builder.example/news", "text": "Project described"}]}}]}
+
+    def test_stdin_lookup_then_combined_review_persists_without_input_files(self):
+        command = [sys.executable, runner.__file__, str(self.path)]
+        request = {"provider": "public_web", "scope": "builder.example", "phase": "account_verification",
+            "purpose": "Review the dated project", "request": {"operation": "open", "url": "https://builder.example/news"}}
+        before_files = set(self.path.parent.iterdir())
+        subprocess.run(command + ["--lookup-file", "-", "--plan-only"], input=json.dumps(request), text=True, capture_output=True, check=True)
+        rid = json.loads(self.path.read_text())["stop_audit"]["route_frontier"][-1]["route_id"]
+        receipt = self.path.parent / "receipts" / (rid + ".json")
+        metadata = json.loads(receipt.read_text())
+        ledger = guard.ledger_path(self.path).read_bytes()
+        result = subprocess.run(command + ["--review-file", "-"], input=json.dumps(self.review(rid)), text=True, capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout)["review_due"]["count"], 0)
+        doc = json.loads(self.path.read_text())
+        self.assertEqual(len(doc["unresolved"]), 1)
+        self.assertEqual(doc["stop_audit"]["route_frontier"][-1]["state"], "exhausted")
+        saved = json.loads(receipt.read_text())
+        self.assertEqual(saved["results"], self.review(rid)["routes"][0]["response"]["results"])
+        for key in ("attempt", "request_fingerprint", "run_fingerprint", "accepted_before", "progress_before"):
+            self.assertEqual(saved[key], metadata[key])
+        self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
+        self.assertEqual(set(self.path.parent.iterdir()) - before_files, {self.path.parent / "receipts"})
+        original = json.loads(self.path.read_text()), receipt.read_bytes()
+        subprocess.run(command + ["--review-file", "-"], input=json.dumps(self.review(rid)), text=True, capture_output=True, check=True)
+        self.assertEqual((json.loads(self.path.read_text()), receipt.read_bytes()), original)
+
+    def test_invalid_review_retains_observation_for_safe_retry(self):
+        receipt = self.fixture.plan_web()
+        bad = self.review()
+        bad["companies"][0]["state"] = "accepted"  # Incomplete contact/evidence fails the existing gate.
+        ledger = guard.ledger_path(self.path).read_bytes()
+        with self.assertRaises(ValueError):
+            runner.save_review(self.path, bad)
+        self.assertEqual(json.loads(self.path.read_text())["accepted"], [])
+        saved = receipt.read_bytes()
+        self.assertEqual(json.loads(saved)["status"], "ok")
+        runner.save_review(self.path, self.review())
+        self.assertEqual(receipt.read_bytes(), saved)
+        self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
+
+    def test_all_observations_are_checked_before_writing_and_paid_receipts_are_protected(self):
+        first = self.fixture.plan_web("first")
+        spec = self.fixture.spec("second")
+        spec["action"]["provider"] = "public_web"
+        spec["request"] = {"operation": "search", "query": "Another source"}
+        second = Path(runner.run_attempt(self.path, spec, plan_only=True)["receipt_file"])
+        review = self.review("first")
+        review["routes"].extend(self.review("second")["routes"])
+        for extra in ({"run_fingerprint": "other-run"}, {"operation": "wrong"}):
+            bad = copy.deepcopy(review)
+            bad["routes"][1]["response"].update(extra)
+            original = self.path.read_bytes(), first.read_bytes(), second.read_bytes(), guard.ledger_path(self.path).read_bytes()
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, r"review.routes\[1\].response"):
+                runner.save_review(self.path, bad)
+            self.assertEqual((self.path.read_bytes(), first.read_bytes(), second.read_bytes(), guard.ledger_path(self.path).read_bytes()), original)
+        runner.run_attempt(self.path, self.fixture.spec("paid", paid=True), execute=self.fixture.paid_response)
+        paid = self.path.parent / "receipts/paid.json"
+        before, ledger = paid.read_bytes(), guard.ledger_path(self.path).read_bytes()
+        with self.assertRaisesRegex(ValueError, "only for planned public-web"):
+            runner.save_review(self.path, self.review("paid"))
+        self.assertEqual(paid.read_bytes(), before)
+        self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
+
+    def test_interrupted_recording_recovers_from_same_combined_review(self):
+        receipt = self.fixture.plan_web()
+        with patch.object(runner, "finish_attempt", side_effect=OSError("interrupted")), self.assertRaises(OSError):
+            runner.save_review(self.path, self.review())
+        saved = receipt.read_bytes()
+        self.assertEqual(json.loads(self.path.read_text())["routes"], [])
+        runner.save_review(self.path, self.review())
+        self.assertEqual(receipt.read_bytes(), saved)
+        self.assertEqual(len(json.loads(self.path.read_text())["routes"]), 1)
+
+    def test_missing_input_file_explains_direct_input(self):
+        result = subprocess.run([sys.executable, runner.__file__, str(self.path), "--lookup-file", str(self.path.parent / "missing.json")],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Input file does not exist", result.stderr)
+        self.assertIn("JSON on stdin", result.stderr)
+
+
 class SavedWorkbookJourneyTests(unittest.TestCase):
     def test_start_lookup_incremental_review_and_saved_workbook(self):
         """Use only the public helpers, with captured synthetic provider responses."""
@@ -379,13 +497,13 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
         runner.run_lookup(path, {"provider": "public_web", "scope": "example.com", "phase": "account_verification",
             "purpose": "Review the business and dated integration", "request": {"operation": "open", "url": "https://example.com/news"}}, plan_only=True)
         rid = json.loads(path.read_text())["stop_audit"]["route_frontier"][-1]["route_id"]
-        runner.complete_public_web(path, rid, {"status": "ok", "results": [{"url": "https://example.com/news",
-            "text": row["account_fit"]["evidence_text"] + " " + row["signal_evidence"]["evidence_text"]}]})
+        observed = {"status": "ok", "results": [{"url": "https://example.com/news",
+            "text": row["account_fit"]["evidence_text"] + " " + row["signal_evidence"]["evidence_text"]}]}
         for evidence in (row["account_fit"], row["signal_evidence"], row["primary_contact"]):
             evidence["source"] = {"provider": "public_web", "operation": "open", "route_id": rid}
         runner.save_review(path, {"companies": [{"scope": "example.com", "company": row["company"],
             "reason_text": "Company evidence reviewed; contact checks pending"}],
-            "routes": [{"route_id": rid, "reason": "Reviewed factual business and integration evidence"}]})
+            "routes": [{"route_id": rid, "response": observed, "reason": "Reviewed factual business and integration evidence"}]})
 
         # Replace an unresolved observation with selected current evidence.
         # The optional signal tag must survive omission from the second update.

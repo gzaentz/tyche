@@ -43,7 +43,7 @@ def run_lookup(run_file, lookup, *, execute=None, plan_only=False):
     values = lookup if is_batch else [lookup]
     if not 1 <= len(values) <= 3:
         raise ValueError("provide one lookup or at most three independent lookups")
-    specs = [research_input.prepare_lookup(value) for value in values]
+    specs = [research_input.prepare_lookup(value, f"lookup[{index}]") for index, value in enumerate(values)]
     # Validate every envelope before reading contracts or creating state.
     for index, spec in enumerate(specs):
         adapter, action, request = _validate_spec(spec, f"lookup[{index}]", plan_only=plan_only)
@@ -56,8 +56,10 @@ def run_lookup(run_file, lookup, *, execute=None, plan_only=False):
                 raise ValueError(f"Describe {request['tool']} in this run before execution")
             receipt = read_receipt(run_file, route["route_id"])["result"]
             research_input.check_tool_contract(receipt, request)
-    return (run_batch(run_file, specs, execute=execute, plan_only=plan_only) if is_batch else
-            run_attempt(run_file, specs[0], execute=execute, plan_only=plan_only))
+    result = (run_batch(run_file, specs, execute=execute, plan_only=plan_only) if is_batch else
+              run_attempt(run_file, specs[0], execute=execute, plan_only=plan_only))
+    result["review_due"] = review_reminder(budget_guard.read_object(Path(run_file)))
+    return result
 
 
 def refresh(document):
@@ -118,9 +120,23 @@ def _contact_gate(document, action):
     raise ValueError("contact lookup requires passing account evidence; unknown stays unresolved")
 
 
+def review_reminder(document):
+    """An advisory derived from existing records, not another research gate."""
+    saved = {_company_key(row) for state in ("accepted", "unresolved", "rejected")
+             for row in document.get(state, []) if isinstance(row, dict)}
+    open_ids = {r.get("route_id") for r in document.get("stop_audit", {}).get("route_frontier", [])
+                if isinstance(r, dict) and r.get("state") == "continuable"}
+    scopes = sorted({r["scope"] for r in document.get("routes", [])
+                     if isinstance(r, dict) and r.get("scope") not in (None, "discovery") and r.get("entity_type") != "tool_catalog"
+                     and r.get("provider_status") in DETERMINATE_PROVIDER_STATUSES
+                     and (r["scope"] not in saved or r.get("route_id") in open_ids)})
+    return {"count": len(scopes), "scopes": scopes[:3]}
+
+
 def run_status(document, decision):
     """The saved request and actionable work, without replaying the entire audit."""
     return {"request": document["request"], "summary": document.get("summary", {}),
+            "review_due": review_reminder(document),
             "next_actions": document.get("stop_check", {}).get("next_actions", []),
             "pending_routes": [{k: r.get(k) for k in ("route_id", "scope", "state", "reason")}
                                for r in document.get("stop_audit", {}).get("route_frontier", [])
@@ -160,12 +176,34 @@ def finalize_run(run_file):
 
 
 def save_review(run_file, review):
-    """Save explicit company/route judgments in one transaction; never dispatch."""
+    """Preserve optional web observations, then atomically save judgments; never dispatch."""
     if not isinstance(review, dict) or set(review) - {"companies", "routes", "next_actions"}:
         raise ValueError("review accepts only companies, routes and next_actions; the saved request is authoritative")
     for key in ("companies", "routes", "next_actions"):
         if not isinstance(review.get(key, []), list):
             raise ValueError(f"review.{key} must be an array")
+    review = copy.deepcopy(review)
+    observations = []
+    seen = set()
+    # Validate every attached response before saving any. Receipts are saved
+    # first so a rejected/interrupted judgment can be retried without research.
+    for index, item in enumerate(review.get("routes", [])):
+        label = f"review.routes[{index}]"
+        research_input.object_fields(item, {"route_id", "reason", "state", "continuation_route_ids", "response"}, label)
+        route_id = research_input.text(item.get("route_id"), label + ".route_id")
+        research_input.text(item.get("reason"), label + ".reason")
+        if route_id in seen:
+            raise ValueError(f"{label}.route_id duplicates {route_id}; review each route once")
+        seen.add(route_id)
+        if "response" in item:
+            response = item.pop("response")
+            try:
+                _public_web_observation(read_receipt(run_file, route_id)["result"], response)
+            except ValueError as exc:
+                raise ValueError(f"{label}.response: {exc}") from exc
+            observations.append((route_id, response))
+    for route_id, response in observations:
+        complete_public_web(run_file, route_id, response, check_stop=False)
     result = {}
 
     def update(document):
@@ -284,7 +322,7 @@ def _validate_spec(spec, label="input", *, plan_only=False):
         if not isinstance(action.get(field), str) or not action[field].strip():
             raise ValueError(f"{label}.action.{field} must be a non-empty string")
     if action["phase"] not in {"account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"}:
-        raise ValueError(f"{label}.action.phase is not a sourcing phase")
+        raise ValueError(f"{label}.action.phase must be account_discovery, account_verification, contact_discovery, contact_verification, or email_validation")
     provider = action["provider"]
     if provider == "public_web" and not plan_only:
         raise ValueError("public web: use --plan-only, then record the observed result with --complete")
@@ -504,7 +542,7 @@ def run_batch(run_file, specs, *, execute=None, plan_only=False):
         if rid in ids or not catalog and scope in scopes:
             raise ValueError("batch actions need unique route IDs and distinct canonical company scopes")
         if not catalog and action["phase"] not in {"account_verification", "contact_discovery", "contact_verification", "email_validation"}:
-            raise ValueError("batch mode is for company checks; run discovery pilots separately")
+            raise ValueError("batch mode is for company checks; run discovery pilots separately as a single lookup object, not an array")
         ids.add(rid)
         if not catalog:
             scopes.add(scope)
@@ -601,14 +639,29 @@ def read_receipt(run_file, route_id):
     return {"route_id": route_id, "receipt_file": str(path), "result": body}
 
 
-def complete_public_web(run_file, route_id, response):
-    """Attach observed web results to their saved plan, never to a paid receipt."""
-    if not isinstance(response, dict) or set(response) - {"status", "operation", "results", "error"}:
-        raise ValueError("web response accepts only status, operation, results and error; receipt metadata is helper-owned")
+def _public_web_observation(body, response):
+    """Validate an observation against the original plan without changing it."""
+    try:
+        research_input.object_fields(response, {"status", "operation", "results", "error"}, "web response")
+    except ValueError as exc:
+        raise ValueError(f"{exc}; receipt metadata is helper-owned") from exc
     if response.get("status") not in ATTEMPT_STATUSES or not isinstance(response.get("results"), list):
         raise ValueError("web response needs an observed result or failure status and a results array; pending outcomes must be recovered")
     if response["status"] == "no_results" and response["results"]:
         raise ValueError("no_results cannot contain result rows")
+    if body.get("provider") != "public_web":
+        raise ValueError("observed responses are only for planned public-web checks; recover provider receipts with --complete")
+    operation = body["attempt"]["request"]["operation"]
+    observed = dict(response, operation=response.get("operation", operation))
+    if observed["operation"] != operation:
+        raise ValueError("web response operation does not match the planned request")
+    if body.get("status") != "pending" and any(body.get(key) != value for key, value in observed.items()):
+        raise ValueError("a saved response cannot be replaced; use --complete to recover it")
+    return observed
+
+
+def complete_public_web(run_file, route_id, response, *, check_stop=True):
+    """Attach observed web results to their saved plan, never to a paid receipt."""
     run_file = Path(run_file).resolve(strict=True)
     receipt = read_receipt(run_file, route_id)
     path = Path(receipt["receipt_file"])
@@ -616,18 +669,10 @@ def complete_public_web(run_file, route_id, response):
         # Recheck identity while holding the receipt lock. Save before recording
         # run state so --complete can recover without another search.
         read_receipt(run_file, route_id)
-        if body.get("provider") != "public_web":
-            raise ValueError("--response-file is only for planned public-web checks; recover provider receipts with --complete")
-        operation = body["attempt"]["request"]["operation"]
-        observed = dict(response, operation=response.get("operation", operation))
-        if observed["operation"] != operation:
-            raise ValueError("web response operation does not match the planned request")
-        if body.get("status") != "pending":
-            if any(body.get(key) != value for key, value in observed.items()):
-                raise ValueError("a saved response cannot be replaced; use --complete to recover it")
-        else:
+        observed = _public_web_observation(body, response)
+        if body.get("status") == "pending":
             body.update(observed, receipt_status="complete")
-    return finish_attempt(run_file, route_id, body)
+    return finish_attempt(run_file, route_id, body, check_stop=check_stop)
 
 
 def main():
@@ -640,7 +685,7 @@ def main():
     mode.add_argument("--batch-files", type=Path, nargs="+", help="1-3 company checks, as attempt files or one JSON array")
     mode.add_argument("--complete", help="record this route's saved normalized receipt, without dispatch")
     mode.add_argument("--receipt", help="read a saved route's compact evidence without dispatching or writing")
-    mode.add_argument("--review-file", type=Path, help="save company decisions and close reviewed routes together")
+    mode.add_argument("--review-file", type=Path, help="save company decisions, observed web responses and route reviews together; - reads stdin")
     mode.add_argument("--status", action="store_true", help="show the authoritative request and compact current work")
     mode.add_argument("--finalize", action="store_true", help="prepare reviewed completion metadata and run strict delivery validation")
     parser.add_argument("--plan-only", action="store_true", help="reserve public-web work before using the browser/search tool")
@@ -651,7 +696,11 @@ def main():
     if args.plan_only and not (args.lookup_file or args.input_file or args.batch_files):
         parser.error("--plan-only requires a lookup or attempt input")
     try:
-        read_input = lambda path: load_json(sys.stdin.read() if str(path) == "-" else path.read_text(encoding="utf-8"))
+        def read_input(path):
+            try:
+                return load_json(sys.stdin.read() if str(path) == "-" else path.read_text(encoding="utf-8"))
+            except FileNotFoundError as exc:
+                raise ValueError(f"Input file does not exist: {path}. Pass - and supply JSON on stdin to avoid a temporary file.") from exc
         if args.start_file:
             result = start_run(args.results, read_input(args.start_file))
         elif args.lookup_file:

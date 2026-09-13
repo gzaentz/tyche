@@ -67,13 +67,16 @@ judgments. The existing helpers handle the mechanical work:
 - `--lookup-file`: run the chosen lookup or up to three independent checks,
   supplying IDs, request metadata, budget reservations and saved receipts.
 - `--review-file`: save incremental company facts and explicit judgments,
-  preserving unrelated evidence and updating counts.
+  optionally including observed web responses in the same call.
 - `export_xlsx.mjs`: validate reviewed results, export and check the saved workbook.
 
 These are capabilities the agent chooses when needed, not a provider waterfall
 or fixed research sequence. The [helper interface](.agents/skills/lead-sourcing/references/adapter-io.md)
 reuses the current providers, ledger, validators and exporter; no new service,
 database or dependency is required. Existing action/request inputs still work.
+Pass `-` to supply helper JSON directly on stdin. Lookup and review responses
+include a compact reminder of companies awaiting review; it does not choose
+their qualification or block further research.
 Detailed safeguards and audit procedures are
 in [workflow-rules.md](.agents/skills/lead-sourcing/references/workflow-rules.md).
 Follow the skill's phase-specific reading links rather than loading every
