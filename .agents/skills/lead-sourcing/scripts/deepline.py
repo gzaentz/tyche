@@ -1590,36 +1590,54 @@ def _run_validated(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any
 
 
 def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_seconds: float, capture=None) -> Tuple[Dict[str, Any], int]:
+    timed_out = False
     try:
         returncode, stdout, stderr = _invoke(command, timeout_seconds)
     except CallTimeout as exc:
+        timed_out = True
+        stdout, stderr = exc.stdout, exc.stderr
+    parsed: Any = None
+    if stdout.strip():
         try:
-            partial = _json_from_text(exc.stdout) if exc.stdout else None
+            parsed = _json_from_text(stdout)
         except ValueError:
-            partial = None
-        if capture is not None and (exc.stdout or exc.stderr):
-            capture({"timed_out": True, "body": response_body(partial, exc.stdout), "stderr": exc.stderr})
+            pass
+    response = {"body": response_body(parsed, stdout), "stderr": stderr}
+    response.update({"timed_out": True} if timed_out else {"exit_code": returncode})
+    if capture is not None:
+        capture(response)
+    return normalize_response(request, response)
+
+
+def normalize_response(request: Dict[str, Any], response: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    """Interpret a captured response using the live adapter rules, without I/O."""
+    if not isinstance(response, dict) or "body" not in response:
+        raise ValueError("captured response requires its original body")
+    parsed = response["body"]
+    stdout = parsed if isinstance(parsed, str) else json.dumps(parsed, ensure_ascii=False)
+    if isinstance(parsed, str):
+        try:
+            parsed = _json_from_text(parsed)
+        except ValueError:
+            parsed = None
+    stderr = response.get("stderr", "")
+    if not isinstance(stderr, str):
+        raise ValueError("captured stderr must be text")
+    if response.get("timed_out") is True:
         body = {
             "status": "timeout",
             "provider": "deepline",
             "operation": request["operation"],
-            **_execution_metadata(partial),
+            **_execution_metadata(parsed),
         }
         if request.get("tool"):
             body["tool"] = request["tool"]
         if request.get("entity_type"):
             body["entity_type"] = request["entity_type"]
         return body, 0
-    except ConfigError:
-        raise
-    parsed: Any = None
-    if stdout.strip():
-        try:
-            parsed = _json_from_text(stdout)
-        except ValueError:
-            parsed = None
-    if capture is not None:
-        capture({"exit_code": returncode, "body": response_body(parsed, stdout), "stderr": stderr})
+    returncode = response.get("exit_code")
+    if type(returncode) is not int:
+        raise ValueError("captured response requires an exit code or timeout")
     # Hunter's observed data-absence error is not an endpoint or transport 404.
     if (request["operation"] == "execute" and request.get("tool") == "hunter_companies_find"
             and request.get("entity_type") == "company" and isinstance(parsed, dict)

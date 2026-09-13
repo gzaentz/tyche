@@ -23,6 +23,8 @@ def write_email_receipts(run_file, document):
                     raw = {'status':item['provider_status'],'error':{'message':'Upstream unavailable'}}
                 saved = {**source,'receipt_status':'complete','status':route['provider_status'],
                          'run_fingerprint':run_fingerprint(run_file),'request_fingerprint':fingerprint,
-                         'attempt':{'request':{'payload':{'email':item['email']}}},
-                         'provider_response':{'exit_code':0,'body':{'status':'ok','element':raw},'stderr':''}}
+                         'attempt':{'request':{'operation':'execute','tool':source['tool'],
+                                              'payload':{'email':item['email']}}},
+                         'provider_response':{'exit_code':1 if item.get('provider_status') else 0,
+                                              'body':raw if item.get('provider_status') else {'status':'ok','element':raw},'stderr':''}}
                 (directory/(rid+'.json')).write_text(json.dumps(saved))

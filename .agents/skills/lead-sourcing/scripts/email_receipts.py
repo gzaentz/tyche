@@ -23,6 +23,15 @@ def receipt_path(run_file, rid):
     return Path(run_file).resolve(strict=True).parent / "receipts" / (rid + ".json")
 
 
+def _saved_receipt(run_file, route):
+    saved = budget_guard.read_object(receipt_path(run_file, route.get("route_id")))
+    if saved.get("run_fingerprint") != budget_guard.run_fingerprint(run_file):
+        raise ValueError("email receipt belongs to another run or lacks run identity")
+    if not route.get("request_fingerprint") or route["request_fingerprint"] != saved.get("request_fingerprint"):
+        raise ValueError("email receipt does not match the route request")
+    return saved
+
+
 def saved_result(run_file, routes, source, email):
     """Return the exact address verdict, never a domain-level catch-all flag."""
     rid = source.get("route_id")
@@ -32,22 +41,23 @@ def saved_result(run_file, routes, source, email):
     if len(matching) != 1:
         raise ValueError("email validation requires one matching route")
     route = matching[0]
-    saved = budget_guard.read_object(receipt_path(run_file, rid))
+    saved = _saved_receipt(run_file, route)
     if (source.get("provider") != "deepline" or source.get("operation") != "execute"
             or any(route.get(k) != source.get(k) or saved.get(k) != source.get(k)
                    for k in ("provider", "operation", "tool"))
             or route.get("phase") != "email_validation" or saved.get("receipt_status") != "complete"
             or saved.get("pending_verification") or route.get("provider_status") != saved.get("status")):
         raise ValueError("requires a completed matching email-validation receipt")
-    if saved.get("run_fingerprint") != budget_guard.run_fingerprint(run_file):
-        raise ValueError("email receipt belongs to another run or lacks run identity")
-    if not route.get("request_fingerprint") or route["request_fingerprint"] != saved.get("request_fingerprint"):
-        raise ValueError("email receipt does not match the route request")
     response = saved.get("provider_response", {})
     if not isinstance(response, dict) or "body" not in response:
         raise ValueError("email receipt lacks the original provider response")
-    # Re-read the captured body; edited normalized results are not evidence.
+    # Reuse the live parser for verdicts and failures; saved labels are not evidence.
     records = [r for r in deepline._records(response["body"]) if deepline._is_email_validation_record(r)]
+    normalized, _ = deepline.normalize_response({"operation": "execute", "tool": source["tool"],
+        "entity_type": "email_validation", "limit": max(1, len(records))}, response)
+    if normalized.get("status") != saved.get("status") or normalized.get("pending_verification"):
+        raise ValueError("saved status conflicts with the original provider response or remains pending")
+    # An explicit address verdict still blocks fallback even if its envelope failed.
     matches = [r for r in records if _text(r.get("address", r.get("email"))) == _text(email)]
     if len(matches) == 1:
         record = matches[0]
@@ -59,8 +69,8 @@ def saved_result(run_file, routes, source, email):
     requested = saved.get("attempt", {}).get("request", {}).get("payload", {}).get("email")
     if not matches and (records or _text(requested) and _text(requested) != _text(email)):
         raise OtherEmail("saved receipt applies to another email")
-    if not records and saved.get("status") in FAILURES and _text(requested) == _text(email):
-        return {"email": email, "status": None, "provider_status": saved["status"]}
+    if not records and normalized.get("status") in FAILURES and _text(requested) == _text(email):
+        return {"email": email, "status": None, "provider_status": normalized["status"]}
     raise ValueError("original provider response must identify exactly one matching email")
 
 
@@ -96,10 +106,19 @@ def check_fallback(run_file, document, request):
     if found is None or not fallback_allowed(found):
         raise ValueError("BounceBan requires a saved same-email ZeroBounce catch-all/unknown or service failure; valid and hard-negative verdicts cannot use fallback")
     # A changed mode or route ID is not permission to repeat a billed verification.
-    for source in _sources(routes + document.get("stop_audit", {}).get("route_frontier", []), "bounceban"):
-        saved = budget_guard.read_object(receipt_path(run_file, source["route_id"]))
-        requested = saved.get("attempt", {}).get("request", {}).get("payload", {}).get("email")
-        if _text(requested) == _text(email):
+    seen = set()
+    for route in routes + document.get("stop_audit", {}).get("route_frontier", []):
+        if (route.get("provider") != "deepline" or route.get("operation") != "execute"
+                or route.get("phase") != "email_validation" or route.get("route_id") in seen):
+            continue
+        seen.add(route["route_id"])
+        path = receipt_path(run_file, route["route_id"])
+        if route.get("state") == "untried" and not path.exists():
+            continue  # Planned work has not entered preparation yet.
+        saved = _saved_receipt(run_file, route)
+        attempted = saved.get("attempt", {}).get("request", {})
+        if ("bounceban" in _text(attempted.get("tool"))
+                and _text(attempted.get("payload", {}).get("email")) == _text(email)):
             raise ValueError("BounceBan was already attempted for this email; recover its saved job")
 
 
