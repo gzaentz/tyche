@@ -1867,14 +1867,15 @@ def main() -> int:
 
     from budget_guard import audit_ledger, load_ledger
     try:
-        execution_budget = load_ledger(args.results)
+        execution_budget = load_ledger(args.results, allow_unbound=args.legacy_stop_policy and not args.check_stop)
     except (ValueError, OSError) as exc:
         output = {"errors": [f"budget ledger: {exc}"], "valid": False, "delivery_allowed": False}
         if args.check_stop:
             output.update(decision="repair_state", eligible_actions=[])
         print(json.dumps(output, sort_keys=True))
         return 2
-    ledger_errors = audit_ledger(args.results, document, state=execution_budget) if execution_budget is not None else []
+    ledger_errors = audit_ledger(args.results, document, state=execution_budget,
+                                 allow_unbound=args.legacy_stop_policy and not args.check_stop) if execution_budget is not None else []
     if ledger_errors:
         execution_budget = None
     if args.check_stop:

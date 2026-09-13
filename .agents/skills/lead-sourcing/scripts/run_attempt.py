@@ -270,6 +270,9 @@ def _prepare(run_file, spec):
 def finish_attempt(run_file, route_id, body, *, check_stop=True):
     """Record a saved response without dispatching anything (also the resume path)."""
     def finish(document):
+        if body.get("run_fingerprint") != budget_guard.run_fingerprint(run_file):
+            raise ValueError("saved response belongs to another run or lacks run identity; preserve it and reconcile its origin")
+        ledger = budget_guard.load_ledger(run_file)
         entry = next(r for r in document["stop_audit"]["route_frontier"] if r["route_id"] == route_id)
         old = next((r for r in document["routes"] if r["route_id"] == route_id), None)
         if old:
@@ -281,7 +284,6 @@ def finish_attempt(run_file, route_id, body, *, check_stop=True):
         if status not in DETERMINATE_PROVIDER_STATUSES | {"rate_limited", "auth_failed", "quota_exceeded", "timeout", "schema_error", "provider_error", "config_error"}:
             raise ValueError("save a normalized response with a determinate provider status")
         paid = action["paid_calls"]
-        ledger = budget_guard.load_ledger(run_file)
         call = ledger.get("calls", {}).get(route_id) if ledger else None
         if paid and call is None and body.get("request_sent") is False:
             paid = 0
@@ -321,6 +323,7 @@ def finish_attempt(run_file, route_id, body, *, check_stop=True):
 
 
 def _start_attempt(run_file, spec, *, plan_only=False):
+    budget_guard.load_ledger(run_file)  # Refuse imported state before planning or dispatch.
     if spec["action"]["provider"] == "public_web" and not plan_only:
         raise ValueError("public web: use --plan-only, then record the observed result with --complete")
     if plan_only and spec["action"]["provider"] != "public_web":
@@ -331,7 +334,8 @@ def _start_attempt(run_file, spec, *, plan_only=False):
     output = receipts / (prepared["action"]["id"] + ".json")
     redact = adapter.redact if adapter else lambda value: value
     metadata = {k: prepared[k] for k in ("progress_before", "accepted_before")}
-    metadata.update(request_fingerprint=prepared["action"]["request_fingerprint"], provider=prepared["action"]["provider"])
+    metadata.update(run_fingerprint=budget_guard.run_fingerprint(run_file),
+                    request_fingerprint=prepared["action"]["request_fingerprint"], provider=prepared["action"]["provider"])
     # Keep audit identity recoverable even if the main draft is damaged.
     metadata["attempt"] = copy.deepcopy({"action": prepared["action"],
                            "request": {k: v for k, v in request.items() if k != "spend"}})

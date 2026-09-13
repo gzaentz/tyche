@@ -45,6 +45,12 @@ milestones require a changed approach. Catalog reads do not count as progress.
 The helper saves `receipts/<action-id>.json` before updating run state. A crash
 leaves the route pending and retains any reservation. Resume a saved normalized
 response with `--complete <action-id>`; this only records it, never dispatches.
+New ledgers and helper receipts carry a fingerprint of the canonical results
+path. Resume in place: rewriting paths in a copied ledger or receipt does not
+make it belong to another run. Missing or mismatched identities require origin
+and billing reconciliation; never erase them, reset spend, or rerun uncertain calls.
+Historical ledgers without this marker remain available to the validator's
+read-only `--legacy-stop-policy`; that mode cannot authorize execution or delivery.
 It derives summary/review counts and cost totals from saved outcomes and receipts;
 unknown charges keep provider capacity unknown. It never marks the frontier complete.
 Each saved response also retains the action and redacted input in `attempt`,

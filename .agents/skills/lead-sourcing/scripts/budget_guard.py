@@ -4,6 +4,7 @@
 import argparse
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -54,9 +55,28 @@ def read_object(path):
     return value
 
 
-def load_ledger(run_file):
+def load_ledger(run_file, *, allow_unbound=False):
     path = ledger_path(run_file)
-    return read_object(path) if os.path.lexists(path) else None
+    state = read_object(path) if os.path.lexists(path) else None
+    if state is not None:
+        check_run_identity(run_file, state, allow_unbound=allow_unbound)
+    return state
+
+
+def run_fingerprint(run_file):
+    """Bind saved state to its original location, including after path rewrites."""
+    return hashlib.sha256(str(Path(run_file).resolve(strict=True)).encode("utf-8")).hexdigest()
+
+
+def check_run_identity(run_file, state, *, allow_unbound=False):
+    if state.get("version") != 1:
+        raise BudgetError("initialize the run budget ledger before execution")
+    if state.get("run_file") != str(Path(run_file).resolve(strict=True)):
+        raise BudgetError("ledger belongs to a different run; do not copy or reset budget state")
+    if allow_unbound and "run_fingerprint" not in state:
+        return  # Historical read-only audit; never authorizes execution.
+    if state.get("run_fingerprint") != run_fingerprint(run_file):
+        raise BudgetError("ledger run identity is missing or mismatched; preserve state and reconcile its origin")
 
 
 @contextmanager
@@ -129,7 +149,8 @@ def initialize(run_file, *, max_usd=None, scrapingdog_usd_per_credit=None, verif
     with transaction(path) as state:
         if state or path.exists():
             raise BudgetError("budget ledger already exists; resume it instead of resetting spend")
-        state.update(version=1, run_file=str(Path(run_file).resolve()), credit_limits=credits,
+        state.update(version=1, run_file=str(Path(run_file).resolve()),
+                     run_fingerprint=run_fingerprint(run_file), credit_limits=credits,
                      usd_limit=str(cap), usd_per_credit=rates,
                      next_lead_limit=None if next_lead is None else str(amount(next_lead, "next-lead cap")),
                      verification_reserve_credits=str(reserve), calls={}, blocked=None)
@@ -201,10 +222,7 @@ def reserve(spend, provider, *, verification=False):
     if not isinstance(accepted, list):
         raise BudgetError("accepted must be an array")
     with transaction(path) as state:
-        if state.get("version") != 1:
-            raise BudgetError("initialize the run budget ledger before any paid call")
-        if state["run_file"] != str(Path(spend["run_file"]).resolve()):
-            raise BudgetError("ledger belongs to a different run; do not copy or reset budget state")
+        check_run_identity(spend["run_file"], state)
         check_limits(document, state)
         calls = state["calls"]
         if route_id in calls:
@@ -218,6 +236,7 @@ def reserve(spend, provider, *, verification=False):
 
 def settle(path, route_id, billing):
     with transaction(path) as state:
+        check_run_identity(path.with_name(path.name.removesuffix(".budget.json")), state)
         call = state["calls"][route_id]
         if call["actual_credits"] is not None:
             raise BudgetError("charge is already settled")
@@ -251,17 +270,14 @@ def guarded_call(request, provider, execute):
     return body, code
 
 
-def audit_ledger(run_file, document, *, state=None):
+def audit_ledger(run_file, document, *, state=None, allow_unbound=False):
     """Cross-check final route accounting against dispatched calls, when present."""
     errors = []
     try:
-        state = load_ledger(run_file) if state is None else state
+        state = load_ledger(run_file, allow_unbound=allow_unbound) if state is None else state
         if state is None:
             return errors
-        if state.get("version") != 1:
-            raise BudgetError("invalid budget ledger version")
-        if state["run_file"] != str(Path(run_file).resolve()):
-            raise BudgetError("ledger belongs to a different run")
+        check_run_identity(run_file, state, allow_unbound=allow_unbound)
         check_limits(document, state)
         if state.get("blocked"):
             errors.append(state["blocked"])

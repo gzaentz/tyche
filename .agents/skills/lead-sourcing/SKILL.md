@@ -16,6 +16,9 @@ dates and budget. Preserve the original wording in `request.txt`; change the
 saved criteria only when the user changes them. Do not add stricter criteria
 while researching. Use `run_attempt.py <results.json> --status` to resume from
 the saved request and compact pending work, not old logs or reconstructed plans.
+Keep run data in its original run directory. Do not import another run's results,
+ledger or receipts; project code and references remain shared. A copied snapshot
+is for inspection, not a continuation with rewritten paths or accounting.
 
 Read the [workflow rules](references/workflow-rules.md), [input contract](references/output-contract.md#input-contract),
 [lifecycle invariants](references/output-contract.md#lifecycle-invariants) and
