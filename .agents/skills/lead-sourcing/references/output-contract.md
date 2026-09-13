@@ -1320,7 +1320,8 @@ field sources.
   ICP: full containment passes, no overlap fails, partial overlap stays unknown.
 - Use the person's own `location.parsed.countryFull`/`country`, `state`, and
   `city`; retain `location.linkedinText` and country codes from the response.
-  Normalize unambiguous location text/codes when parsed fields are missing.
+  Use the response's country code when its parsed country is missing; leave
+  city/state blank when the response has no structured values for them.
   Never substitute employment location, company headquarters, profile language,
   or a guessed city for the person's location. Country is required for every
   accepted primary/backup contact; populate city and state whenever supported.
@@ -1332,9 +1333,16 @@ field sources.
   HarvestAPI company/profile getter. Missing facts or evidence stay unresolved.
 
 These fields are required independently of email/phone opt-outs.
-The validator, review acceptance, and exporter enforce the requirements. Old
-saved runs may need enrichment before re-export; do not invent evidence, change
-their requests, or overwrite historical files to make them pass.
+Review acceptance fills missing range/location values from the matching saved
+HarvestAPI response. Supplied values must agree; city/state stay blank when the
+response does not support them. The same receipt check runs during strict
+validation and workbook export, reading the captured provider body rather than
+reviewer-written evidence text. It verifies the entity, run and request identity
+without another provider call. Keep `receipts/<route_id>.json` with the run.
+Old saved runs may need enrichment or receipt reconciliation before re-export;
+do not invent evidence, change their requests, or overwrite historical files to
+make them pass. Library-only structural checks without a run path are not a
+delivery gate; use the full strict validator CLI before delivery.
 
 ## `leads.xlsx` contract
 

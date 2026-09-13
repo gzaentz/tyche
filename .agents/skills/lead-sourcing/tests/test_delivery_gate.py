@@ -8,6 +8,7 @@ import unittest
 
 from test_output_contract import VALIDATOR_PATH, cost_result, shortfall_result
 from test_stop_policy import STARTED_AT, action, stop_document
+from linkedin_fixtures import write_linkedin_receipts
 
 
 def checkpoint_document():
@@ -53,14 +54,17 @@ class DeliveryGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "results.json"
             path.write_text(json.dumps(document), encoding="utf-8")
+            write_linkedin_receipts(path, document)
+            path.write_text(json.dumps(document), encoding="utf-8")
             before = path.read_bytes()
+            files_before = {p: p.read_bytes() for p in Path(directory).rglob("*") if p.is_file()}
             result = subprocess.run(
                 [sys.executable, str(VALIDATOR_PATH), str(path), *flags],
                 capture_output=True, text=True, timeout=10,
             )
             self.assertNotIn("Traceback", result.stderr)
             self.assertEqual(path.read_bytes(), before)
-            self.assertEqual(list(Path(directory).iterdir()), [path])
+            self.assertEqual({p: p.read_bytes() for p in Path(directory).rglob("*") if p.is_file()}, files_before)
             return result.returncode, json.loads(result.stdout)
 
     def test_old_40_call_cap_cannot_authorize_shortfall_or_block_paid_recovery(self):

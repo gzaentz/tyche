@@ -352,6 +352,7 @@ class ExportXlsxTests(unittest.TestCase):
         self.assertIn("--node-modules is required", result.stderr)
 
     def test_writes_valid_styled_workbook_when_runtime_is_configured(self):
+        from linkedin_fixtures import write_linkedin_receipts
         node_modules = os.environ.get("TYCHE_WORKSPACE_NODE_MODULES")
         if not self.node or not node_modules:
             self.skipTest("Codex workbook runtime is not configured")
@@ -363,6 +364,9 @@ class ExportXlsxTests(unittest.TestCase):
                 json.dumps(accepted_document(["email", "phone"])),
                 encoding="utf-8",
             )
+            document = json.loads(source.read_text())
+            write_linkedin_receipts(source, document)
+            source.write_text(json.dumps(document))
             result = subprocess.run(
                 [
                     self.node,

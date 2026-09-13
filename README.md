@@ -147,8 +147,10 @@ Contact location and company size come from LinkedIn through HarvestAPI.
 Every accepted contact requires `country`; `city` and `state` are populated
 when supported by the person's profile. Every accepted company requires its
 published `employee_range`, not LinkedIn's associated-member count. Saved field
-evidence links each value to a successful HarvestAPI getter. These requirements
-also apply when email/phone fields are optional.
+evidence links each value to a successful HarvestAPI getter. Review acceptance
+fills missing values from the captured response; acceptance, strict validation,
+and workbook export reject values that disagree with it. These local checks
+reuse saved receipts and also apply when email/phone fields are optional.
 
 For grouped contact requests, keep `requested_roles` as the required union of
 the optional `contact_role_groups.primary` and `.secondary` arrays. TYCHE

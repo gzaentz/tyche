@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from test_output_contract import VALIDATOR, VALIDATOR_PATH, cost_result
+from linkedin_fixtures import write_linkedin_receipts
 
 
 class ProgressMatrixTests(unittest.TestCase):
@@ -65,6 +66,8 @@ class ProgressMatrixTests(unittest.TestCase):
             path = Path(directory) / "results.json"
             document = cost_result([route])
             document["stop_check"] = {"started_at": "2026-01-01T00:00:00Z", "next_actions": []}
+            path.write_text(json.dumps(document))
+            write_linkedin_receipts(path, document)
             path.write_text(json.dumps(document))
             original = path.read_bytes()
             result = subprocess.run([sys.executable, str(VALIDATOR_PATH), str(path), "--show-progress", "--show-cost-summary"],

@@ -14,6 +14,8 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from linkedin_receipts import _linkedin_url, employee_range_bounds, linkedin_receipt_errors
+
 
 ACTIONABLE_FRONTIER_STATES = {"untried", "continuable"}
 FINAL_FRONTIER_STATES = {"exhausted", "blocked"}
@@ -1094,26 +1096,6 @@ def _validate_client_output(accepted: list, errors: list[str]) -> None:
         ):
             errors.append(f"{path}.company requires an exact canonical industry/sub_industry pair")
 
-def _linkedin_url(value: Any, kind: str) -> bool:
-    """Require a direct company/profile URL, not a post, search or lookalike host."""
-    return isinstance(value, str) and re.fullmatch(
-        rf"https?://(?:[a-z0-9-]+\.)*linkedin\.com/{kind}/[a-z0-9_%~.-]+/?(?:[?#][^\s]*)?",
-        value.strip(), re.IGNORECASE,
-    ) is not None
-
-
-def employee_range_bounds(value: Any) -> Optional[tuple[int, Optional[int]]]:
-    """Read a published range without converting a member count into a band."""
-    if not isinstance(value, str):
-        return None
-    value = re.sub(r"[\s,]", "", value).replace("–", "-").replace("—", "-")
-    match = re.fullmatch(r"(\d+)(?:-(\d+)|(\+))", value)
-    if not match:
-        return None
-    lower, upper = int(match[1]), int(match[2]) if match[2] else None
-    return (lower, upper) if upper is None or upper >= lower else None
-
-
 def _validate_harvest_evidence(evidence: Any, linkedin: Any, kind: str, path: str,
                               routes: dict, errors: list[str]) -> None:
     evidence = evidence if isinstance(evidence, dict) else {}
@@ -1182,9 +1164,10 @@ def linkedin_field_errors(document: dict) -> list[str]:
     return errors
 
 
-def accepted_errors(document: dict) -> list[str]:
+def accepted_errors(document: dict, *, run_file=None, fill_missing=False) -> list[str]:
     """Shared accepted-lead contract for saving a review and final delivery."""
-    errors = linkedin_field_errors(document)
+    errors = linkedin_receipt_errors(document, run_file, fill_missing=fill_missing) if run_file is not None else []
+    errors.extend(linkedin_field_errors(document))
     request, accepted = document.get("request", {}), document.get("accepted", [])
     if document.get("schema_version") == "1.2":
         _validate_client_output(accepted, errors)
@@ -1533,7 +1516,7 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
     return result
 
 
-def validate_run(document: Any, *, require_stop_check: bool = False, now: Optional[datetime] = None, execution_budget=None) -> list[str]:
+def validate_run(document: Any, *, require_stop_check: bool = False, now: Optional[datetime] = None, execution_budget=None, run_file=None) -> list[str]:
     errors: list[str] = []
     if not isinstance(document, dict):
         return ["results.json must contain one JSON object"]
@@ -1565,7 +1548,7 @@ def validate_run(document: Any, *, require_stop_check: bool = False, now: Option
     if summary.get("accepted_companies") != accepted_count:
         errors.append("summary.accepted_companies must equal len(accepted)")
 
-    errors.extend(accepted_errors(document))
+    errors.extend(accepted_errors(document, run_file=run_file))
 
     _validate_budget_accounting(document, errors)
     _validate_cost_accounting(document, errors)
@@ -1889,7 +1872,8 @@ def main() -> int:
         print(json.dumps(output, sort_keys=True))
         return 2 if output["errors"] else 0
     checked_at = datetime.now(timezone.utc)
-    errors = validate_run(document, require_stop_check=not args.legacy_stop_policy, now=checked_at, execution_budget=execution_budget)
+    errors = validate_run(document, require_stop_check=not args.legacy_stop_policy, now=checked_at, execution_budget=execution_budget,
+                          run_file=None if args.legacy_stop_policy else args.results)
     errors.extend(ledger_errors)
     output: dict[str, Any] = {"valid": not errors, "errors": errors, "stop_policy": "legacy" if args.legacy_stop_policy else "strict"}
     stop_check = evaluate_stop(document, now=checked_at, execution_budget=execution_budget)

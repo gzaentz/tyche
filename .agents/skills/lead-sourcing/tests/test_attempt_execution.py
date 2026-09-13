@@ -317,6 +317,56 @@ class AttemptExecutionTests(unittest.TestCase):
     def test_batch_cli_saves_actual_wrapper_receipts_and_passes_stop_check(self):
         self.check_batch_cli()
 
+    def test_provider_status_controls_attempt_exit_without_discarding_adapter_errors(self):
+        statuses = ["ok", "partial", "no_results", *sorted(VALIDATOR.BLOCKING_PROVIDER_STATUSES)]
+        for index, status in enumerate(statuses):
+            spec = self.spec(f"status-{index}", query=status, approach=status)
+            result = runner.run_attempt(self.path, spec, execute=lambda request, capture: (
+                {"provider": "deepline", "operation": "search", "status": status, "results": []}, 0))
+            self.assertEqual(result["exit_code"], 0 if status in {"ok", "partial", "no_results"} else 2)
+            self.assertEqual(result["provider_status"], status)
+        result = runner.run_attempt(self.path, self.spec("settlement-error", query="settlement", approach="settlement"),
+            execute=lambda request, capture: ({"provider": "deepline", "operation": "search", "status": "ok", "results": []}, 3))
+        self.assertEqual(result["exit_code"], 3)
+
+    def test_single_cli_provider_failure_returns_nonzero_and_preserves_receipt(self):
+        self.check_failure_cli(batch=False)
+
+    def test_batch_cli_provider_failure_returns_nonzero_and_keeps_successful_siblings(self):
+        self.check_failure_cli(batch=True)
+
+    def check_failure_cli(self, *, batch):
+        stub = self.path.parent / "fake-deepline"
+        stub.write_text(f"#!{sys.executable}\nimport json, sys\n"
+            "with open(sys.argv[sys.argv.index('--input') + 1][1:]) as stream: payload = json.load(stream)\n"
+            "failed = payload['query'] == 'company-0.example'\n"
+            "print(json.dumps({'status': 'rate_limited' if failed else 'no_results', 'results': [], "
+            "'billing': {'credits_charged': 0.1, 'cost_usd': 0.01}}))\n"
+            "sys.exit(2 if failed else 0)\n")
+        stub.chmod(0o700)
+        specs = self.company_specs() if batch else self.company_specs()[:1]
+        source = self.path.parent / "attempts.json"
+        source.write_text(json.dumps(specs if batch else specs[0]))
+        result = subprocess.run([sys.executable, runner.__file__, str(self.path),
+            "--batch-files" if batch else "--input-file", str(source)],
+            env=dict(os.environ, DEEPLINE_BIN=str(stub)), capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 2, result.stderr + result.stdout)
+        output = json.loads(result.stdout)
+        self.assertEqual(output["exit_code"], 2)
+        attempts = output["attempts"] if batch else [output]
+        self.assertEqual([a["provider_status"] for a in attempts], ["rate_limited"] + (["no_results"] * 2 if batch else []))
+        self.assertEqual([a["exit_code"] for a in attempts], [2] + ([0, 0] if batch else []))
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(len(saved["routes"]), len(specs))
+        self.assertEqual(saved["stop_audit"]["route_frontier"][0]["state"], "blocked")
+        for attempt in attempts:
+            receipt = json.loads(Path(attempt["receipt_file"]).read_text())
+            self.assertEqual(receipt["receipt_status"], "complete")
+            self.assertEqual(receipt["status"], attempt["provider_status"])
+            self.assertIn("provider_response", receipt)
+        self.assertEqual(budget_guard.audit_ledger(self.path, saved), [])
+        self.assertEqual(len(budget_guard.load_ledger(self.path)["calls"]), len(specs))
+
     def test_batch_array_uses_same_wrapper_receipts_and_budget(self):
         self.check_batch_cli(array_file=True)
 

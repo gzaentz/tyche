@@ -388,6 +388,7 @@ class ClientOutputTests(unittest.TestCase):
             self.assertTrue(set(parents).issubset(taxonomy["parent_industries"]))
 
     def test_actual_client_workbook_has_sources_typed_dates_and_full_prose(self):
+        from linkedin_fixtures import write_linkedin_receipts
         node_modules = os.environ.get("TYCHE_WORKSPACE_NODE_MODULES")
         if not self.node or not node_modules:
             self.skipTest("Bundled workbook runtime is not configured")
@@ -397,6 +398,8 @@ class ClientOutputTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source = pathlib.Path(directory) / "results.json"
             destination = pathlib.Path(directory) / "leads.xlsx"
+            source.write_text(json.dumps(document), encoding="utf-8")
+            write_linkedin_receipts(source, document)
             source.write_text(json.dumps(document), encoding="utf-8")
             result = subprocess.run(
                 [self.node, str(EXPORTER_PATH), str(source), str(destination), "--node-modules", node_modules],

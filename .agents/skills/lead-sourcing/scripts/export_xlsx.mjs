@@ -8,7 +8,8 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 
 export const XLSX_COLUMNS = [
   "Name",
@@ -477,6 +478,15 @@ export async function exportXlsx(document, destination, options = {}) {
   const clientOutput = isClientOutput(document);
   const columns = clientOutput ? CLIENT_XLSX_COLUMNS : XLSX_COLUMNS;
   const sourceRows = clientOutput ? sourcesFor(document) : [];
+  if (rows.length) {
+    if (!options.resultsPath) throw new ExportError("resultsPath is required to verify saved HarvestAPI receipts");
+    const checked = spawnSync(process.env.TYCHE_WORKSPACE_PYTHON || "python3", [
+      fileURLToPath(new URL("./linkedin_receipts.py", import.meta.url)), path.resolve(options.resultsPath),
+    ], { input: JSON.stringify(document), encoding: "utf8", timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
+    if (checked.error || checked.status !== 0) {
+      throw new ExportError(`LinkedIn receipt validation failed: ${checked.error?.message || checked.stdout || checked.stderr}`);
+    }
+  }
   const lastColumn = clientOutput ? "T" : "R";
   const { Workbook, SpreadsheetFile } = await loadArtifactTool(options.nodeModules);
   const workbook = Workbook.create();
@@ -651,7 +661,7 @@ async function main() {
     const args = process.argv.slice(2);
     const { resultsPath, destination, options } = parseExportArgs(args);
     const document = JSON.parse(await fs.readFile(resultsPath, "utf8"));
-    const receipt = await exportXlsx(document, destination, options);
+    const receipt = await exportXlsx(document, destination, { ...options, resultsPath });
     process.stdout.write(`${JSON.stringify({ exported: true, path: destination, rows: receipt.rows, columns: receipt.columns })}\n`);
     return 0;
   } catch (error) {

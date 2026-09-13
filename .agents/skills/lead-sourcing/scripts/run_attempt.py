@@ -110,7 +110,7 @@ def save_review(run_file, review):
         scoped = dict(document)
         for state in ("accepted", "unresolved", "rejected"):
             scoped[state] = [r for r in document.get(state, []) if _company_key(r) in changed]
-        problems = qualification_errors(scoped) + accepted_errors(scoped)
+        problems = accepted_errors(scoped, run_file=run_file, fill_missing=True) + qualification_errors(scoped)
         if problems:
             raise ValueError("; ".join(problems))
 
@@ -350,6 +350,9 @@ def _dispatch(adapter, request, capture, *, execute=None, plan_only=False):
             raise OSError("public-web plan could not be saved; recover its receipt before dispatch")
         return {"pending": True, "receipt_file": str(capture.path), **metadata}
     body, code = (execute or adapter.run)(request, capture.capture)
+    # Adapters can return valid JSON with exit 0 for a provider-level failure.
+    # Keep their nonzero codes, but never report a failed attempt as success.
+    code = code or (0 if body.get("status") in DETERMINATE_PROVIDER_STATUSES else 2)
     body.update(metadata)
     if not capture.finish(body):
         raise OSError("response could not be saved; recover the captured response, do not repeat the provider call")
@@ -464,8 +467,8 @@ def main():
         else:
             result = run_attempt(args.results, load_json(args.input_file.read_text()), plan_only=args.plan_only)
         print(json.dumps(cli_output(result), ensure_ascii=True, allow_nan=False))
-        if args.batch_files:
-            return result["exit_code"]
+        if args.batch_files or args.input_file:
+            return result.get("exit_code", 0)
     except (ValueError, OSError, KeyError, TypeError, StopIteration) as exc:
         parser.exit(2, str(exc) + "\n")
 

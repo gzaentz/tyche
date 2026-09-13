@@ -156,6 +156,11 @@ count against all caps and the verification reserve. A refused or failed member
 does not discard successful siblings. The batch returns all outcomes and exits
 nonzero if any member fails; recover saved receipts with `--complete`, never
 rerun the whole batch or retry an uncertain billed request.
+Single attempts follow the same exit-code rule: `ok`, `partial`, and `no_results`
+are successful provider outcomes; provider failures return nonzero even when
+the adapter successfully returned JSON. Adapter errors remain nonzero. Saved
+receipts, reservations and successful batch members are preserved. A successful
+attempt still requires evidence review and full delivery validation.
 The batch returns one final `stop_decision` after recording its outcomes; use
 that decision without a separate status or stop-check command.
 
