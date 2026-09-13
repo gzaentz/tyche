@@ -37,6 +37,17 @@ class HarvestLinkedInNormalizationTests(unittest.TestCase):
         self.assertIsNone(row["city"])
         self.assertIsNone(row["state"])
 
+    def test_country_only_profile_does_not_repeat_country_as_state(self):
+        location = {"linkedinText": "United Kingdom", "countryCode": "GB",
+                    "parsed": {"countryFull": "United Kingdom", "country": "UK",
+                               "state": "United Kingdom"}}
+        row = self.normalize({"firstName": "Ada", "linkedinUrl": "https://linkedin.com/in/ada-example",
+                              "location": location}, "profile")
+        self.assertEqual(row["country"], "United Kingdom")
+        self.assertIsNone(row["state"])
+        self.assertIsNone(row["city"])
+        self.assertEqual(row["location"], location)
+
     def test_company_range_is_not_associated_member_count(self):
         company = {"name": "Example", "website": "https://example.com", "linkedinUrl": "https://linkedin.com/company/example",
                    "employeeCount": 9999, "employeeCountRange": {"start": 11, "end": 50}}

@@ -483,6 +483,12 @@ def normalize_evidence(
                 result["country"] = _text(_first(parsed, "countryFull", "country", "countryCode")) or _text(location.get("countryCode"))
                 for field in ("state", "city"):
                     result[field] = _text(parsed.get(field))
+                country_names = {str(parsed.get(key) or "").strip().casefold()
+                                 for key in ("countryFull", "country", "countryCode")}
+                country_names.discard("")
+                if (str(location.get("linkedinText") or "").strip().casefold() in country_names
+                        and str(result["state"] or "").casefold() in country_names):
+                    result["state"] = None  # Country-only LinkedIn text is not a state.
 
     # Contact-capable tools use several common names for person data. Keep the
     # source fields untouched, but expose stable contact fields for callers
