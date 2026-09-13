@@ -11,16 +11,15 @@ from pathlib import Path
 import re
 
 import budget_guard
-from email_receipts import check_fallback, verification_finished
+from email_receipts import check_fallback, validator_for_tool, verification_finished
 from provider_output import ResponseFile, load_json
 from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
-from validate_run import (DETERMINATE_PROVIDER_STATUSES, _company_key,
+from validate_run import (BLOCKING_PROVIDER_STATUSES, DETERMINATE_PROVIDER_STATUSES, _company_key,
                           calculate_cost_summary, calculate_review_counts, evaluate_stop, excluded_company,
                           progress_snapshot, qualification_errors, _reviewed_company_scopes, accepted_errors,
                           validate_run)
 
-ATTEMPT_STATUSES = DETERMINATE_PROVIDER_STATUSES | {
-    "rate_limited", "auth_failed", "quota_exceeded", "timeout", "schema_error", "provider_error", "config_error"}
+ATTEMPT_STATUSES = DETERMINATE_PROVIDER_STATUSES | BLOCKING_PROVIDER_STATUSES
 
 
 def refresh(document):
@@ -279,11 +278,14 @@ def _validate_spec(spec, label="input", *, plan_only=False):
     if action.get("status_read") and (provider != "deepline" or operation != "execute"
                                      or action.get("cost_upper_bound_credits") != 0):
         raise ValueError("status_read requires a described free Deepline job-status getter")
+    is_verification = ("email_validation" in {request.get("entity_type"), action.get("entity_type")}
+                       or provider == "deepline" and operation == "execute"
+                       and validator_for_tool(request.get("tool")))
     if provider == "deepline" and operation in {"search", "describe"}:
         action["entity_type"] = "tool_catalog"
     elif "tool_catalog" in {request.get("entity_type"), action.get("entity_type")}:
         raise ValueError("tool_catalog is reserved for live catalog operations")
-    elif "email_validation" in {request.get("entity_type"), action.get("entity_type")} and action["phase"] != "email_validation":
+    elif is_verification and action["phase"] != "email_validation":
         raise ValueError(f"{label}.action.phase must be email_validation for an email-validation request")
     if action.get("entity_type") and action["entity_type"] != "tool_catalog":
         request["entity_type"] = action["entity_type"]

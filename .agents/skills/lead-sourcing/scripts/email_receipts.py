@@ -13,6 +13,11 @@ def _text(value):
     return value.strip().casefold() if isinstance(value, str) else ""
 
 
+def validator_for_tool(tool):
+    """Recognize supported validator families without pinning a live tool ID."""
+    return next((name for name in ("zerobounce", "bounceban") if name in _text(tool)), None)
+
+
 class OtherEmail(ValueError):
     """A valid saved receipt applies to a different address."""
 
@@ -162,7 +167,7 @@ def _sources(routes, validator):
     for route in reversed(routes):
         if (isinstance(route, dict) and route.get("provider") == "deepline" and route.get("operation") == "execute"
                 and route.get("phase") == "email_validation"
-                and validator in _text(route.get("tool"))):
+                and validator_for_tool(route.get("tool")) == validator):
             yield {"provider": "deepline", "operation": "execute", "validator": validator,
                    "tool": route["tool"], "route_id": route["route_id"]}
 
@@ -189,7 +194,7 @@ def fallback_allowed(verdict):
 
 def check_fallback(run_file, document, request):
     """Refuse unnecessary or repeated BounceBan dispatch before reserving spend."""
-    if request.get("operation") != "execute" or "bounceban" not in _text(request.get("tool")):
+    if request.get("operation") != "execute" or validator_for_tool(request.get("tool")) != "bounceban":
         return
     email = request.get("payload", {}).get("email")
     if not _text(email):
@@ -216,7 +221,7 @@ def check_fallback(run_file, document, request):
             continue  # Planned work has not entered preparation yet.
         saved = _saved_receipt(run_file, route)
         attempted = saved.get("attempt", {}).get("request", {})
-        if ("bounceban" in _text(attempted.get("tool"))
+        if (validator_for_tool(attempted.get("tool")) == "bounceban"
                 and _text(attempted.get("payload", {}).get("email")) == _text(email)):
             raise ValueError("BounceBan was already attempted for this email; recover its saved job")
 

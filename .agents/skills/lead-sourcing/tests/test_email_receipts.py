@@ -262,7 +262,11 @@ class EmailReceiptTests(unittest.TestCase):
 
     def test_rejected_dispatch_does_not_reserve_or_call_provider(self):
         fixture=attempt_tests.AttemptExecutionTests();fixture.setUp();self.addCleanup(fixture.doCleanups)
+        fixture.doc['unresolved'] = [{'stage': 'contact', 'candidate': {'domain': 'example.com'},
+            'account_fit': {'evidence_url': 'https://example.com/product', 'evidence_text': 'Verified platform fit.'}}]
+        fixture.path.write_text(json.dumps(fixture.doc))
         spec=fixture.spec('bad-fallback',paid=True)
+        spec['action'].update(phase='email_validation', scope='example.com')
         spec['request'].update(tool='bounceban_verify_single',payload={'email':'nobody@example.com'})
         with patch.object(run_attempt,'check_fallback',side_effect=ValueError('no eligible same-email receipt')) as guard:
             with patch.object(run_attempt.budget_guard,'reserve') as reserve:

@@ -151,7 +151,7 @@ class AttemptExecutionTests(unittest.TestCase):
                     spec = self.spec(f"catalog-{phase}-{operation}", query=phase)
                     spec["action"]["phase"] = phase
                     if operation == "describe":
-                        spec["request"] = {"operation": operation, "tool": f"fixture-{phase}"}
+                        spec["request"] = {"operation": operation, "tool": f"zerobounce_fixture_{phase}"}
                     def catalog_response(request, capture):
                         return {"provider": "deepline", "operation": request["operation"],
                                 "tool": request.get("tool"), "status": "ok", "results": [{"tool": "fixture"}]}, 0
@@ -837,6 +837,30 @@ class AttemptExecutionTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(), original)
             self.assertEqual(budget_guard.load_ledger(self.path), ledger)
             self.assertFalse((self.path.parent / "receipts").exists())
+
+    def test_known_verifiers_cannot_bypass_phase_check_with_missing_or_wrong_labels(self):
+        for tool in ("zerobounce_validate", "bounceban_verify_single", "bounceban_verify_single_result"):
+            for entity in (None, "contact"):
+                specs = self.company_specs()
+                spec = specs[1]
+                spec["action"]["phase"] = "contact_verification"
+                spec["request"].update(tool=tool, payload={"email": "buyer@company-1.example"})
+                if tool.endswith("_result"):
+                    spec["action"].update(status_read=True, cost_upper_bound_credits=0)
+                    spec["request"]["payload"] = {"id": "saved-job"}
+                if entity:
+                    spec["action"]["entity_type"] = spec["request"]["entity_type"] = entity
+                original, ledger = self.path.read_bytes(), budget_guard.load_ledger(self.path)
+                execute = Mock()
+                with self.subTest(tool=tool, entity=entity):
+                    with self.assertRaisesRegex(ValueError, "phase must be email_validation"):
+                        runner.run_attempt(self.path, spec, execute=execute)
+                    with self.assertRaisesRegex(ValueError, r"batch\[1\].action.phase must be email_validation"):
+                        runner.run_batch(self.path, specs, execute=execute)
+                    execute.assert_not_called()
+                    self.assertEqual(self.path.read_bytes(), original)
+                    self.assertEqual(budget_guard.load_ledger(self.path), ledger)
+                    self.assertFalse((self.path.parent / "receipts").exists())
 
     def test_excluded_company_blocked_before_contact_spend(self):
         self.doc["request"]["icp"] = {"exclusions": ["Tissage de Luz"]}
