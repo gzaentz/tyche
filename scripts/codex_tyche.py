@@ -12,6 +12,8 @@ import tempfile
 import threading
 import time
 
+from run_costs import UsageReceipt, execute_with_usage
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT / '.agents' / 'skills'
@@ -196,6 +198,8 @@ def main():
 
         if args.smoke or args.exec or args.exec_file is not None:
             command = ['codex', 'exec', '--ephemeral', *overrides]
+            if args.exec_file is not None:
+                command.append('--json')
             if args.smoke:
                 command.extend(['--sandbox', 'read-only', '-c', 'web_search="disabled"',
                                 '-c', 'sandbox_workspace_write.network_access=false',
@@ -206,6 +210,10 @@ def main():
             if args.prompt:
                 command.append(args.prompt)
         try:
+            if args.exec_file is not None:
+                receipt = UsageReceipt(args.exec_file, MODEL, REASONING_EFFORT, SERVICE_TIER)
+                print(json.dumps({'model_usage_receipt': str(receipt.path)}), flush=True)
+                return execute_with_usage(command, ROOT, env, receipt)
             return subprocess.call(
                 command, cwd=ROOT, env=env,
                 stdin=subprocess.DEVNULL if args.smoke or args.exec or args.exec_file is not None else None,

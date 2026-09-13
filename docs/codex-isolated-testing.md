@@ -107,6 +107,35 @@ README.md. This launcher does not source `.env` automatically. Paid sourcing
 still requires the existing budgets and adapters. With a ChatGPT Codex login,
 model calls use that login's allowance; provider charges remain separate.
 
+For `--exec-file`, the launcher uses Codex's JSON event stream and automatically
+saves `model-usage/<invocation-id>.json` beside the request file. It retains only
+the model, effort, requested speed, session identity, numeric input/cache/output
+usage and a dated Standard API-equivalent estimate. Each continuation gets its
+own receipt. Failed or interrupted invocations with missing usage remain
+explicitly incomplete, never free. The temporary profile and ephemeral mode
+remain unchanged. An already running invocation cannot gain retrospective usage
+capture; its old aggregate `tokens used` footer is not a pricing breakdown.
+
+After the run, combine its provider summary and every invocation receipt:
+
+```bash
+python3 scripts/run_costs.py reports/<run-id>/results.json \
+  --monitoring-cost reports/<run-id>/monitoring-cost.json
+```
+
+The optional monitoring file contains a run-scoped Standard API-equivalent
+`estimated_usd: {minimum, maximum}` breakdown from the outer task's usage
+collector. Keep monitoring/rework separate from sourcing worker usage; never
+substitute the whole conversation's cost or sum overlapping time windows.
+Missing monitoring or worker usage makes the combined estimate and per-lead
+cost null, while preserving the known subtotal. Provider confirmed/maximum
+figures retain unsettled reservations. Model estimates reflect distinct input,
+cached-input and output rates, with a range when request-size/cache-write details
+are absent. They are not invoices and exclude Fast/priority premiums,
+hosted-tool fees and subscription allocation; do not label them actual full cost.
+Historical runs without model receipts cannot be reconstructed from token
+totals alone. Preserve the original reports and add a separate cost audit.
+
 The temporary profile and its session history are removed when the launcher
 exits. Files saved in the project, including sourcing results and receipts,
 remain. Start a fresh launch after editing the skill to avoid stale context.
