@@ -205,6 +205,39 @@ class RunCostsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'different run'):
             report(self.results(), [receipt.path], self.root / 'another-run')
 
+    def test_explicit_compaction_link_explains_cli_total_but_all_responses_are_priced(self):
+        receipt=self.receipt()
+        self.record_response(receipt,response_id='ordinary')
+        self.record_response(receipt,response_id='compact')
+        receipt.observe_compaction('compact')
+        receipt.observe({'type':'turn.completed','usage':self.usage})
+        receipt.finish(0)
+        self.assertEqual(receipt.data['status'],'complete')
+        self.assertEqual(receipt.data['reconciliation_basis'],'cli_excludes_compaction')
+        self.assertEqual(receipt.data['standard_api_equivalent_usd']['minimum'],0.000352)
+        self.assertEqual(receipt.data['compaction_usage_totals'],self.usage)
+
+    def test_guessing_or_missing_compaction_usage_cannot_reconcile(self):
+        for link in (None,'missing'):
+            receipt=self.receipt();self.record_response(receipt,response_id='ordinary')
+            self.record_response(receipt,response_id='unexplained')
+            if link:receipt.observe_compaction(link)
+            receipt.observe({'type':'turn.completed','usage':self.usage});receipt.finish(0)
+            self.assertEqual(receipt.data['status'],'incomplete')
+
+    def test_large_partial_compaction_record_keeps_only_linkage(self):
+        receipt=self.receipt();path=self.journal_path()
+        record={'type':'compacted','payload':{'message':'private '*20000,
+                'replacement_history':[{'text':'private history'}], 'compaction_response_id':'compact'}}
+        raw=(json.dumps(record)+'\n').encode()
+        path.write_bytes(raw[:90000]);journal=UsageJournal(self.root/'profile',receipt)
+        journal.poll();self.assertEqual(receipt.data['compaction_response_ids'],[])
+        with path.open('ab') as f:f.write(raw[90000:])
+        journal.poll();journal.poll()
+        self.assertEqual(receipt.data['compaction_response_ids'],['compact'])
+        self.assertNotIn('private history',receipt.path.read_text())
+        self.assertNotIn('private private',receipt.path.read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

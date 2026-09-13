@@ -62,7 +62,7 @@ to catalog categories: useful public-data reads can be labeled `admin`, while
 an `automation` result can be a paid research job. Inspect the actual contract
 and side effects; neither category grants execution permission.
 
-For each selected tool, call `describe` immediately before `execute` and record
+For each selected tool, call `describe` before its first `execute` in the run and record
 its live input schema, connection state, and price. Prefer a title-roster tool
 for nuanced roles. If that is unavailable, use broad function and seniority with
 the full user-approved title family. Ignore non-callable or monitor-only search

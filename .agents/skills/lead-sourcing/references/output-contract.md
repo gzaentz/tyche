@@ -1354,16 +1354,20 @@ delivery gate; use the full strict validator CLI before delivery.
 ## `leads.xlsx` contract
 
 For version `1.2`, write a workbook with `Leads` and `Sources` worksheets.
-The first row of `Leads` is the fixed, ordered header:
+The first row of `Leads` is the fixed, ordered 19-column header:
 
 ```text
-Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Intent Signal,Signals,Intent Details,Phone
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Signals,Intent Details,Phone
 ```
 
 Versions `1.0` and `1.1` keep their single `Leads` worksheet, 18-column
-layout (without `Intent Signal` or `Signals`), and labelled signal/date/details/source text
+layout (without `Signals`), and labelled signal/date/details/source text
 in `Intent Details`, with the same clarified location/range headers on new exports.
 Do not silently migrate or overwrite historical runs.
+
+Keep `signal_evidence.signal` and qualification signal tags in structured results;
+the client sheet displays their types inside `Signals` instead of a separate
+`Intent Signal` column.
 
 `leads.xlsx` is the clean flattened deliverable. Write exactly one row for each
 accepted primary company-contact pair and no rows for rejected, unresolved, or
@@ -1387,7 +1391,6 @@ route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 | `HQ Country` | `company.hq_country`, otherwise blank |
 | `Company Employee Range` | required `company.employee_range` from LinkedIn through HarvestAPI |
 | `Description` | required `company.description`, exactly two factual sentences |
-| `Intent Signal` | short signal label from `signal_evidence.signal` |
 | `Signals` | `signal_evidence` plus passed `qualification_checks` explicitly tagged with `signal`; facts, original source dates and available source URLs |
 | `Intent Details` | `intent_details`, a natural paragraph explaining the activity, its context and why the company matters now |
 | `Phone` | `primary_contact.phone`, otherwise blank |
@@ -1435,7 +1438,8 @@ unverified optional values as empty cells rather than placeholder text.
   For each signal, describe what the company did with specific facts and supported
   dates, then explain its relevance to the company's likely needs and the
   requested product/service using supporting business or qualification evidence.
-  Usually give that explanation in the next sentence. Close with one sentence
+  Give that explanation in the next sentence when it makes the paragraph flow
+  naturally. Use the same reviewed events and dates displayed in `Signals`. Close with one sentence
   connecting the signals, likely need and requested product/service to explain
   why the company matters now in terms of its own situation. Synthesize the
   evidence rather than repeating the events or merely describing expansion.

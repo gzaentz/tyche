@@ -12,13 +12,10 @@ databases, CRM writes or outreach.
 
 Normalize the user's request once into `results.json.request`. It is the source
 of truth for company size, geography, roles, required versus preferred signals,
-dates and budget. Preserve the original wording in `request.txt`; change the
-saved criteria only when the user changes them. Do not add stricter criteria
-while researching. Use `run_attempt.py <results.json> --status` to resume from
-the saved request and compact pending work, not old logs or reconstructed plans.
-Keep run data in its original run directory. Do not import another run's results,
-ledger or receipts; project code and references remain shared. A copied snapshot
-is for inspection, not a continuation with rewritten paths or accounting.
+dates and budget. Preserve original wording in `request.txt`; only user changes
+can change criteria. Resume with `run_attempt.py <results.json> --status`.
+Keep results, ledger and receipts in their original run directory. Copies are
+for inspection; never import another run or rewrite continuation accounting.
 
 Read the [workflow rules](references/workflow-rules.md), [input contract](references/output-contract.md#input-contract),
 [lifecycle invariants](references/output-contract.md#lifecycle-invariants) and
@@ -31,11 +28,15 @@ once. The default shared provider budget is USD 0.50 per requested lead.
 1. **Discover.** Find fresh companies using sources likely to establish the
    requested signals. Start with a small pilot, then follow productive sources.
    Select tools through [tools.md](references/tools.md); describe a live tool
-   before paid execution. Reuse relevant saved catalog reviews and receipts.
+   before its first execution. Reuse descriptions within the run; discover more
+   tools when needed. Refresh when schema, pricing or access changes.
 2. **Check up to three companies concurrently.** Use the [batch helper](references/adapter-io.md#concurrent-company-checks).
    Batch ready independent checks, including companies at different phases;
    do not wait to fill a batch. Review the actual sources for required fit and
-   signals before buyer lookup, then verify the requested role and fields.
+   signals before buyer lookup, including whether activity was announced,
+   conditional, planned or completed. Resolve company LinkedIn URLs from observed
+   sources before enrichment; do not construct slugs from company names. Then
+   verify the requested role and fields.
    Apply the [qualification policy](references/workflow-rules.md#qualification-policy).
    Required unknown facts stay unresolved; evidenced mismatches reject; preferred
    signals only rank. Corroborate sources for the same project, preserving dates.
@@ -50,13 +51,11 @@ once. The default shared provider budget is USD 0.50 per requested lead.
    gaps and move on; reopen only for a concrete new source. After two attempts
    without verified progress, change source family or evidence target.
 
-Read current companies and relevant receipts after setup. Reuse returned
-decisions; call `--status` after interruptions or missing state. Keep full
-receipts on disk and avoid repeatedly dumping results, ledgers or logs.
+Reuse returned decisions and saved evidence; keep complete receipts on disk
+and avoid repeatedly dumping results or logs.
 
 Continue while useful affordable work remains. Use commentary for checkpoints;
-do not stop because a batch ended or ask permission to continue. An interruption
-resumes the same results, receipts and ledger. Respect explicit user pauses.
+do not stop because a batch ended or ask permission to continue. Respect explicit user pauses.
 
 ## Authorization
 
@@ -73,9 +72,10 @@ only for eligible failures or catch-all/unknown. Never override a hard negative.
 
 Generate the report and workbook after source review, then regenerate only
 when corrections change their content. Keep structured results current throughout.
-Before delivery, write `report.md`, `results.json` and `leads.xlsx`, then run
-`python3 scripts/validate_run.py <results.json> --show-progress`. Full strict
-`delivery_allowed: true` is required. Follow the [stopping contract](references/output-contract.md#stopping-check)
+Before delivery, save reviewed `results.json` and `report.md`, then run
+`node .agents/skills/lead-sourcing/scripts/export_xlsx.mjs <results.json>`.
+This validates, exports and verifies the saved workbook. Inspect its PNG preview.
+The launcher supplies runtime paths. Full strict `delivery_allowed: true` is required. Follow the [stopping contract](references/output-contract.md#stopping-check)
 for target completion, actual limits/blockers or reviewed `no_productive_route`.
 Report shortfalls honestly; exhausted searches do not prove an empty market.
 

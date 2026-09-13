@@ -168,3 +168,28 @@ The launcher uses the installed Codex app-server's discovery protocol. It was
 checked with Codex CLI 0.154.0-alpha.6.2 and fails closed if instruction-source reporting
 or skill discovery is unavailable. Existing desktop conversations already
 contain their earlier context; this launcher does not clean or modify them.
+
+## Workbook finalization and usage reconciliation
+
+The launcher supplies `TYCHE_WORKSPACE_NODE`, `TYCHE_WORKSPACE_NODE_MODULES`
+and `TYCHE_WORKSPACE_PYTHON` from the installed desktop bundle when available,
+preserving explicit environment overrides. Other hosts configure these paths
+once; runtime dependencies are never downloaded during research. Finalize saved
+reviewed results with:
+
+```bash
+node .agents/skills/lead-sourcing/scripts/export_xlsx.mjs reports/<run-id>/results.json
+```
+
+It uses full strict validation, verifies the
+exported workbook's lead/source values, and saves validation, inspection and PNG
+preview files beside the workbook. The preview still requires visual review.
+
+Model receipts retain numeric usage, response identities and explicit
+`compacted.compaction_response_id` linkage from the isolated worker journal.
+If the CLI excludes linked compaction responses, reconciliation compares the
+ordinary responses to its total while pricing **all** captured responses. No
+response is excluded based on a guessed token difference. Missing linkage,
+missing usage, or unexplained differences remain incomplete. Private compaction
+messages and replacement histories are not retained. API-equivalent estimates
+remain distinct from actual model billing.

@@ -353,28 +353,33 @@ provider credentials directly.
   contact. Its fixed columns are:
 
 ```text
-Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Intent Signal,Signals,Intent Details,Phone
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Signals,Intent Details,Phone
 ```
 
 Generate it from the structured result instead of assembling rows by hand. The
 agent writes a two-sentence factual business description and an `intent_details`
-paragraph covering the activity, context and why the company matters now.
+paragraph explaining each verified signal, its relevance, and a final synthesis
+tied to the company’s own services and situation.
 `Signals` shows verified signal facts, source dates and links from existing
 evidence. The agent selects exact
 industry/sub-industry labels from the bundled PP taxonomy. Uncertain
-classifications stay blank with a `classification_note`. A `Sources` worksheet
+classifications stay unresolved until an evidence-supported industry/sub-industry
+pair is available. A `Sources` worksheet
 preserves supporting evidence and separates evidence dates from observations.
 Version `1.0`/`1.1` exports retain their original 18-column, one-sheet layout.
 See the output contract for the writing and taxonomy rules. The
-Codex agent first loads the bundled workspace dependencies, then passes the
-returned Node and node_modules paths to the exporter:
+launcher supplies the installed Node, Python and node_modules paths. Configure
+`TYCHE_WORKSPACE_NODE`, `TYCHE_WORKSPACE_PYTHON` and `TYCHE_WORKSPACE_NODE_MODULES`
+once on other hosts. Finalize reviewed results with:
 
 ```bash
-<bundled-node> .agents/skills/lead-sourcing/scripts/export_xlsx.mjs \
-  reports/<run-id>/results.json \
-  reports/<run-id>/leads.xlsx \
-  --node-modules <bundled-node-modules>
+node .agents/skills/lead-sourcing/scripts/export_xlsx.mjs reports/<run-id>/results.json
 ```
+
+This command runs strict validation, exports the workbook, verifies its saved
+lead/source values and writes validation, inspection and preview artifacts.
+Inspect the preview before delivery. Explicit output and dependency paths remain
+available for integrations.
 
 The exporter keeps the exact column order, adds filters and clear headers, and
 formats long text for review. The workbook library comes from the Codex

@@ -72,3 +72,6 @@ def write_linkedin_receipts(run_file, document):
                 "provider_response": {"exit_code": 0, "body": {"status": "ok", "element": profile}, "stderr": ""}}
             directory.mkdir(exist_ok=True)
             (directory / (rid + ".json")).write_text(json.dumps(receipt))
+
+    from email_fixtures import write_email_receipts
+    write_email_receipts(run_file, document)

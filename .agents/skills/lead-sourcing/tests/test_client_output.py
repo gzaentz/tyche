@@ -153,9 +153,9 @@ class ClientOutputTests(unittest.TestCase):
         self.assertEqual(payload["legacy"], EXPECTED_LEGACY_COLUMNS)
         self.assertEqual(
             payload["client"],
-            EXPECTED_LEGACY_COLUMNS[:16] + ["Intent Signal", "Signals"] + EXPECTED_LEGACY_COLUMNS[16:],
+            EXPECTED_LEGACY_COLUMNS[:16] + ["Signals"] + EXPECTED_LEGACY_COLUMNS[16:],
         )
-        self.assertEqual(payload["rows"][0]["Intent Signal"], "warehouse_system_integration")
+        self.assertNotIn("Intent Signal", payload["rows"][0])
         row = payload["rows"][0]
         self.assertEqual(row["Description"], document["accepted"][0]["company"]["description"])
         self.assertEqual(row["Intent Details"], document["accepted"][0]["intent_details"])
@@ -407,24 +407,21 @@ class ClientOutputTests(unittest.TestCase):
             source.write_text(json.dumps(document), encoding="utf-8")
             write_linkedin_receipts(source, document)
             source.write_text(json.dumps(document), encoding="utf-8")
-            result = subprocess.run(
-                [self.node, str(EXPORTER_PATH), str(source), str(destination), "--node-modules", node_modules],
-                capture_output=True, text=True, check=False,
-            )
+            result = _export_module.export_workbook(self.node, source, destination, node_modules)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout.splitlines()[-1])["columns"], 20)
+            self.assertEqual(json.loads(result.stdout.splitlines()[-1])["columns"], 19)
             rows = _export_module.read_first_sheet_rows(destination)
-            self.assertEqual(rows[0], EXPECTED_LEGACY_COLUMNS[:16] + ["Intent Signal", "Signals"] + EXPECTED_LEGACY_COLUMNS[16:])
-            self.assertEqual(rows[1][16], document["accepted"][0]["signal_evidence"]["signal"])
-            self.assertIn(document["accepted"][0]["signal_evidence"]["evidence_url"], rows[1][17])
-            self.assertEqual(rows[1][18], document["accepted"][0]["intent_details"])
+            self.assertEqual(rows[0], EXPECTED_LEGACY_COLUMNS[:16] + ["Signals"] + EXPECTED_LEGACY_COLUMNS[16:])
+            self.assertIn(document["accepted"][0]["signal_evidence"]["signal"], rows[1][16])
+            self.assertIn(document["accepted"][0]["signal_evidence"]["evidence_url"], rows[1][16])
+            self.assertEqual(rows[1][17], document["accepted"][0]["intent_details"])
             source_rows = _export_module.read_first_sheet_rows(destination, sheet_number=2)
             self.assertEqual(source_rows[1][8], document["accepted"][0]["account_fit"]["evidence_text"])
             tag = lambda name: "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}" + name
             with zipfile.ZipFile(destination) as archive:
                 workbook = ET.fromstring(archive.read("xl/workbook.xml"))
                 self.assertEqual([sheet.attrib["name"] for sheet in workbook.iter(tag("sheet"))], ["Leads", "Sources"])
-                self.assertIn(b'A1:T2', archive.read("xl/tables/table1.xml"))
+                self.assertIn(b'A1:S2', archive.read("xl/tables/table1.xml"))
                 self.assertIn(b'SourcesTable', archive.read("xl/tables/table2.xml"))
                 sheet = ET.fromstring(archive.read("xl/worksheets/sheet2.xml"))
                 cells = {cell.attrib["r"]: cell for cell in sheet.iter(tag("c"))}

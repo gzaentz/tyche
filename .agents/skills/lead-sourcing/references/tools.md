@@ -23,7 +23,9 @@ reloading them for every call.
 ## Choose by evidence gap
 
 These are discovery seeds, not executable Deepline IDs. Search the live
-catalog, then describe the selected tool immediately before execution.
+catalog, then describe the selected tool before its first execution in the run.
+Reuse that description for subsequent calls unless its schema, price or access
+becomes stale or untrusted. Discover the next useful tool when it is needed.
 Connection state, schema, native result limits, and conservative cost bounds
 must be checked live. Catalog categories are not permissions: useful reads
 can be labeled `admin`, and research jobs can have side effects or unknown costs.

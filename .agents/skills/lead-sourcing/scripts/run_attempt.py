@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 
 import budget_guard
+from email_receipts import check_fallback
 from provider_output import ResponseFile, load_json
 from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
 from validate_run import (DETERMINATE_PROVIDER_STATUSES, _company_key,
@@ -244,6 +245,8 @@ def _prepare(run_file, spec):
                 raise ValueError("request already attempted or pending; recover its receipt or choose a changed request")
         if any(r["route_id"] == action["id"] for r in frontier):
             raise ValueError("route ID already planned; resume its receipt instead of redispatching")
+        if provider == "deepline" and not action.get("status_read"):
+            check_fallback(run_file, document, request)
         actions = document["stop_check"]["next_actions"]
         actions[:] = [a for a in actions if a["id"] != action["id"]] + [action]
         decision = evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))
@@ -429,7 +432,7 @@ def cli_output(result):
         output["attempts"] = [cli_output(attempt) for attempt in output["attempts"]]
     if isinstance(output.get("result"), dict):
         body = {k: v for k, v in output["result"].items()
-                if k not in {"progress_before", "accepted_before", "request_fingerprint", "attempt"}}
+                if k not in {"progress_before", "accepted_before", "request_fingerprint", "attempt", "provider_response"}}
         if "results" in body and body.get("evidence") == body["results"]:
             body.pop("evidence", None)
         output["result"] = body

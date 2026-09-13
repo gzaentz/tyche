@@ -46,6 +46,23 @@ def inside(path, directory):
         return False
 
 
+def workspace_environment(env):
+    """Use configured paths or the installed desktop bundle, without downloads."""
+    env = dict(env)
+    bundle = Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies'
+    defaults = {
+        'TYCHE_WORKSPACE_NODE': bundle / 'node/bin/node',
+        'TYCHE_WORKSPACE_NODE_MODULES': bundle / 'node/node_modules',
+        'TYCHE_WORKSPACE_PYTHON': bundle / 'python/bin/python3',
+    }
+    for key, default in defaults.items():
+        if not env.get(key) and default.exists():
+            env[key] = str(default)
+    if env.get('TYCHE_WORKSPACE_NODE'):
+        env['PATH'] = str(Path(env['TYCHE_WORKSPACE_NODE']).parent) + os.pathsep + env.get('PATH', '')
+    return env
+
+
 def inspect_runtime(env, overrides, start_thread=False):
     """Use the installed runtime's discovery results, not a filesystem guess."""
     messages = queue.Queue()
@@ -160,6 +177,13 @@ def main():
         # and global skill sync can contact npm or alter context mid-run.
         env = dict(os.environ, CODEX_HOME=profile, TYCHE_ISOLATED_RUN='1',
                    DEEPLINE_NO_AUTO_UPDATE='1', DEEPLINE_SKIP_SKILLS_SYNC='1')
+        env = workspace_environment(env)
+        if args.exec_file is not None:
+            for key in ('TYCHE_WORKSPACE_NODE', 'TYCHE_WORKSPACE_PYTHON'):
+                if not Path(env.get(key, '')).is_file():
+                    raise RuntimeError(f'Configure {key} before starting a sourcing run')
+            if not (Path(env.get('TYCHE_WORKSPACE_NODE_MODULES', '')) / '@oai/artifact-tool/package.json').is_file():
+                raise RuntimeError('Configure TYCHE_WORKSPACE_NODE_MODULES before starting a sourcing run')
         # Pin the isolated runner's model selection instead of inheriting the
         # user's current Codex default.  `xhigh` is the UI's Extra High effort;
         # `fast` selects the accelerated service tier when available.

@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from email_receipts import FAILURES as EMAIL_FALLBACK_FAILURES, email_receipt_errors
 from linkedin_receipts import _linkedin_url, employee_range_bounds, linkedin_receipt_errors
 
 
@@ -22,7 +23,6 @@ FINAL_FRONTIER_STATES = {"exhausted", "blocked"}
 PAID_PROVIDERS = {"deepline", "scrapingdog"}
 SUPPORTED_RESULT_SCHEMA_VERSIONS = {"1.0", "1.1", "1.2"}
 DETERMINATE_PROVIDER_STATUSES = {"ok", "partial", "no_results"}
-EMAIL_FALLBACK_FAILURES = {"provider_error", "timeout", "rate_limited", "auth_failed", "quota_exceeded"}
 BLOCKING_PROVIDER_STATUSES = {
     "rate_limited",
     "auth_failed",
@@ -108,6 +108,11 @@ def qualification_errors(document: dict) -> list[str]:
                         errors.append(f"{path}: employee_range is outside or only partly inside request.icp.company_size")
             failed = [c for c in required if c.get("status") == "fail" and c.get("evidence")]
             if state == "accepted" or (state == "unresolved" and row.get("stage") == "contact"):
+                if document.get("schema_version") == "1.2":
+                    for check in required:
+                        for item in (check.get("evidence") if isinstance(check.get("evidence"), list) else []):
+                            if error := source_evidence_error(item, path + ".qualification_checks." + str(check.get("criterion"))):
+                                errors.append(error)
                 if excluded_company(document.get("request", {}), row):
                     errors.append(f"{path}: excluded company cannot pass the account gate")
                 if any(c.get("status") != "pass" or not c.get("evidence") for c in required):
@@ -1161,10 +1166,66 @@ def linkedin_field_errors(document: dict) -> list[str]:
     return errors
 
 
+def source_evidence_error(item, path):
+    item = item if isinstance(item, dict) else {}
+    url, date, basis, excerpt = (item.get(a, item.get(b)) for a, b in (
+        ("evidence_url", "url"), ("evidence_date", "date"),
+        ("evidence_date_basis", "date_basis"), ("evidence_text", "text")))
+    source = item.get("source") or {}
+    try:
+        date_valid = isinstance(date, str) and datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%d") == date
+    except ValueError:
+        date_valid = False
+    if (not isinstance(url, str) or re.fullmatch(r"https?://[^\s]+", url) is None
+            or not date_valid or not isinstance(basis, str) or basis not in {"published", "posted", "updated", "observed_current"}
+            or not _nonempty_text(excerpt) or not isinstance(source, dict)
+            or any(not _nonempty_text(source.get(k)) for k in ("provider", "operation", "route_id"))):
+        return f"{path} requires dated source evidence"
+    return None
+
+
+def source_evidence_errors(document):
+    """The evidence shape consumed by the client workbook and source review."""
+    errors = []
+    if document.get("schema_version") != "1.2":
+        return errors
+    if document.get("accepted"):
+        try:
+            observed = str(document.get("retrieved_at", ""))[:10]
+            if datetime.strptime(observed, "%Y-%m-%d").strftime("%Y-%m-%d") != observed:
+                raise ValueError
+        except ValueError:
+            errors.append("retrieved_at requires an observation date")
+    for index, row in enumerate(document.get("accepted", [])):
+        if not isinstance(row, dict):
+            continue
+        company = row.get("company") if isinstance(row.get("company"), dict) else {}
+        contact = row.get("primary_contact") if isinstance(row.get("primary_contact"), dict) else {}
+        signal = row.get("signal_evidence")
+        if not isinstance(signal, dict) or not _nonempty_text(signal.get("signal")):
+            errors.append(f"accepted[{index}].signal_evidence.signal is required")
+        evidence = [(key, row.get(key)) for key in ("account_fit", "signal_evidence")]
+        evidence += [("primary_contact", contact), ("primary_contact.location_evidence", contact.get("location_evidence")),
+                     ("company.employee_range_evidence", company.get("employee_range_evidence"))]
+        for check in row.get("qualification_checks", []):
+            if isinstance(check, dict):
+                items = check.get("evidence", [])
+                if not isinstance(items, list):
+                    errors.append(f"accepted[{index}].qualification_checks.evidence must be an array")
+                    continue
+                evidence += [("qualification_checks." + str(check.get("criterion")), e) for e in items]
+        for path, item in evidence:
+            if error := source_evidence_error(item, f"accepted[{index}].{path}"):
+                errors.append(error)
+    return errors
+
+
 def accepted_errors(document: dict, *, run_file=None, fill_missing=False) -> list[str]:
     """Shared accepted-lead contract for saving a review and final delivery."""
-    errors = linkedin_receipt_errors(document, run_file, fill_missing=fill_missing) if run_file is not None else []
+    errors = (linkedin_receipt_errors(document, run_file, fill_missing=fill_missing)
+              + email_receipt_errors(document, run_file, fill_missing=fill_missing)) if run_file is not None else []
     errors.extend(linkedin_field_errors(document))
+    errors.extend(source_evidence_errors(document))
     request, accepted = document.get("request", {}), document.get("accepted", [])
     if document.get("schema_version") == "1.2":
         _validate_client_output(accepted, errors)
@@ -1840,12 +1901,23 @@ def main() -> int:
         help="include the route-derived cost summary in validator output",
     )
     parser.add_argument("--show-progress", action="store_true", help="include unresolved-company groups and nonblocking strategy warnings")
+    parser.add_argument("--check-output", action="store_true", help="check accepted output only; use - for JSON stdin; never authorizes delivery")
     args = parser.parse_args()
     try:
-        document = json.loads(args.results.read_text(encoding="utf-8"))
+        document = json.loads(sys.stdin.read() if args.check_output and str(args.results) == "-" else args.results.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         print(json.dumps({"valid": False, "delivery_allowed": False, "errors": [str(exc)]}))
         return 2
+
+    if args.check_output:
+        try:
+            if not isinstance(document, dict) or not isinstance(document.get("accepted"), list):
+                raise ValueError("results must contain an accepted array")
+            errors = accepted_errors(document, run_file=None if str(args.results) == "-" else args.results) + qualification_errors(document)
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
+            errors = [str(exc)]
+        print(json.dumps({"valid": not errors, "delivery_allowed": False, "errors": errors}))
+        return 2 if errors else 0
 
     from budget_guard import audit_ledger, load_ledger
     try:

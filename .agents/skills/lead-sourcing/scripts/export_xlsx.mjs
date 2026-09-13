@@ -3,8 +3,6 @@
 /** Export accepted TYCHE company-contact pairs to a styled Excel workbook. */
 
 import fs from "node:fs/promises";
-import { readFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { createRequire } from "node:module";
@@ -33,16 +31,12 @@ export const XLSX_COLUMNS = [
 ];
 
 export const CLIENT_XLSX_COLUMNS = [
-  ...XLSX_COLUMNS.slice(0, 16), "Intent Signal", "Signals", ...XLSX_COLUMNS.slice(16),
+  ...XLSX_COLUMNS.slice(0, 16), "Signals", ...XLSX_COLUMNS.slice(16),
 ];
 export const SOURCE_COLUMNS = [
   "Company", "Domain", "Field", "Signal", "Evidence Date", "Date Basis",
   "Observed On", "Source URL", "Evidence Text",
 ];
-const TAXONOMY = JSON.parse(readFileSync(
-  new URL("../assets/leadpoet_industry_taxonomy.json", import.meta.url), "utf8",
-));
-
 const COLUMN_LETTERS = [
   "A", "B", "C", "D", "E", "F", "G", "H", "I",
   "J", "K", "L", "M", "N", "O", "P", "Q", "R",
@@ -63,24 +57,12 @@ function isClientOutput(document) {
   return version === "1.2";
 }
 
-function validateClientRow(row, index) {
-  if (typeof row.intent_details !== "string" || !row.intent_details.trim()) {
-    throw new ExportError(`accepted[${index}].intent_details must be a non-empty string`);
-  }
-  const company = object(row.company);
-  if (typeof company.description !== "string" || !company.description.trim()) {
-    throw new ExportError(`accepted[${index}].company.description is required; write exactly two factual sentences`);
-  }
-  if ("classification_note" in company && (typeof company.classification_note !== "string" || !company.classification_note.trim())) {
-    throw new ExportError(`accepted[${index}].company.classification_note must be a non-empty string`);
-  }
-  if (
-    typeof company.industry !== "string" || typeof company.sub_industry !== "string"
-    || !TAXONOMY.parent_industries.includes(company.industry)
-    || !Object.hasOwn(TAXONOMY.subindustry_parents, company.sub_industry)
-    || !TAXONOMY.subindustry_parents[company.sub_industry].includes(company.industry)
-  ) {
-    throw new ExportError(`accepted[${index}].company requires an exact canonical industry/sub_industry pair`);
+function validateOutput(document, resultsPath) {
+  const checked = spawnSync(process.env.TYCHE_WORKSPACE_PYTHON || "python3", [
+    fileURLToPath(new URL("./validate_run.py", import.meta.url)), resultsPath || "-", "--check-output",
+  ], { input: resultsPath ? undefined : JSON.stringify(document), encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024 });
+  if (checked.error || checked.status !== 0) {
+    throw new ExportError(`Output validation failed: ${checked.error?.message || checked.stdout || checked.stderr}`);
   }
 }
 
@@ -95,10 +77,7 @@ function text(value) {
   return "";
 }
 
-function isLinkedInUrl(value, kind) {
-  if (kind) return typeof value === "string" && new RegExp(
-    `^https?://(?:[a-z0-9-]+\\.)*linkedin\\.com/${kind}/[a-z0-9_%~.-]+/?(?:[?#][^\\s]*)?$`, "i",
-  ).test(value.trim());
+function isLinkedInUrl(value) {
   if (!value) return false;
   try {
     const host = new URL(value).hostname.toLowerCase();
@@ -131,27 +110,6 @@ function employeeRange(value, field) {
     throw new ExportError(`${field} requires the LinkedIn employee range`);
   }
   return normalized;
-}
-
-function validateHarvestEvidence(document, evidence, linkedin, kind, field) {
-  const item = object(evidence);
-  const source = object(item.source);
-  const url = item.evidence_url;
-  const slug = (value) => value.match(new RegExp(`/${kind}/([^/?#]+)`, "i"))[1].toLowerCase();
-  if (!isLinkedInUrl(url, kind) || (isLinkedInUrl(linkedin, kind) && slug(url) !== slug(linkedin))) {
-    throw new ExportError(`${field}.evidence_url requires the same LinkedIn /${kind}/ entity`);
-  }
-  if (!calendarDate(item.evidence_date) || item.evidence_date_basis !== "observed_current" || !text(item.evidence_text)) {
-    throw new ExportError(`${field} requires dated observed_current LinkedIn source text`);
-  }
-  const tool = text(source.tool).toLowerCase().replace(/[^a-z0-9]/g, "");
-  const routes = (document.routes || []).filter((route) => text(route.route_id) === text(source.route_id));
-  if (source.provider !== "deepline" || source.operation !== "execute"
-      || !tool.includes("harvestapi") || !tool.endsWith(kind === "company" ? "getcompany" : "getprofile")
-      || routes.length !== 1 || routes[0].provider !== "deepline" || routes[0].operation !== "execute"
-      || routes[0].tool !== source.tool || !["ok", "partial"].includes(routes[0].provider_status)) {
-    throw new ExportError(`${field}.source requires a matching successful HarvestAPI execute route`);
-  }
 }
 
 function intentDetails(signal) {
@@ -212,87 +170,7 @@ function requestedValue(contact, field, requestedFields, index) {
   return value;
 }
 
-const EMAIL_FALLBACK_FAILURES = new Set(["provider_error", "timeout", "rate_limited", "auth_failed", "quota_exceeded"]);
-
-function validateEmailReceipt(document, contact, email, index, validator = "zerobounce", path = `accepted[${index}].primary_contact.email_validation`) {
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new ExportError(`${path} requires a valid email address`);
-  }
-  const receipt = object(contact.email_validation);
-  if (!Object.keys(receipt).length) {
-    throw new ExportError(`${path} requires a Deepline ZeroBounce receipt`);
-  }
-  if (text(receipt.email).toLowerCase() !== email.toLowerCase()) {
-    throw new ExportError(`${path}.email must match the contact email`);
-  }
-  const status = text(receipt.status);
-  const outage = validator === "zerobounce" && receipt.status === null
-    && EMAIL_FALLBACK_FAILURES.has(receipt.provider_status);
-  if ("provider_status" in receipt && !outage) {
-    throw new ExportError(`${path}.provider_status requires a service failure with null verdict`);
-  }
-  const eligibleFallback = outage || ["catch-all", "unknown"].includes(status.toLowerCase());
-  if (!status && !outage) {
-    throw new ExportError(`${path}.status is unresolved or missing`);
-  }
-  const fallback = receipt.fallback;
-  if (validator === "bounceban") {
-    if (status.toLowerCase() !== "success" || text(receipt.result).toLowerCase() !== "deliverable") {
-      throw new ExportError(`${path} requires BounceBan success and result deliverable`);
-    }
-    if ("fallback" in receipt) throw new ExportError(`${path} cannot chain fallbacks`);
-  } else if (eligibleFallback && Object.keys(object(fallback)).length) {
-    validateEmailReceipt(document, { email_validation: fallback }, email, index, "bounceban", `${path}.fallback`);
-    const ids = (document.routes || []).map((route) => text(object(route).route_id));
-    if (ids.indexOf(text(object(fallback.source).route_id)) <= ids.indexOf(text(object(receipt.source).route_id))) {
-      throw new ExportError(`${path} fallback must use a distinct later route`);
-    }
-  } else if (status.toLowerCase() !== "valid") {
-    throw new ExportError(`${path}.status must be valid`);
-  }
-  if (validator === "zerobounce" && "fallback" in receipt && !eligibleFallback) {
-    throw new ExportError(`${path} fallback requires catch-all, unknown, or a recorded service failure`);
-  }
-
-  const source = object(receipt.source);
-  if (text(source.provider).toLowerCase() !== "deepline") {
-    throw new ExportError(`${path}.source.provider must be deepline`);
-  }
-  if (text(source.validator).toLowerCase() !== validator) {
-    throw new ExportError(`${path}.source.validator must be ${validator}`);
-  }
-  if (text(source.operation) !== "execute") {
-    throw new ExportError(`${path}.source.operation must be execute`);
-  }
-  const tool = text(source.tool);
-  const routeId = text(source.route_id);
-  if (!tool || !routeId) {
-    throw new ExportError(`${path}.source requires tool and route_id`);
-  }
-
-  const routes = Array.isArray(document.routes) ? document.routes : [];
-  const matchingRoutes = routes.filter(
-    (candidate) => text(object(candidate).route_id) === routeId,
-  );
-  if (matchingRoutes.length !== 1) {
-    throw new ExportError(`${path}.source.route_id must identify one route receipt`);
-  }
-  const route = object(matchingRoutes[0]);
-  if (
-    route.provider !== "deepline"
-    || route.phase !== "email_validation"
-    || route.operation !== "execute"
-    || route.tool !== tool
-    || (outage ? route.provider_status !== receipt.provider_status : !["ok", "partial"].includes(route.provider_status))
-    || !Number.isInteger(route.paid_calls)
-    || route.paid_calls < 1
-    || (validator === "bounceban" && route.paid_calls !== 1)
-  ) {
-    throw new ExportError(`${path} does not match a successful paid Deepline validation route`);
-  }
-}
-
-export function rowsFor(document) {
+export function rowsFor(document, resultsPath) {
   if (!document || typeof document !== "object" || Array.isArray(document)) {
     throw new ExportError("results.json must contain one JSON object");
   }
@@ -301,12 +179,12 @@ export function rowsFor(document) {
   }
 
   const clientOutput = isClientOutput(document);
+  validateOutput(document, resultsPath);
   const requestedFields = requestedContactFields(document);
   return document.accepted.map((acceptedRow, index) => {
     if (!acceptedRow || typeof acceptedRow !== "object" || Array.isArray(acceptedRow)) {
       throw new ExportError(`accepted[${index}] must be an object`);
     }
-    if (clientOutput) validateClientRow(acceptedRow, index);
     const company = object(acceptedRow.company);
     const contact = object(acceptedRow.primary_contact);
     const signal = object(acceptedRow.signal_evidence);
@@ -326,34 +204,8 @@ export function rowsFor(document) {
     }
 
     const range = employeeRange(company.employee_range, `accepted[${index}].company.employee_range`);
-    validateHarvestEvidence(document, company.employee_range_evidence, company.linkedin_url,
-      "company", `accepted[${index}].company.employee_range_evidence`);
-    const contacts = [[`accepted[${index}].primary_contact`, contact],
-      ...(acceptedRow.backup_contacts || []).map((backup, i) => [`accepted[${index}].backup_contacts[${i}]`, object(backup)])];
-    for (const [field, candidate] of contacts) {
-      const linkedin = Object.hasOwn(candidate, "linkedin_url") ? candidate.linkedin_url
-        : isLinkedInUrl(candidate.contact_url, "in") ? candidate.contact_url : undefined;
-      const country = typeof candidate.country === "string" ? candidate.country.trim() : "";
-      if (!country || ["unknown", "n/a", "na", "none", "null", "remote", "-"].includes(country.toLowerCase())) {
-        throw new ExportError(`${field}.country is required from the person's LinkedIn location`);
-      }
-      for (const key of ["city", "state"]) {
-        if (candidate[key] != null && (typeof candidate[key] !== "string" || !candidate[key].trim())) {
-          throw new ExportError(`${field}.${key} must be text when supplied`);
-        }
-      }
-      validateHarvestEvidence(document, candidate.location_evidence, linkedin, "in", `${field}.location_evidence`);
-    }
-
     const email = requestedValue(contact, "email", requestedFields, index);
     const phone = requestedValue(contact, "phone", requestedFields, index);
-    const storedEmail = text(contact.email);
-    if (storedEmail) validateEmailReceipt(document, contact, storedEmail, index);
-    for (const [backupIndex, backup] of (acceptedRow.backup_contacts || []).entries()) {
-      const backupEmail = text(object(backup).email);
-      if (backupEmail) validateEmailReceipt(document, backup, backupEmail, index, "zerobounce", `accepted[${index}].backup_contacts[${backupIndex}].email_validation`);
-    }
-
     return {
       Name: requiredValues.Name,
       Email: email,
@@ -371,7 +223,7 @@ export function rowsFor(document) {
       "HQ Country": text(company.hq_country),
       "Company Employee Range": range,
       Description: text(company.description),
-      ...(clientOutput ? { "Intent Signal": text(signal.signal), Signals: signalsFor(acceptedRow) } : {}),
+      ...(clientOutput ? { Signals: signalsFor(acceptedRow) } : {}),
       "Intent Details": clientOutput ? text(acceptedRow.intent_details) : intentDetails(signal),
       Phone: phone,
     };
@@ -389,51 +241,34 @@ function matrixFor(rows, columns = XLSX_COLUMNS, literalText = false) {
   ];
 }
 
-function calendarDate(value) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
-
 export function sourcesFor(document) {
+  validateOutput(document);
   const rows = [];
-  for (const [index, row] of document.accepted.entries()) {
+  for (const row of document.accepted) {
     const company = object(row.company);
-    const add = (field, evidence, signal = "", evidencePath = field) => {
+    const add = (field, evidence, signal = "") => {
       const item = object(evidence);
       const url = item.evidence_url ?? item.url;
       const date = item.evidence_date ?? item.date;
       const basis = item.evidence_date_basis ?? item.date_basis;
       const excerpt = item.evidence_text ?? item.text;
-      const source = object(item.source);
-      if (
-        typeof url !== "string" || !/^https?:\/\/[^\s]+$/.test(url)
-        || !calendarDate(date)
-        || !["published", "posted", "updated", "observed_current"].includes(basis)
-        || typeof excerpt !== "string" || !excerpt.trim()
-        || ["provider", "operation", "route_id"].some((key) => typeof source[key] !== "string" || !source[key].trim())
-      ) throw new ExportError(`accepted[${index}].${evidencePath} requires dated source evidence`);
       const observed = basis === "observed_current" ? date : text(document.retrieved_at).slice(0, 10);
-      if (!calendarDate(observed)) throw new ExportError("retrieved_at requires an observation date");
       rows.push({
         Company: text(company.canonical_name), Domain: text(company.domain), Field: field,
         Signal: signal, "Evidence Date": basis === "observed_current" ? "" : date,
         "Date Basis": basis, "Observed On": observed, "Source URL": url, "Evidence Text": excerpt,
       });
     };
-    add("Description", row.account_fit, "", "account_fit");
+    add("Description", row.account_fit);
     const signal = object(row.signal_evidence);
-    if (typeof signal.signal !== "string" || !signal.signal.trim()) {
-      throw new ExportError(`accepted[${index}].signal_evidence.signal is required`);
-    }
-    add("Signals", signal, signal.signal, "signal_evidence");
-    add("Role", row.primary_contact, "", "primary_contact");
-    add("Contact Location", row.primary_contact.location_evidence, "", "primary_contact.location_evidence");
-    add("Company Employee Range", company.employee_range_evidence, "", "company.employee_range_evidence");
+    add("Signals", signal, signal.signal);
+    add("Role", row.primary_contact);
+    add("Contact Location", row.primary_contact.location_evidence);
+    add("Company Employee Range", company.employee_range_evidence);
     for (const check of row.qualification_checks || []) {
       for (const evidence of check.evidence || []) {
         add(check.status === "pass" && text(check.signal) ? "Signals" : check.criterion,
-          evidence, text(check.signal), `qualification_checks.${check.criterion}`);
+          evidence, text(check.signal));
       }
     }
     if (text(company.classification_note)) {
@@ -470,21 +305,15 @@ function inspectionText(result) {
 }
 
 export async function exportXlsx(document, destination, options = {}) {
-  const rows = rowsFor(document);
+  if (!options.resultsPath) throw new ExportError("resultsPath is required to verify saved provider receipts");
+  const saved = JSON.parse(await fs.readFile(options.resultsPath, "utf8"));
+  if (JSON.stringify(saved) !== JSON.stringify(document)) throw new ExportError("export document differs from saved results");
+  const rows = rowsFor(document, options.resultsPath);
   const clientOutput = isClientOutput(document);
   const columns = clientOutput ? CLIENT_XLSX_COLUMNS : XLSX_COLUMNS;
   const sourceRows = clientOutput ? sourcesFor(document) : [];
-  if (rows.length) {
-    if (!options.resultsPath) throw new ExportError("resultsPath is required to verify saved HarvestAPI receipts");
-    const checked = spawnSync(process.env.TYCHE_WORKSPACE_PYTHON || "python3", [
-      fileURLToPath(new URL("./linkedin_receipts.py", import.meta.url)), path.resolve(options.resultsPath),
-    ], { input: JSON.stringify(document), encoding: "utf8", timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
-    if (checked.error || checked.status !== 0) {
-      throw new ExportError(`LinkedIn receipt validation failed: ${checked.error?.message || checked.stdout || checked.stderr}`);
-    }
-  }
-  const lastColumn = clientOutput ? "T" : "R";
-  const { Workbook, SpreadsheetFile } = await loadArtifactTool(options.nodeModules);
+  const lastColumn = clientOutput ? "S" : "R";
+  const { Workbook, SpreadsheetFile, FileBlob } = await loadArtifactTool(options.nodeModules);
   const workbook = Workbook.create();
   const sheet = workbook.worksheets.add("Leads");
   const lastRow = rows.length + 1;
@@ -514,7 +343,7 @@ export async function exportXlsx(document, destination, options = {}) {
       rowHeight: 66,
     };
     sheet.getRange(`C2:C${lastRow}`).format.wrapText = true;
-    sheet.getRange(`P2:${clientOutput ? "S" : "Q"}${lastRow}`).format.wrapText = true;
+    sheet.getRange(`P2:${clientOutput ? "R" : "Q"}${lastRow}`).format.wrapText = true;
     sheet.getRange(`O2:O${lastRow}`).format.numberFormat = "#,##0";
 
     const table = sheet.tables.add(usedRangeAddress, true, "LeadsTable");
@@ -522,8 +351,8 @@ export async function exportXlsx(document, destination, options = {}) {
     table.showFilterButton = true;
   }
 
-  const widths = clientOutput ? [...COLUMN_WIDTHS.slice(0, 16), 30, 72, ...COLUMN_WIDTHS.slice(16)] : COLUMN_WIDTHS;
-  const letters = clientOutput ? [...COLUMN_LETTERS, "S", "T"] : COLUMN_LETTERS;
+  const widths = clientOutput ? [...COLUMN_WIDTHS.slice(0, 16), 72, ...COLUMN_WIDTHS.slice(16)] : COLUMN_WIDTHS;
+  const letters = clientOutput ? [...COLUMN_LETTERS, "S"] : COLUMN_LETTERS;
   letters.forEach((column, index) => {
     sheet.getRange(`${column}1:${column}${lastRow}`).format.columnWidth = widths[index];
   });
@@ -607,17 +436,45 @@ export async function exportXlsx(document, destination, options = {}) {
 
   await fs.mkdir(path.dirname(path.resolve(destination)), { recursive: true });
   const output = await SpreadsheetFile.exportXlsx(workbook);
-  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "tyche-xlsx-"));
+  const temporaryDirectory = await fs.mkdtemp(path.join(path.dirname(path.resolve(destination)), ".tyche-xlsx-"));
   try {
     const temporaryWorkbook = path.join(temporaryDirectory, "leads.xlsx");
     await output.save(temporaryWorkbook);
-    await fs.copyFile(temporaryWorkbook, destination);
+    const restored = await SpreadsheetFile.importXlsx(await FileBlob.load(temporaryWorkbook));
+    const actual = restored.worksheets.getItem("Leads").getRange(usedRangeAddress).values;
+    const expected = matrixFor(rows, columns);
+    const formulas = restored.worksheets.getItem("Leads").getRange(usedRangeAddress).formulas;
+    if (formulas.flat().some(value => typeof value === "string" && value.startsWith("="))) throw new ExportError("Saved lead cells must be literal values");
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new ExportError("Saved workbook values differ from validated lead rows");
+    }
+    if (clientOutput) {
+      const sourceValues = restored.worksheets.getItem("Sources").getRange(`A1:I${sourceRows.length + 1}`).values;
+      const expectedSources = matrixFor(sourceRows, SOURCE_COLUMNS);
+      const sourceFormulas = restored.worksheets.getItem("Sources").getRange(`A1:I${sourceRows.length + 1}`).formulas;
+      if (sourceFormulas.flat().some(value => typeof value === "string" && value.startsWith("="))) throw new ExportError("Saved source cells must be literal values");
+      for (let i = 0; i < expectedSources.length; i++) {
+        for (let j = 0; j < SOURCE_COLUMNS.length; j++) {
+          const expectedValue = expectedSources[i][j];
+          const actualValue = sourceValues[i][j];
+          // Excel stores these calendar-date cells as serial numbers.
+          const dateValue = i > 0 && [4, 6].includes(j) && expectedValue
+            ? (Date.parse(`${expectedValue}T00:00:00Z`) - Date.UTC(1899, 11, 30)) / 86400000 : expectedValue;
+          if (actualValue !== dateValue) throw new ExportError("Saved Sources values differ from validated evidence");
+        }
+      }
+    }
+    if (JSON.stringify(JSON.parse(await fs.readFile(options.resultsPath, "utf8"))) !== JSON.stringify(document)) {
+      throw new ExportError("Saved results changed during export; review and finalize again");
+    }
+    await fs.rename(temporaryWorkbook, destination);
   } finally {
     await fs.rm(temporaryDirectory, { recursive: true, force: true });
   }
 
   const inspection = {
     used_range: usedRangeAddress,
+    saved_workbook_values_verified: true,
     region: inspectionText(regionInspection),
     formulas: inspectionText(formulaInspection),
     formula_errors: inspectionText(errorInspection),
@@ -631,33 +488,41 @@ export async function exportXlsx(document, destination, options = {}) {
 }
 
 function parseExportArgs(args) {
-  if (args.length < 2) {
-    throw new ExportError(
-      "usage: export_xlsx.mjs <results.json> <leads.xlsx> [--node-modules PATH] [--preview PATH] [--inspection PATH]",
-    );
-  }
-  const options = {};
-  for (let index = 2; index < args.length; index += 2) {
-    const flag = args[index];
-    const value = args[index + 1];
+  if (!args.length) throw new ExportError("usage: export_xlsx.mjs <results.json> [leads.xlsx] [--node-modules PATH] [--preview PATH] [--inspection PATH]");
+  const resultsPath = path.resolve(args[0]);
+  const explicitDestination = args[1] && !args[1].startsWith("--");
+  const destination = explicitDestination ? args[1] : path.join(path.dirname(resultsPath), "leads.xlsx");
+  const options = {
+    nodeModules: process.env.TYCHE_WORKSPACE_NODE_MODULES,
+    preview: path.join(path.dirname(destination), "leads-preview.png"),
+    inspection: path.join(path.dirname(destination), "leads-inspection.json"),
+  };
+  for (let index = explicitDestination ? 2 : 1; index < args.length; index += 2) {
+    const flag = args[index], value = args[index + 1];
     if (!value) throw new ExportError(`${flag} requires a path`);
     if (flag === "--node-modules") options.nodeModules = value;
     else if (flag === "--preview") options.preview = value;
     else if (flag === "--inspection") options.inspection = value;
     else throw new ExportError(`unknown option: ${flag}`);
   }
-  if (!options.nodeModules) {
-    throw new ExportError("--node-modules is required for the Codex workbook runtime");
-  }
-  return { resultsPath: args[0], destination: args[1], options };
+  if (!options.nodeModules) throw new ExportError("--node-modules is required unless TYCHE_WORKSPACE_NODE_MODULES is configured");
+  return { resultsPath, destination, options };
 }
 
 async function main() {
   try {
     const args = process.argv.slice(2);
     const { resultsPath, destination, options } = parseExportArgs(args);
-    const document = JSON.parse(await fs.readFile(resultsPath, "utf8"));
+    const resultText = await fs.readFile(resultsPath, "utf8");
+    const validation = spawnSync(process.env.TYCHE_WORKSPACE_PYTHON || "python3", [
+      fileURLToPath(new URL("./validate_run.py", import.meta.url)), resultsPath, "--show-cost-summary",
+    ], { encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024 });
+    const checked = validation.status === 0 ? JSON.parse(validation.stdout) : null;
+    if (!checked?.delivery_allowed) throw new ExportError(`Strict delivery validation failed: ${validation.error?.message || validation.stdout || validation.stderr}`);
+    if (await fs.readFile(resultsPath, "utf8") !== resultText) throw new ExportError("Saved results changed during validation");
+    const document = JSON.parse(resultText);
     const receipt = await exportXlsx(document, destination, { ...options, resultsPath });
+    await fs.writeFile(path.join(path.dirname(destination), "validation.json"), JSON.stringify(checked, null, 2) + "\n");
     process.stdout.write(`${JSON.stringify({ exported: true, path: destination, rows: receipt.rows, columns: receipt.columns })}\n`);
     return 0;
   } catch (error) {

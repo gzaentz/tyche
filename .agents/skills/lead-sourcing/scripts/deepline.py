@@ -1058,6 +1058,14 @@ def _email_validation_output(
 
 def _execution_metadata(parsed: Any) -> Dict[str, Any]:
     metadata = _output_preview_metadata(parsed)
+    if isinstance(parsed, dict):
+        for container in (parsed, parsed.get("error"), parsed.get("summary")):
+            if not isinstance(container, dict):
+                continue
+            for key in ("job_id", "request_id"):
+                value = container.get(key)
+                if isinstance(value, str) and value.strip():
+                    metadata.setdefault(key, value)
     billing = parsed.get("billing") if isinstance(parsed, dict) else None
     if isinstance(billing, dict):
         amounts = {key: value for key in ("credits_charged", "cost_usd")
@@ -1585,16 +1593,17 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
     try:
         returncode, stdout, stderr = _invoke(command, timeout_seconds)
     except CallTimeout as exc:
+        try:
+            partial = _json_from_text(exc.stdout) if exc.stdout else None
+        except ValueError:
+            partial = None
         if capture is not None and (exc.stdout or exc.stderr):
-            try:
-                partial = _json_from_text(exc.stdout)
-            except ValueError:
-                partial = None
             capture({"timed_out": True, "body": response_body(partial, exc.stdout), "stderr": exc.stderr})
         body = {
             "status": "timeout",
             "provider": "deepline",
             "operation": request["operation"],
+            **_execution_metadata(partial),
         }
         if request.get("tool"):
             body["tool"] = request["tool"]
@@ -1614,7 +1623,7 @@ def _run_command(request: Dict[str, Any], command: Sequence[str], timeout_second
     # Hunter's observed data-absence error is not an endpoint or transport 404.
     if (request["operation"] == "execute" and request.get("tool") == "hunter_companies_find"
             and request.get("entity_type") == "company" and isinstance(parsed, dict)
-            and set(parsed) <= {"ok", "error", "billing"} and parsed.get("ok") is False
+            and set(parsed) <= {"ok", "error", "billing", "job_id", "request_id"} and parsed.get("ok") is False
             and parsed.get("error") == {
                 "message": "not_found: The domain does not exist in our database",
                 "code": "UPSTREAM_NOT_FOUND", "details": {"statusCode": 404}}):

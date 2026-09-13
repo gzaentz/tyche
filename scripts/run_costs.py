@@ -58,7 +58,7 @@ class UsageReceipt:
             'started_at': now(), 'finished_at': None, 'model': model, 'reasoning_effort': effort,
             'requested_service_tier': service_tier, 'thread_id': None, 'status': 'running',
             'usage': None, 'standard_api_equivalent_usd': None, 'actual_model_billed_usd': None,
-            'responses': [], 'usage_reconciled': False,
+            'responses': [], 'compaction_response_ids': [], 'usage_reconciled': False,
             'pricing_source': PRICING_SOURCE, 'pricing_checked_on': '2026-09-13',
             'pricing_basis': 'standard_api_equivalent_not_actual_billing',
             'limitations': ['Standard rates exclude Fast/priority premiums and hosted-tool charges.',
@@ -102,6 +102,14 @@ class UsageReceipt:
             raise ValueError('Reasoning output exceeds total output')
         record = {'response_id': response_id, 'turn_id': turn_id, 'model': model,
                   'usage': usage, 'recorded_at': timestamp}
+        for key in ('session_id', 'root_turn_id'):
+            if isinstance(payload.get(key), str):
+                record[key] = payload[key]
+        for key in ('turn_token_usage', 'thread_token_usage'):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                record[key] = {k: value[k] for k in USAGE_FIELDS
+                               if type(value.get(k)) is int and value[k] >= 0}
         for previous in self.data['responses']:
             if previous['response_id'] == response_id:
                 if any(previous[k] != record[k] for k in ('turn_id', 'model', 'usage')):
@@ -110,6 +118,14 @@ class UsageReceipt:
         record['standard_api_equivalent_usd'] = estimate(usage, model, per_request=True)
         self.data['responses'].append(record)
         self.save()
+
+    def observe_compaction(self, response_id):
+        # This is the runtime's explicit linkage, never a guessed token difference.
+        if not isinstance(response_id, str) or not response_id:
+            raise ValueError('Compaction event lacks response identity')
+        if response_id not in self.data['compaction_response_ids']:
+            self.data['compaction_response_ids'].append(response_id)
+            self.save()
 
     def capture_error(self, exc):
         message = str(exc)[:300]
@@ -123,9 +139,19 @@ class UsageReceipt:
         totals = {k: sum(r['usage'][k] for r in responses) for k in USAGE_FIELDS}
         self.data['response_usage_totals'] = totals if responses else None
         final = self.data['usage']
-        self.data['usage_reconciled'] = bool(responses and final
-            and all(k in final for k in ('input_tokens', 'cached_input_tokens', 'output_tokens')) and all(
-            totals[k] == v for k, v in final.items()))
+        compactions = set(self.data['compaction_response_ids'])
+        ordinary = {k: sum(r['usage'][k] for r in responses if r['response_id'] not in compactions)
+                    for k in USAGE_FIELDS}
+        complete = bool(responses and final and all(k in final for k in
+                       ('input_tokens', 'cached_input_tokens', 'output_tokens')))
+        linked = compactions <= {r['response_id'] for r in responses}
+        basis = ('all_responses' if complete and all(totals[k] == v for k, v in final.items()) else
+                 'cli_excludes_compaction' if complete and compactions and linked
+                 and all(ordinary[k] == v for k, v in final.items()) else None)
+        self.data['usage_reconciled'] = bool(basis and linked)
+        self.data['reconciliation_basis'] = basis
+        self.data['compaction_usage_totals'] = {k: totals[k] - ordinary[k] for k in USAGE_FIELDS}
+
         if responses:
             self.data['standard_api_equivalent_usd'] = {
                 k: float(sum((Decimal(str(r['standard_api_equivalent_usd'][k])) for r in responses), Decimal(0)))
@@ -162,12 +188,30 @@ class UsageJournal:
         with self.path.open('rb') as stream:
             stream.seek(self.offset)
             while True:
+                record_start = stream.tell()
                 line = stream.readline(65537)
                 if not line:
                     break
                 if not line.endswith(b'\n') and len(line) < 65537:
                     break  # The journal writer has not finished this record yet.
                 self.offset = stream.tell()
+                # Compaction records contain large private replacement histories.
+                # Parse only a bounded record, retain just its response identity.
+                if not self.discarding and b'"type":"compacted"' in line[:200].replace(b' ', b''):
+                    if not line.endswith(b'\n'):
+                        line += stream.readline(16 * 1024 * 1024)
+                    if not line.endswith(b'\n'):
+                        if len(line) >= 16 * 1024 * 1024:
+                            raise ValueError('Compaction metadata exceeds capture limit')
+                        self.offset = record_start
+                        break
+                    self.offset = stream.tell()
+                    record = json.loads(line)
+                    payload = record.get('payload') if isinstance(record, dict) else None
+                    if not isinstance(payload, dict):
+                        raise ValueError('Invalid compaction metadata')
+                    self.receipt.observe_compaction(payload.get('compaction_response_id'))
+                    continue
                 if self.discarding or len(line) > 65536:
                     if not self.discarding and b'"token_usage_record"' in line[:1024]:
                         raise ValueError('Usage record exceeded the metadata size limit')

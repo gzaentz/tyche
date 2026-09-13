@@ -431,6 +431,7 @@ class AttemptExecutionTests(unittest.TestCase):
                   "result": {"status": "partial", "results": rows, "evidence": copy.deepcopy(rows),
                              "error": "One source failed", "billing": {"credits_charged": 0.1},
                              "pending_verification": {"job_id": "saved-job"},
+                             "provider_response": {"body": {"rows": rows, "raw_metadata": "saved on disk"}},
                              "progress_before": ["old-company:account"] * 1000,
                              "attempt": {"request": {"query": "saved query"}}}}
         original = copy.deepcopy(result)
@@ -439,6 +440,7 @@ class AttemptExecutionTests(unittest.TestCase):
         body = compact["attempts"][0]["result"]
         self.assertLess(len(json.dumps(compact)), len(json.dumps(result)) / 10)
         self.assertEqual(body["results"], rows)
+        self.assertNotIn("provider_response", body)
         for field in ("status", "error", "billing", "pending_verification"):
             self.assertEqual(body[field], result["result"][field])
         self.assertEqual(compact["stop_decision"], {"decision": "continue"})

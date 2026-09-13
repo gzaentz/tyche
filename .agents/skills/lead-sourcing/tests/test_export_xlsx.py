@@ -60,6 +60,23 @@ try {
 """
 
 
+def export_workbook(node, source, destination, node_modules):
+    # Rendering fixtures exercise the library. Full CLI delivery additionally
+    # requires the run ledger and stop policy, tested with completed run fixtures.
+    program = """
+import fs from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+const [modulePath, source, destination, nodeModules] = process.argv.slice(-4);
+const exporter = await import(pathToFileURL(modulePath));
+const document = JSON.parse(await fs.readFile(source, 'utf8'));
+const receipt = await exporter.exportXlsx(document, destination, {resultsPath:source,nodeModules});
+console.log(JSON.stringify(receipt));
+"""
+    return subprocess.run([node, '--input-type=module', '-',
+                           str(EXPORTER_PATH), str(source), str(destination), node_modules],
+                          text=True, input=program, capture_output=True)
+
+
 def accepted_document(contact_fields: list[str] | None = None) -> dict:
     effective_fields = ["email"] if contact_fields is None else contact_fields
     request = {} if contact_fields is None else {"contact_fields": contact_fields}
@@ -206,7 +223,7 @@ class ExportXlsxTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(
             match.group(1).split(","),
-            EXPECTED_COLUMNS[:16] + ["Intent Signal", "Signals"] + EXPECTED_COLUMNS[16:],
+            EXPECTED_COLUMNS[:16] + ["Signals"] + EXPECTED_COLUMNS[16:],
         )
 
     def test_maps_all_contact_and_company_columns(self):
@@ -269,14 +286,14 @@ class ExportXlsxTests(unittest.TestCase):
         document["accepted"][0]["primary_contact"].pop("email")
         result = self.run_rows_json(document)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("primary_contact.email is required", result.stderr)
+        self.assertIn("primary_contact requires requested email", result.stderr)
 
     def test_missing_or_invalid_email_validation_fails_closed(self):
         missing = accepted_document()
         missing["accepted"][0]["primary_contact"].pop("email_validation")
         result = self.run_rows_json(missing)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("requires a Deepline ZeroBounce receipt", result.stderr)
+        self.assertIn("requires a Deepline ZeroBounce email_validation receipt", result.stderr)
 
         invalid = accepted_document()
         invalid["accepted"][0]["primary_contact"]["email_validation"]["status"] = "INVALID"
@@ -288,7 +305,7 @@ class ExportXlsxTests(unittest.TestCase):
         unaccounted["routes"][0]["paid_calls"] = 0
         result = self.run_rows_json(unaccounted)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("successful paid Deepline validation route", result.stderr)
+        self.assertIn("must record its paid Deepline call", result.stderr)
 
     def test_only_explicit_valid_zerobounce_status_exports(self):
         for status in ("valid", " VALID ", "Valid"):
@@ -337,9 +354,9 @@ class ExportXlsxTests(unittest.TestCase):
             {"request": {"contact_fields": []}, "accepted": [{}]}
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("requires company and primary_contact objects", result.stderr)
+        self.assertIn("requires primary_contact", result.stderr)
 
-    def test_cli_requires_the_explicit_codex_runtime_path(self):
+    def test_cli_requires_runtime_path_when_launcher_has_not_configured_it(self):
         if not self.node:
             self.skipTest("Node.js is not available")
         result = subprocess.run(
@@ -347,9 +364,27 @@ class ExportXlsxTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            env={k: v for k, v in os.environ.items() if k != "TYCHE_WORKSPACE_NODE_MODULES"},
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("--node-modules is required", result.stderr)
+
+    def test_strict_cli_refuses_invalid_run_without_replacing_workbook(self):
+        if not self.node:
+            self.skipTest("Node.js is not available")
+        with tempfile.TemporaryDirectory() as directory:
+            source = pathlib.Path(directory) / "results.json"
+            destination = pathlib.Path(directory) / "leads.xlsx"
+            source.write_text(json.dumps(accepted_document()))
+            destination.write_bytes(b"previous workbook")
+            result = subprocess.run(
+                [self.node, str(EXPORTER_PATH), str(source), "--node-modules", directory],
+                capture_output=True, text=True, timeout=15,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Strict delivery validation failed", result.stderr)
+            self.assertEqual(destination.read_bytes(), b"previous workbook")
+            self.assertFalse((source.parent / "validation.json").exists())
 
     def test_writes_valid_styled_workbook_when_runtime_is_configured(self):
         from linkedin_fixtures import write_linkedin_receipts
@@ -367,19 +402,7 @@ class ExportXlsxTests(unittest.TestCase):
             document = json.loads(source.read_text())
             write_linkedin_receipts(source, document)
             source.write_text(json.dumps(document))
-            result = subprocess.run(
-                [
-                    self.node,
-                    str(EXPORTER_PATH),
-                    str(source),
-                    str(destination),
-                    "--node-modules",
-                    node_modules,
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+            result = export_workbook(self.node, source, destination, node_modules)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(destination.is_file())
             self.assertFalse(pathlib.Path(f"{destination}.inspect.ndjson").exists())

@@ -29,7 +29,8 @@ ledger below first. The attempt file contains one action and its wrapper input:
 }
 ```
 
-For provider execution, use a freshly described tool and its native payload.
+For provider execution, use a tool described in this run and its native payload.
+Reuse saved descriptions until changed schemas, pricing or access require a refresh.
 Every Deepline `execute` and ScrapingDog call sets `paid_calls: 1` and a priced
 whole-call bound, even if that bound is zero. The helper adds `spend`; do not
 provide a separate ledger or reset its limits. Put `phase` and `scope` on each
@@ -58,7 +59,7 @@ so recovering a damaged draft does not require inventing scope or approach label
 If only raw response bytes survived, normalize that receipt locally first. A
 pending/unknown remote outcome is not permission to retry. Async research jobs
 need their documented result-retrieval call, not another job submission.
-For a freshly described **free job-status getter only**, mark its action
+For a described **free job-status getter only**, mark its action
 `status_read: true` with a zero cost bound. Repeated reads of the same job are
 allowed only after a saved `partial` status response with a zero cost bound;
 pending transport, failures and job submissions remain protected. Respect the
@@ -76,6 +77,12 @@ does not invent a browser, scrape or API response.
 The helper never infers qualification or market exhaustion. Assess the saved
 evidence and submit company/route decisions together with `--review-file` below.
 Full strict validation remains required before delivery.
+
+The review helper fills missing email verdicts from saved same-run provider
+responses and rejects conflicts. A valid verdict remains valid when the domain
+has a catch-all flag. Before a BounceBan verification, the attempt helper checks
+the saved same-email ZeroBounce result and refuses ineligible or repeated calls.
+Recover pending jobs with the documented free status getter; never resubmit them.
 
 The attempt CLI prints normalized provider results once, with the full receipt
 path. Repeated progress snapshots, request metadata and duplicate evidence stay
@@ -222,7 +229,7 @@ before dispatch. All callers for a run must use the same results file. Confirmed
 charges plus outstanding maximum costs plus the next call and protected
 verification balance must fit every cap. Only Deepline requests marked
 `entity_type: "email_validation"` consume the verification allowance. Use that
-metadata only for a freshly described validation tool, never for discovery.
+metadata only for a validation tool described in this run, never for discovery.
 `spend_receipt` identifies the ledger entry; record its route ID, accepted-lead
 count, and actual cost or retained upper bound in the usual result fields.
 Mark email-validation `next_actions` with the same `entity_type` so the stopping
