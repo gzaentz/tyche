@@ -257,6 +257,9 @@ while repeatedly starting new country searches.
   material contradictions, not merely overlapping headcount ranges.
   A requested funding stage describes current status: check for a later round,
   acquisition or IPO before treating a historical financing as a stage match.
+  Resolve these checks before contact spend and save the result once in the
+  existing qualification evidence; conflicting must-haves stay unresolved or
+  receive an evidenced rejection. Do not enrich contacts to rescue a failed account.
 - Corroborate facts across credible sources for the same identified project.
   A recent announcement or substantive progress update can establish activity
   within the requested window; drawings, specifications or another project

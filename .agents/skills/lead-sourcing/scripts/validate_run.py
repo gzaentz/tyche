@@ -151,19 +151,40 @@ def progress_snapshot(document: dict) -> list[str]:
     return sorted(facts)
 
 
-def stalled_approaches(document: dict) -> set[str]:
-    attempts = [r for r in document.get("routes", []) if isinstance(r, dict)
+def _research_key(value: dict) -> Optional[tuple]:
+    scope = _route_scope(value) or "discovery"
+    phase = value.get("phase") or ("account_discovery" if scope == "discovery" else "account_verification")
+    return (scope, phase) if isinstance(scope, str) and isinstance(phase, str) else None
+
+
+def stalled_approaches(document: dict, action: Optional[dict] = None) -> set[str]:
+    """Compare research in the same scope/phase, not independent verification work."""
+    groups = {}
+    for route in [r for r in document.get("routes", []) if isinstance(r, dict)
                 and r.get("entity_type") != "tool_catalog" and isinstance(r.get("approach"), str)
                 and isinstance(r.get("progress_before"), list)
                 and all(isinstance(k, str) for k in r["progress_before"])
-                and r.get("provider_status") in {"ok", "no_results"}]
-    if len(attempts) < 2:
-        return set()
-    first, second = attempts[-2:]
-    if (set(second["progress_before"]) - set(first["progress_before"])
-            or set(progress_snapshot(document)) - set(second["progress_before"])):
-        return set()
-    return {first["approach"], second["approach"]}
+                and r.get("provider_status") in {"ok", "no_results"}]:
+        key = _research_key(route)
+        # These resolve a specific target. Original-request duplicate protection
+        # still applies; another person/email or a new phase is useful work.
+        if (key is None or key[1] in {"contact_verification", "email_validation"}
+                or (action is not None and key != _research_key(action))):
+            continue
+        groups.setdefault(key, []).append(route)
+    current, stalled = progress_snapshot(document), set()
+    for (scope, _), attempts in groups.items():
+        if len(attempts) < 2:
+            continue
+        first, second = attempts[-2:]
+
+        def facts(snapshot):
+            return {f for f in snapshot if scope == "discovery" or f.startswith(scope + ":")}
+
+        if not (facts(second["progress_before"]) - facts(first["progress_before"])
+                or facts(current) - facts(second["progress_before"])):
+            stalled.update((first["approach"], second["approach"]))
+    return stalled
 
 
 def _route_scope(route: dict) -> Optional[str]:
@@ -1449,8 +1470,7 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
     next_lead_limit = limits.get("max_deepline_credits_per_next_lead", request_budget.get("max_deepline_credits_per_next_lead"))
     blocked_kinds: list[str] = []
     needs_pricing = False
-    stalled = stalled_approaches(document)
-    stalled_keys = {_approach_key(a) for a in stalled}
+    stalled = set()
     strategy_changes = []
     for action in actions:
         if not isinstance(action, dict):
@@ -1491,16 +1511,17 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
             errors.append(f"{aid}: public_web actions must have zero provider cost and paid calls")
             continue
         approach = action.get("approach")
+        action_stalls = stalled_approaches(document, action)
+        stalled.update(action_stalls)
+        stalled_keys = {_approach_key(a) for a in action_stalls}
         repeated_recovery = scope in reviewed and any(
             _route_scope(r) == scope and r.get("entity_type") != "tool_catalog"
             and r.get("provider_status") in {"ok", "no_results"}
-            and ((isinstance(approach, str) and isinstance(r.get("approach"), str)
-                  and _approach_key(approach) == _approach_key(r["approach"]))
-                 or (action.get("request_fingerprint")
-                     and action["request_fingerprint"] == r.get("request_fingerprint")))
+            and action.get("request_fingerprint") == r.get("request_fingerprint")
+            and action.get("request_fingerprint")
             for r in document.get("routes", []) if isinstance(r, dict))
         if action.get("entity_type") != "tool_catalog" and (
-                ((stalled or scope in reviewed) and not _nonempty_text(approach))
+                ((action_stalls or scope in reviewed) and not _nonempty_text(approach))
                 or repeated_recovery
                 or (isinstance(approach, str) and _approach_key(approach) in stalled_keys)):
             strategy_changes.append(aid)
@@ -1553,6 +1574,9 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
                 not route.get("approach") or route["approach"] == a.get("approach"))))]
         if not candidates:
             missing_routes.append(route.get("route_id"))
+    # A reviewed gap can have concrete new work; it is not parked while that
+    # work is eligible. Exhaustion still requires the existing source review.
+    result["parked_scopes"] = sorted(reviewed - {a["scope"] for a in actions if a["id"] in result["eligible_actions"]})
     result.update(strategy_change_required=bool(strategy_changes), stalled_approaches=sorted(stalled),
                   missing_routes=missing_routes)
     if document.get("stop_reason") == "no_productive_route" and not actions:

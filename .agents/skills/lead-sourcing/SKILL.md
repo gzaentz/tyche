@@ -34,7 +34,7 @@ once. The default shared provider budget is USD 0.50 per requested lead.
    batching. Preserve required filters and provider-native limits.
 2. **Check up to three companies concurrently.** Use the [batch helper](references/adapter-io.md#concurrent-company-checks).
    Batch ready independent checks across phases without waiting to fill batches.
-   Review actual sources for required fit and signals before buyer lookup;
+   Review required fit, current stage, acquisition history and dated signals before buyer lookup;
    distinguish announced, conditional, planned and completed activity. Resolve
    company LinkedIn URLs from sources before enrichment; never invent slugs.
    Then verify requested roles and fields.
@@ -47,14 +47,14 @@ once. The default shared provider budget is USD 0.50 per requested lead.
    Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
    Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size):
    accepted contacts need country; companies need published employee range and source.
-3. **Save the review and repeat.** Use [one review file](references/adapter-io.md#save-a-review)
-   for company decisions, checked routes and useful next actions. The helper
-   updates counts and retires completed work; follow its decision without
-   repeating checks or calculating totals. Park reviewed gaps; reopen for concrete
-   new sources. After two attempts without verified progress, change source family
-   or evidence target.
+3. **Save the review and repeat.** After each batch, use [one review file](references/adapter-io.md#save-a-review)
+   for company/contact facts, checked routes and useful next actions. Accept fully
+   qualified leads immediately; keep incomplete candidates unresolved. The helper
+   updates counts and retires completed work. After two comparable research attempts
+   within the same company and phase without verified progress, change strategy.
+   Independent profile/email checks remain eligible; never repeat an uncertain call.
 
-Read only needed receipt fields. Never read the live launcher's log from the
+Use `--receipt <route-id>` for compact saved evidence. Never read the live launcher's log from the
 worker; it recursively repeats history. Use `--status` for progress.
 
 Continue useful affordable work across batches; report checkpoints in commentary.

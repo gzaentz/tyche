@@ -228,18 +228,33 @@ def _fingerprint(provider, request):
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def _prepare(run_file, spec):
-    action, request = copy.deepcopy(spec["action"]), copy.deepcopy(spec["request"])
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", action.get("id", "")):
-        raise ValueError("action.id must be a safe unique route ID")
+def _validate_spec(spec, label="input"):
+    """Reject malformed input before any member of a batch is planned or sent."""
+    example = ('Use {"action": {"id": "lookup-1", "scope": "discovery", '
+               '"phase": "account_discovery", "approach": "tool-discovery", '
+               '"description": "Find research tools", "provider": "deepline", '
+               '"paid_calls": 0, "cost_upper_bound_credits": 0}, '
+               '"request": {"operation": "search", "query": "company research"}}.')
+    if not isinstance(spec, dict):
+        raise ValueError(f"{label} must be an action/request object. {example}")
+    for field in ("action", "request"):
+        if not isinstance(spec.get(field), dict):
+            raise ValueError(f"{label}.{field} must be an object. {example}")
+    action = spec["action"]
+    if not isinstance(action.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", action["id"]):
+        raise ValueError(f"{label}.action.id must be a safe unique route ID. {example}")
     for field in ("scope", "description", "phase", "approach", "provider"):
         if not isinstance(action.get(field), str) or not action[field].strip():
-            raise ValueError(f"action.{field} is required")
+            raise ValueError(f"{label}.action.{field} is required. {example}")
     if action["phase"] not in {"account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"}:
-        raise ValueError("invalid sourcing phase")
+        raise ValueError(f"{label}.action.phase is not a sourcing phase")
+    if action["provider"] not in {"deepline", "scrapingdog", "public_web"}:
+        raise ValueError(f"{label}.action.provider must use an existing provider wrapper")
+
+
+def _prepare(run_file, spec):
+    action, request = copy.deepcopy(spec["action"]), copy.deepcopy(spec["request"])
     provider = action["provider"]
-    if provider not in {"deepline", "scrapingdog", "public_web"}:
-        raise ValueError("use an existing provider wrapper")
     adapter = None if provider == "public_web" else importlib.import_module(provider)
     if adapter:
         request = (adapter._validate_request(request) if provider == "deepline" else adapter.validate_request(request))
@@ -378,6 +393,7 @@ def finish_attempt(run_file, route_id, body, *, check_stop=True):
 
 
 def _start_attempt(run_file, spec, *, plan_only=False):
+    _validate_spec(spec)
     budget_guard.load_ledger(run_file)  # Refuse imported state before planning or dispatch.
     if spec["action"]["provider"] == "public_web" and not plan_only:
         raise ValueError("public web: use --plan-only, then record the observed result with --complete")
@@ -430,13 +446,10 @@ def run_batch(run_file, specs, *, execute=None, plan_only=False):
     if not isinstance(specs, list) or not 1 <= len(specs) <= 3:
         raise ValueError("a batch requires 1-3 independent company checks")
     ids, scopes = set(), set()
-    for spec in specs:
-        if not isinstance(spec, dict) or not isinstance(spec.get("action"), dict) or not isinstance(spec.get("request"), dict):
-            raise ValueError("each batch item requires action and request objects")
+    for index, spec in enumerate(specs):
+        _validate_spec(spec, f"batch[{index}]")
         action = spec["action"]
         rid, scope = action["id"], action["scope"]
-        if not isinstance(rid, str) or not isinstance(scope, str):
-            raise ValueError("batch route IDs and company scopes must be strings")
         scope = scope.strip().lower()
         if rid in ids or scope in scopes:
             raise ValueError("batch actions need unique route IDs and distinct canonical company scopes")
@@ -518,13 +531,22 @@ def cli_output(result):
     return output
 
 
+def read_receipt(run_file, route_id):
+    """Read saved evidence through the same display projection used at dispatch."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", route_id):
+        raise ValueError("invalid route ID")
+    path = Path(run_file).resolve(strict=True).parent / "receipts" / (route_id + ".json")
+    return {"route_id": route_id, "receipt_file": str(path), "result": budget_guard.read_object(path)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", type=Path)
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--input-file", type=Path, help="JSON containing action and wrapper request")
+    mode.add_argument("--input-file", type=Path, help="one action/request object or an array of 1-3 independent company checks")
     mode.add_argument("--batch-files", type=Path, nargs="+", help="1-3 company checks, as attempt files or one JSON array")
     mode.add_argument("--complete", help="record this route's saved normalized receipt, without dispatch")
+    mode.add_argument("--receipt", help="read a saved route's compact evidence without dispatching or writing")
     mode.add_argument("--review-file", type=Path, help="save company decisions and close reviewed routes together")
     mode.add_argument("--status", action="store_true", help="show the authoritative request and compact current work")
     mode.add_argument("--finalize", action="store_true", help="prepare reviewed completion metadata and run strict delivery validation")
@@ -540,17 +562,18 @@ def main():
             result = save_review(args.results, load_json(args.review_file.read_text()))
             result = {"request_file": str(args.results), **{k: v for k, v in result.items() if k != "request"}}
         elif args.complete:
-            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", args.complete):
-                raise ValueError("invalid route ID")
-            body = load_json((args.results.parent / "receipts" / (args.complete + ".json")).read_text())
-            result = finish_attempt(args.results, args.complete, body)
+            result = finish_attempt(args.results, args.complete, read_receipt(args.results, args.complete)["result"])
+        elif args.receipt:
+            result = read_receipt(args.results, args.receipt)
         elif args.batch_files:
             specs = [load_json(path.read_text()) for path in args.batch_files]
             if len(specs) == 1 and isinstance(specs[0], list):
                 specs = specs[0]
             result = run_batch(args.results, specs, plan_only=args.plan_only)
         else:
-            result = run_attempt(args.results, load_json(args.input_file.read_text()), plan_only=args.plan_only)
+            spec = load_json(args.input_file.read_text())
+            execute = run_batch if isinstance(spec, list) else run_attempt
+            result = execute(args.results, spec, plan_only=args.plan_only)
         print(json.dumps(cli_output(result), ensure_ascii=True, allow_nan=False))
         if args.batch_files or args.input_file:
             return result.get("exit_code", 0)

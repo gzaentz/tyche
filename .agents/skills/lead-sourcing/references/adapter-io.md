@@ -9,7 +9,7 @@ run from the repository root.
 ## One attempt
 
 Use `scripts/run_attempt.py <results.json> --input-file <attempt.json>` for normal
-dispatch. It composes the existing wrappers, budget guard and route recorder;
+dispatch, using one object or an array of independent company checks. It composes the existing wrappers, budget guard and route recorder;
 there is no new provider or orchestration service. Initialize the run and paid
 ledger below first. The attempt file contains one action and its wrapper input:
 
@@ -40,8 +40,11 @@ evidence in accepted rows or contact-stage unresolved rows.
 Use stable `approach` labels describing the source family and search/evidence
 strategy, not tool names, batch numbers or cosmetic rewordings. The helper hashes
 the actual request, so changing a route ID or approach label cannot repeat a
-possibly billed request. Two completed substantive attempts without new verified
-milestones require a changed approach. Catalog reads do not count as progress.
+possibly billed request. Two comparable research attempts within the same scope
+and phase without new verified milestones require a changed approach. Progress
+at another company does not reset that company's research. Profile/email checks
+for distinct targets and advancement to another phase remain eligible; finishing
+one source does not exhaust the company. Catalog reads do not count as progress.
 
 The helper saves `receipts/<action-id>.json` before updating run state. A crash
 leaves the route pending and retains any reservation. Resume a saved normalized
@@ -94,12 +97,14 @@ It is not sent to the provider. Multiple matching roles require review; a headli
 or a historical role without an end date does not establish the current title.
 Finder email flags never replace ZeroBounce or eligible BounceBan validation.
 Repeated progress snapshots, request metadata and duplicate evidence stay in
-the receipt. Inspect specific saved fields when needed; the CLI view does not
-truncate or replace the underlying evidence or accounting.
+the receipt. Reopen it with `run_attempt.py <results.json> --receipt <route-id>`
+to reuse this compact view without dispatching or changing state. Inspect specific
+raw fields only for a missing fact or contradiction; full receipts remain saved.
 
 ## Save a review
 
-After a completed batch, write one review file. Use existing company rows and
+After each completed batch, save reviewed contact facts and fully qualified
+leads without waiting for the remaining companies. Write one review file using existing company rows and
 their full evidence; `state` is `accepted`, `unresolved` or `rejected`. Unresolved
 rows retain `stage: "account"` or `"contact"` and the missing facts in
 `reason_text`. A route review needs only its ID and your reason that this exact
@@ -144,17 +149,16 @@ After the pilot, use one agent and up to three ready checks for different
 companies. Use fewer when fewer checks are ready or the remaining lead shortfall
 is smaller. Batch ready checks instead of calling them one by one; different
 companies may be at different phases. Do not wait to fill a batch.
-Each file uses the same `action`/`request` format above:
+Save the same `action`/`request` objects above as an array in `batch.json`:
 
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
-  reports/<run-id>/results.json --batch-files \
-  reports/<run-id>/check-a.json reports/<run-id>/check-b.json reports/<run-id>/check-c.json
+  reports/<run-id>/results.json --input-file reports/<run-id>/batch.json
 ```
 
-Alternatively, save those 1-3 objects as a JSON array in `batch.json` and pass
-`--batch-files reports/<run-id>/batch.json`. Use either one array file or
-individual attempt files; the same independence and budget checks apply.
+The existing `--batch-files` option remains compatible with one array file or
+multiple individual attempt files. All paths use the same execution, independence
+and budget checks. Missing input fields identify their item before dispatch.
 
 Give each action a unique route ID and its canonical company domain as `scope`.
 Batch mode accepts account verification, contact discovery, contact verification

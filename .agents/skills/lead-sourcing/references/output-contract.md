@@ -899,16 +899,19 @@ Account gaps require an account discovery/verification review; contact gaps
 require a contact discovery/verification or email-validation review. Retain all
 receipts and qualification checks. Parking does not qualify or reject a company,
 hide an actionable frontier entry, or establish whole-run exhaustion.
-Remove speculative follow-ups; reopen only for a concrete new source or
-capability with a different stable approach, explained in the action description.
+Remove speculative follow-ups; reopen for a concrete new source, verification
+target or next phase, explained in the action description. An eligible next
+action reopens the company; completing a receipt alone does not exhaust it.
 
 The attempt helper adds optional audit metadata without changing client output:
 `scope`, stable `approach`, `request_fingerprint`, and verified `progress_before`
-milestones. Two completed non-catalog attempts without new verified milestones
-require a different approach. A provider switch alone is not a strategy change.
-Version labels such as `-v117` do not change the approach. Parked-company actions
-cannot repeat a completed approach or request fingerprint; discovering new
-evidence requires an actual source/target change, not a rephrased label.
+milestones. Two comparable research attempts within the same scope and phase
+without new verified milestones require a different approach. A provider switch
+or version label such as `-v117` is not a strategy change. Other companies' progress
+does not reset a company's research. Distinct profile/email verification targets
+and advancement to another phase remain eligible without renaming the approach.
+Request fingerprints still protect against duplicate or uncertain paid calls;
+use saved receipts and status continuations rather than resubmitting them.
 Actionable frontier entries must retain a matching next action or continuation;
 covering only the generic discovery scope cannot hide an untried research path.
 
@@ -1472,6 +1475,11 @@ unverified optional values as empty cells rather than placeholder text.
   The helpers require
   these fields and preserve the authored text; factual accuracy and natural prose
   are sourcing-agent review responsibilities, not regex or extra model-call gates.
+
+  Hypothetical example with two verified signals:
+
+  > AsterPay announced a banking partnership on 10 August 2026 to add local settlement in Malaysia. The additional settlement option could increase the importance of bank integration and reconciliation within its merchant payments platform. On 2 September 2026, it advertised integration-engineering and payments-operations roles. Those openings are consistent with work to connect payment partners and support day-to-day processing. Together, the partnership and hiring suggest AsterPay is building the technical and operational capacity to support broader payment coverage for merchants.
+
 - Use `assets/leadpoet_industry_taxonomy.json`, a versioned PP snapshot with
   pinned provenance. Select the company's business activity from evidence, not
   the customer's industry or the technology merely mentioned in a job posting.

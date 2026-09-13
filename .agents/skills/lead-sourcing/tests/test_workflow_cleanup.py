@@ -84,6 +84,88 @@ class ScopedResearchTests(unittest.TestCase):
             runner.run_attempt(self.path, spec, execute=dispatch)
         dispatch.assert_not_called()
 
+    def test_alternate_profiles_use_existing_ledger_and_duplicate_requests_stay_blocked(self):
+        doc = json.loads(self.path.read_text())
+        doc["unresolved"].append(dict(stage="contact", candidate={"domain": "qualified.example"},
+            reason_text="Find a current buyer with a valid work email.",
+            qualification_checks=[dict(criterion="product", importance="required", status="pass",
+                                       evidence=[{"url": "https://qualified.example/products"}])]))
+        self.path.write_text(json.dumps(doc))
+        for index in range(3):
+            spec = self.fixture.spec(f"profile-{index}", query=f"person-{index}", paid=True)
+            spec["action"].update(phase="contact_verification", scope="qualified.example")
+            self.assertEqual(runner.run_attempt(self.path, spec,
+                execute=self.fixture.paid_response)["exit_code"], 0)
+        before = runner.budget_guard.ledger_path(self.path).read_bytes()
+        spec = self.fixture.spec("renamed-route", query="person-0", approach="cosmetic-label", paid=True)
+        spec["action"].update(phase="contact_verification", scope="qualified.example")
+        dispatch = Mock()
+        with self.assertRaisesRegex(ValueError, "already attempted or pending"):
+            runner.run_attempt(self.path, spec, execute=dispatch)
+        dispatch.assert_not_called()
+        self.assertEqual(runner.budget_guard.ledger_path(self.path).read_bytes(), before)
+        self.assertEqual(len(runner.budget_guard.load_ledger(self.path)["calls"]), 3)
+
+
+class IndependentProgressTests(unittest.TestCase):
+    def document(self, scopes, phase="account_verification"):
+        doc = exhausted_result()
+        doc["routes"], doc["stop_audit"]["route_frontier"] = [], []
+        doc["unresolved"] = [dict(stage="contact", candidate={"domain": scope},
+            reason_text="Review saved; the next contact still needs verification.") for scope in set(scopes)]
+        snapshot = VALIDATOR.progress_snapshot(doc)
+        for index, scope in enumerate(scopes):
+            rid = f"checked-{index}"
+            doc["routes"].append(dict(route_id=rid, scope=scope, phase=phase,
+                provider="public_web", operation="search", paid_calls=0,
+                provider_status="ok", cost_basis="actual", cost_credits=0,
+                cost_upper_bound_credits=0, approach="same-source", progress_before=snapshot,
+                request_fingerprint=hashlib.sha256(rid.encode()).hexdigest()))
+            doc["stop_audit"]["route_frontier"].append(dict(route_id=rid, scope=scope,
+                state="exhausted", exhaustion_basis="no_new_unique_candidates",
+                reason="Reviewed this response; continue the remaining work."))
+        return doc
+
+    def next_action(self, doc, scope, phase):
+        doc["stop_check"]["next_actions"] = [dict(action("next", scope=scope),
+            phase=phase, approach="same-source", request_fingerprint="f" * 64)]
+        return VALIDATOR.evaluate_stop(doc, now=NOW)
+
+    def test_successful_checks_at_other_companies_do_not_block_next_company(self):
+        for phase in ("account_verification", "contact_verification", "email_validation"):
+            with self.subTest(phase=phase):
+                doc = self.document(["you.example", "brankas.example"], phase)
+                self.assertEqual(self.next_action(doc, "liquid.example", phase)["eligible_actions"], ["next"])
+
+    def test_new_verification_target_reopens_reviewed_company_without_renaming(self):
+        for phase in ("contact_verification", "email_validation"):
+            with self.subTest(phase=phase):
+                doc = self.document(["one.example"] * 2, phase)
+                decision = self.next_action(doc, "one.example", phase)
+                self.assertEqual(decision["eligible_actions"], ["next"])
+                self.assertNotIn("one.example", decision["parked_scopes"])
+                doc["stop_check"]["next_actions"][0]["request_fingerprint"] = doc["routes"][-1]["request_fingerprint"]
+                self.assertEqual(VALIDATOR.evaluate_stop(doc, now=NOW)["eligible_actions"], [])
+
+    def test_completing_a_route_does_not_block_the_next_phase(self):
+        doc = self.document(["one.example"] * 2, "contact_discovery")
+        self.assertEqual(self.next_action(doc, "one.example", "contact_verification")["eligible_actions"], ["next"])
+
+    def test_same_company_research_stalls_despite_unrelated_progress(self):
+        doc = self.document(["one.example"] * 2)
+        doc["unresolved"].append(dict(stage="contact", candidate={"domain": "other.example"}))
+        self.assertEqual(self.next_action(doc, "one.example", "account_verification")["eligible_actions"], [])
+        doc["unresolved"][0]["qualification_checks"] = [dict(criterion="funding", importance="required",
+            status="pass", evidence=[{"url": "https://one.example/funding"}])]
+        self.assertEqual(self.next_action(doc, "one.example", "account_verification")["eligible_actions"], ["next"])
+
+    def test_malformed_route_keys_do_not_crash_progress_comparison(self):
+        for field in ("scope", "phase"):
+            with self.subTest(field=field):
+                doc = self.document(["one.example"] * 2)
+                doc["routes"][0][field] = {"malformed": True}
+                self.assertEqual(self.next_action(doc, "one.example", "account_verification")["eligible_actions"], ["next"])
+
 
 class ExhaustionReviewTests(unittest.TestCase):
     def test_parked_company_stays_unresolved_while_fresh_discovery_runs(self):

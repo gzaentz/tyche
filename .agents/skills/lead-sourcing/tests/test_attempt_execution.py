@@ -415,7 +415,57 @@ class AttemptExecutionTests(unittest.TestCase):
     def test_batch_array_uses_same_wrapper_receipts_and_budget(self):
         self.check_batch_cli(array_file=True)
 
-    def check_batch_cli(self, array_file=False):
+    def test_input_file_array_uses_existing_batch_execution(self):
+        self.check_batch_cli(array_file=True, flag="--input-file")
+
+    def test_malformed_specs_identify_field_before_any_dispatch(self):
+        execute = Mock()
+        before = self.path.read_bytes()
+        for field in ("action", "request"):
+            spec = self.spec()
+            spec.pop(field)
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, field):
+                runner.run_attempt(self.path, spec, execute=execute)
+        specs = self.company_specs()
+        specs[1]["action"].pop("description")
+        with self.assertRaisesRegex(ValueError, r"batch\[1\].action.description"):
+            runner.run_batch(self.path, specs, execute=execute)
+        execute.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(budget_guard.load_ledger(self.path)["calls"], {})
+
+    def test_receipt_cli_is_compact_read_only_and_preserves_material_results(self):
+        runner.run_attempt(self.path, self.spec(), execute=self.free_response)
+        receipt = self.path.parent / "receipts/one.json"
+        body = json.loads(receipt.read_text())
+        body.update(tool="harvestapi_get_profile", status="provider_error",
+            errors=["Lookup partially failed"], billing={"credits_charged": 0.14},
+            pending_verification={"job_id": "pending-job"},
+            results=[dict(entity_type="person", contact_name="Fixture Person", location="Singapore",
+                evidence_date="2026-09-01", evidence_url="https://example.com/source",
+                position_review="ambiguous", missing_fields=["contact_email"],
+                profilePicture="unneeded" * 10000)])
+        receipt.write_text(json.dumps(body))
+        files = [self.path, budget_guard.ledger_path(self.path), receipt]
+        before = [p.read_bytes() for p in files]
+        output = subprocess.run([sys.executable, runner.__file__, str(self.path), "--receipt", "one"],
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(output.returncode, 0, output.stderr)
+        shown = json.loads(output.stdout)
+        self.assertEqual(shown["receipt_file"], str(receipt.resolve()))
+        for key in ("status", "errors", "billing", "pending_verification"):
+            self.assertEqual(shown["result"][key], body[key])
+        for key in ("contact_name", "location", "evidence_date", "evidence_url", "position_review", "missing_fields"):
+            self.assertEqual(shown["result"]["results"][0][key], body["results"][0][key])
+        self.assertLess(len(output.stdout), len(receipt.read_text()) / 10)
+        self.assertEqual([p.read_bytes() for p in files], before)
+        for bad_id in ("../one", "missing"):
+            failed = subprocess.run([sys.executable, runner.__file__, str(self.path), "--receipt", bad_id],
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(failed.returncode, 2)
+        self.assertEqual([p.read_bytes() for p in files], before)
+
+    def check_batch_cli(self, array_file=False, flag="--batch-files"):
         stub = self.path.parent / "fake-deepline"
         stub.write_text(f"#!{sys.executable}\nimport json\n"
                         "print(json.dumps({'status': 'no_results', 'results': [], "
@@ -430,7 +480,7 @@ class AttemptExecutionTests(unittest.TestCase):
             batch = self.path.parent / "batch.json"
             batch.write_text(json.dumps(self.company_specs()))
             files = [str(batch)]
-        result = subprocess.run([sys.executable, runner.__file__, str(self.path), "--batch-files", *files],
+        result = subprocess.run([sys.executable, runner.__file__, str(self.path), flag, *files],
                                 env=dict(os.environ, DEEPLINE_BIN=str(stub)), capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         output = json.loads(result.stdout)
