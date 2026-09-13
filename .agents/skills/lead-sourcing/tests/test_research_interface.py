@@ -191,6 +191,37 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(guard.ledger_path(self.path).read_bytes(), before)
         self.assertEqual(output["exit_code"], 0)
 
+    def test_aliases_share_normalization_and_paid_duplicate_protection(self):
+        runner.run_lookup(self.path, {"request": {"op": " CATALOG-DESCRIBE ", "name": " fixture-search "}}, execute=catalog)
+        value = lookup()
+        value["request"] = {"op": " EXECUTE ", "name": "fixture-search", "input": {"query": "payment product"}}
+        original = copy.deepcopy(value)
+        paid = Mock(side_effect=self.fixture.paid_response)
+        runner.run_lookup(self.path, value, execute=paid)
+        self.assertEqual(value, original)
+        route = json.loads(self.path.read_text())["routes"][-1]
+        self.assertEqual((route["operation"], route["paid_calls"], route["cost_credits"]), ("execute", 1, 0.1))
+        ledger = guard.ledger_path(self.path).read_bytes()
+        legacy = self.fixture.spec("repeat", query="payment product", paid=True)
+        with self.assertRaisesRegex(ValueError, "already attempted"):
+            runner.run_attempt(self.path, legacy, execute=paid)
+        self.assertEqual(paid.call_count, 1)
+        self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
+
+    def test_both_input_formats_use_adapter_normalization(self):
+        for provider, request in (
+                ("deepline", {"operation": "EXECUTE", "tool": "fixture-search", "payload": {"query": "payments"}}),
+                ("deepline", {"op": "tools_search", "q": " payments "}),
+                ("scrapingdog", {"op": " GOOGLE_SEARCH ", "q": " payments "})):
+            with self.subTest(provider=provider, request=request):
+                value = dict(lookup(), provider=provider, request=request)
+                concise = runner.research_input.prepare_lookup(value)
+                legacy = {"action": copy.deepcopy(concise["action"]), "request": request}
+                _, action, normalized = runner._validate_spec(legacy)
+                _, concise_action, concise_request = runner._validate_spec(concise)
+                self.assertEqual(concise_request, normalized)
+                self.assertEqual(concise_action, action)
+
     def test_bad_payloads_and_phase_fail_before_any_planning_or_dispatch(self):
         self.describe()
         invalid = [lookup(), lookup(), lookup(), lookup()]
@@ -276,8 +307,45 @@ class IncrementalReviewTests(unittest.TestCase):
         runner.save_review(self.path, review)
         row = json.loads(self.path.read_text())["rejected"][0]
         self.assertEqual(row["reason_code"], "not_icp_fit")
-        self.assertIn(source, row["qualification_checks"][1]["evidence"])
+        self.assertEqual(row["qualification_checks"][1]["evidence"], review["companies"][0]["qualification_checks"][0]["evidence"])
         self.assertEqual(row["candidate"]["hq_country"], "Singapore")
+
+    def test_criterion_variants_refine_one_judgment_and_keep_omitted_signal(self):
+        check = {"criterion": "  Buyer   Hiring ", "importance": "preferred", "status": "unknown",
+                 "signal": "HIRING", "claim": "No dated opening verified", "evidence": []}
+        runner.save_review(self.path, {"companies": [{"scope": "builder.example", "qualification_checks": [check]}]})
+        check.pop("signal")
+        check.update(criterion="BUYER hiring", status="pass", claim="An operations role is open",
+                     evidence=[{"url": "https://builder.example/careers", "text": "Operations role open"}])
+        for name in ("BUYER hiring", "buyer hiring", " buyer   hiring "):
+            check["criterion"] = name
+            runner.save_review(self.path, {"companies": [{"scope": "builder.example", "qualification_checks": [check]}]})
+        row = next(r for r in json.loads(self.path.read_text())["unresolved"] if r["candidate"]["domain"] == "builder.example")
+        self.assertEqual(len(row["qualification_checks"]), 3)
+        saved = row["qualification_checks"][-1]
+        self.assertEqual((saved["criterion"], saved["signal"], saved["status"]), ("buyer hiring", "HIRING", "pass"))
+        self.assertEqual(saved["evidence"], check["evidence"])
+        check.update(criterion="buyer hiring", signal="MARKET_EXPANSION")
+        runner.save_review(self.path, {"companies": [{"scope": "builder.example", "qualification_checks": [check]}]})
+        row = next(r for r in json.loads(self.path.read_text())["unresolved"] if r["candidate"]["domain"] == "builder.example")
+        self.assertEqual(row["qualification_checks"][-1]["signal"], "MARKET_EXPANSION")
+
+    def test_duplicate_criterion_updates_and_ambiguous_saved_checks_are_atomic(self):
+        check = {"criterion": "recent_intent", "importance": "required", "status": "unknown",
+                 "claim": "The date remains unknown", "evidence": []}
+        for existing_duplicates in (False, True):
+            with self.subTest(existing_duplicates=existing_duplicates):
+                doc = copy.deepcopy(self.doc)
+                if existing_duplicates:
+                    doc["unresolved"][0]["qualification_checks"].append(dict(check, criterion=" RECENT_INTENT "))
+                self.path.write_text(json.dumps(doc))
+                before, ledger = self.path.read_bytes(), guard.ledger_path(self.path).read_bytes()
+                incoming = [check] if existing_duplicates else [check, dict(check, criterion=" RECENT_INTENT ")]
+                with self.assertRaisesRegex(ValueError, "duplicate|multiple"):
+                    runner.save_review(self.path, {"companies": [{"scope": "builder.example", "company": {"hq_country": "Singapore"},
+                                                                  "qualification_checks": incoming}]})
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
 
     def test_identity_change_unsupported_rejection_and_incomplete_acceptance_are_atomic(self):
         before, ledger = self.path.read_bytes(), guard.ledger_path(self.path).read_bytes()
@@ -303,7 +371,8 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
         path = Path(directory.name) / "results.json"
         sample = client_document()
         request = sample["request"]
-        request["buying_signals"] = [{"kind": "PRODUCT_LAUNCH", "query": "Recent operational integration"}]
+        request["buying_signals"] = [{"kind": "PRODUCT_LAUNCH", "query": "Recent operational integration"},
+                                    {"kind": "HIRING", "query": "Preferred operations hiring", "max_age_days": 90}]
         runner.start_run(path, {"request": request, "verification_reserve_credits": 0.1})
         row = sample["accepted"][0]
         # Facts are fixtures; no live research or provider is called in this test.
@@ -317,6 +386,35 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
         runner.save_review(path, {"companies": [{"scope": "example.com", "company": row["company"],
             "reason_text": "Company evidence reviewed; contact checks pending"}],
             "routes": [{"route_id": rid, "reason": "Reviewed factual business and integration evidence"}]})
+
+        # Replace an unresolved observation with selected current evidence.
+        # The optional signal tag must survive omission from the second update.
+        observations = [("archive", "unknown", "Archived operations vacancy; current hiring unverified."),
+                        ("careers", "pass", "An operations manager position is open on August 20, 2026.")]
+        runner.run_lookup(path, {"provider": "public_web", "scope": "example.com", "phase": "account_verification",
+            "purpose": "Review operations hiring", "request": {"operation": "search_query", "query": "Example Products operations jobs"}}, plan_only=True)
+        source_id = json.loads(path.read_text())["stop_audit"]["route_frontier"][-1]["route_id"]
+        runner.complete_public_web(path, source_id, {"status": "ok", "results": [
+            {"url": "https://example.com/" + slug, "text": facts} for slug, _, facts in observations]})
+        receipt_path = path.parent / "receipts" / (source_id + ".json")
+        original_receipt = receipt_path.read_bytes()
+        for slug, status, facts in observations:
+            url = "https://example.com/" + slug
+            evidence = {"url": url, "date": "2026-08-20", "date_basis": "observed_current", "text": facts,
+                        "source": {"provider": "public_web", "operation": "search_query", "route_id": source_id}}
+            check = {"criterion": "hiring" if status == "unknown" else " HIRING ", "importance": "preferred",
+                     "status": status, "claim": facts, "evidence": [evidence]}
+            if status == "unknown":
+                check["signal"] = "HIRING"
+            runner.save_review(path, {"companies": [{"scope": "example.com", "qualification_checks": [check]}],
+                "routes": [{"route_id": source_id, "reason": "Reviewed the hiring observation"}]})
+        row["intent_details"] = (
+            "Example Products connected its acquired warehouse to a shared WMS on August 12, 2026. "
+            "The integration helps coordinate inventory and fulfillment across its warehouses. "
+            "An operations manager position was open on August 20, 2026. "
+            "That hiring suggests a need for operational capacity as the shared system is adopted. "
+            "Together, the integration and hiring make warehouse coordination relevant to its consumer-products business now."
+        )
 
         def describe(request, capture):
             return {"provider": "deepline", "operation": "describe", "tool": request["tool"], "status": "ok",
@@ -373,6 +471,15 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
                               ("Contact Country", contact["country"]), ("Company Employee Range", company["employee_range"])):
             self.assertEqual(rows[1][rows[0].index(header)], value)
         self.assertNotIn("Intent Signal", rows[0])
+        signals = rows[1][rows[0].index("Signals")]
+        self.assertIn("HIRING\nObserved on: 2026-08-20", signals)
+        self.assertIn(observations[1][2], signals)
+        self.assertIn("https://example.com/careers", signals)
+        self.assertNotIn(observations[0][2], signals)
+        self.assertNotIn("https://example.com/archive", signals)
+        self.assertEqual(before["accepted"][0]["qualification_checks"][0]["evidence"], [evidence])
+        self.assertEqual(receipt_path.read_bytes(), original_receipt)
+        self.assertIn(observations[0][2], original_receipt.decode())
         self.assertEqual(json.loads(path.read_text())["accepted"], before["accepted"])
         self.assertEqual(guard.ledger_path(path).read_bytes(), ledger)
 

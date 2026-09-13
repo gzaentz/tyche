@@ -5,7 +5,6 @@ import argparse
 import copy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
-import importlib
 import json
 from pathlib import Path
 import re
@@ -286,19 +285,12 @@ def _validate_spec(spec, label="input", *, plan_only=False):
             raise ValueError(f"{label}.action.{field} must be a non-empty string")
     if action["phase"] not in {"account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"}:
         raise ValueError(f"{label}.action.phase is not a sourcing phase")
-    if action["provider"] not in {"deepline", "scrapingdog", "public_web"}:
-        raise ValueError(f"{label}.action.provider must use an existing provider wrapper")
     provider = action["provider"]
     if provider == "public_web" and not plan_only:
         raise ValueError("public web: use --plan-only, then record the observed result with --complete")
     if plan_only and provider != "public_web":
         raise ValueError("--plan-only is for external public-web actions, not provider calls")
-    adapter = None if provider == "public_web" else importlib.import_module(provider)
-    if adapter:
-        try:
-            request = (adapter._validate_request(request) if provider == "deepline" else adapter.validate_request(request))
-        except ValueError as exc:
-            raise ValueError(f"{label}.request: {exc}") from exc
+    adapter, request = research_input.normalize_provider_request(provider, request, label)
     operation = request.get("operation")
     if not isinstance(operation, str) or not operation.strip():
         raise ValueError(f"{label}.request.operation must be a non-empty string")

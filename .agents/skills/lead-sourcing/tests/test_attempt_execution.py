@@ -613,13 +613,14 @@ class AttemptExecutionTests(unittest.TestCase):
         self.assertEqual(runner.cli_output(result)["result"]["results"], [row])
 
     def test_normalized_profile_output_is_compact_and_keeps_review_gaps(self):
+        import deepline
         source = {"firstName": "Ada", "linkedinUrl": "https://www.linkedin.com/in/ada-example/",
                   "headline": "Payments product leader", "currentPosition": [
                       {"companyName": name, "position": "Advisor", "company": {"description": "nested data " * 2000}}
                       for name in ("Example", "Another")],
                   "experience": [{"position": "Previous role", "description": "old history " * 5000}],
                   "emails": [{"email": "ada@example.org", "catchAllDomain": True}]}
-        row = runner.importlib.import_module("deepline").normalize_evidence(source, tool="harvestapi_get_profile", entity_type="contact")
+        row = deepline.normalize_evidence(source, tool="harvestapi_get_profile", entity_type="contact")
         body = {"receipt_file": "receipt.json", "result": {"tool": "harvestapi_get_profile", "results": [row]}}
         original = copy.deepcopy(body)
         compact = runner.cli_output(body)

@@ -169,9 +169,12 @@ A `companies` item identifies `scope` and only the fields being updated:
 ```
 
 `company` updates the supplied factual fields. `qualification_checks` updates
-one judgment per exact `criterion` name, retaining earlier supporting evidence
-and unrelated checks. Supply importance, status, claim and evidence explicitly;
-code does not decide fit. Use the same criterion name when refining a judgment.
+one judgment per `criterion` name, ignoring capitalization and extra whitespace.
+Supply importance, status, claim and the selected current evidence explicitly;
+that evidence replaces the previous selection. Omitted `signal` metadata and
+unrelated checks remain unchanged, and original provider receipts stay saved.
+Duplicate criterion updates or multiple saved matches require reconciliation;
+code does not decide which judgment is correct or whether the company fits.
 
 `account_fit`, `signal_evidence`, `intent_details`, `primary_contact` and
 `backup_contacts` are complete replacements when supplied, and untouched when

@@ -7,6 +7,7 @@ here. The research agent supplies those judgments; existing helpers enforce them
 import copy
 from datetime import datetime, timezone
 import hashlib
+import importlib
 from pathlib import Path
 import re
 import uuid
@@ -162,14 +163,28 @@ def start_document(run_file, setup, *, existing=None, ledger=None):
     return document, options
 
 
+def normalize_provider_request(provider, request, label):
+    """Use the existing adapter contract for both research and legacy inputs."""
+    if provider not in ("deepline", "scrapingdog", "public_web"):
+        raise ValueError(f"{label}.provider must use an existing provider wrapper")
+    if not isinstance(request, dict):
+        raise ValueError(f"{label}.request must contain the provider operation and inputs")
+    request = copy.deepcopy(request)
+    adapter = None if provider == "public_web" else importlib.import_module(provider)
+    if adapter:
+        try:
+            request = adapter._validate_request(request) if provider == "deepline" else adapter.validate_request(request)
+        except ValueError as exc:
+            raise ValueError(f"{label}.request: {exc}") from exc
+    return adapter, request
+
+
 def prepare_lookup(value):
     """The agent selects target, purpose and request; derive bookkeeping only."""
     object_fields(value, {"provider", "request", "scope", "phase", "purpose", "approach",
                           "max_cost_credits", "status_read"}, "lookup")
     provider = value.get("provider", "deepline")
-    request = copy.deepcopy(value.get("request"))
-    if not isinstance(request, dict):
-        raise ValueError('lookup.request must contain the provider operation and inputs')
+    _, request = normalize_provider_request(provider, value.get("request"), "lookup")
     catalog = provider == "deepline" and request.get("operation") in {"search", "describe"}
     paid = provider == "scrapingdog" or provider == "deepline" and request.get("operation") == "execute"
     purpose = value.get("purpose", f"Inspect {request.get('tool') or request.get('query', '')}" if catalog else None)
@@ -223,6 +238,10 @@ def check_tool_contract(receipt, request):
             raise ValueError(f"provider payload.{name} must be {kind}")
 
 
+def _criterion_key(value):
+    return " ".join(text(value, "criterion").split()).casefold()
+
+
 def company_update(document, item):
     """Apply explicit field/criterion updates, preserving unrelated evidence."""
     object_fields(item, {"scope", "state", "stage", "reason_code", "reason_text", "company",
@@ -254,20 +273,25 @@ def company_update(document, item):
         seen = set()
         for check in item["qualification_checks"]:
             object_fields(check, {"criterion", "importance", "status", "claim", "evidence", "signal"}, "qualification check")
-            key = text(check.get("criterion"), "criterion")
-            if key in seen or check.get("importance") not in {"required", "preferred"} or check.get("status") not in {"pass", "fail", "unknown"}:
+            key = _criterion_key(check.get("criterion"))
+            if key in seen:
+                raise ValueError(f"duplicate criterion update: {key}")
+            if check.get("importance") not in {"required", "preferred"} or check.get("status") not in {"pass", "fail", "unknown"}:
                 raise ValueError("each criterion needs one explicit importance and status")
             text(check.get("claim"), "claim")
             if not isinstance(check.get("evidence"), list) or check["status"] != "unknown" and not check["evidence"]:
                 raise ValueError("pass/fail requires evidence; unknown may have an empty evidence array")
             seen.add(key)
-            previous = next((c for c in checks if c.get("criterion") == key), None)
-            update = copy.deepcopy(check)
-            if previous:
-                # Keep the original supporting observations when a judgment is
-                # refined. Explicit status/claim describe the current judgment.
-                update["evidence"] = previous.get("evidence", []) + [e for e in update["evidence"] if e not in previous.get("evidence", [])]
-                checks[checks.index(previous)] = update
+            matches = [index for index, saved in enumerate(checks) if _criterion_key(saved.get("criterion")) == key]
+            if len(matches) > 1:
+                raise ValueError(f"multiple saved checks for criterion {key}; reconcile before updating")
+            update = copy.deepcopy(checks[matches[0]]) if matches else {}
+            # A judgment selects its current evidence. Omitted metadata stays;
+            # original provider receipts remain the immutable audit record.
+            update.update(copy.deepcopy(check))
+            update["criterion"] = key
+            if matches:
+                checks[matches[0]] = update
             else:
                 checks.append(update)
     for key in ("account_fit", "signal_evidence", "intent_details", "primary_contact", "backup_contacts"):
