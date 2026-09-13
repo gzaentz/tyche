@@ -72,7 +72,13 @@ def client_document(*, date_basis: str = "published", schema_version: str = "1.2
     document["retrieved_at"] = "2026-09-01T12:34:56Z"
     row = document["accepted"][0]
     row["intent_details"] = (
-        "The project covers inventory visibility & fulfillment."
+        "Example Products connected its acquired warehouse to a shared WMS on August 12, 2026. "
+        "The project covers inventory visibility and fulfillment across the combined operation. "
+        "This recent integration may increase its need to coordinate stock and orders between warehouses."
+    )
+    row["company"]["description"] = (
+        "Example Products, Inc. manufactures packaged goods, tools, and accessories. "
+        "It supplies retailers with consumer products."
     )
     row["company"]["sub_industry"] = "Textiles"
     row["company"]["classification_note"] = "Canonical taxonomy classification"
@@ -81,12 +87,13 @@ def client_document(*, date_basis: str = "published", schema_version: str = "1.2
         "evidence_url": "https://example.com/about",
         "evidence_date": "2026-08-10",
         "evidence_date_basis": date_basis,
-        "evidence_text": "The company manufactures packaged goods.",
+        "evidence_text": "Example Products manufactures packaged goods, tools and accessories for retailers.",
         "source": _source("public_web", "fit-1"),
     }
     row["signal_evidence"].update(
         {
             "evidence_date_basis": date_basis,
+            "evidence_text": "On August 12, 2026, the company connected its acquired warehouse to one WMS. The project covers inventory visibility & fulfillment.",
             "source": _source("public_web", "signal-1"),
         }
     )
@@ -138,17 +145,52 @@ class ClientOutputTests(unittest.TestCase):
                 check=False, capture_output=True, text=True,
             )
 
-    def test_client_columns_insert_intent_signal_before_details_and_legacy_is_unchanged(self):
-        result = self.run_rows_json(client_document())
+    def test_client_columns_separate_signals_from_prose_and_legacy_is_unchanged(self):
+        document = client_document()
+        result = self.run_rows_json(document)
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["legacy"], EXPECTED_LEGACY_COLUMNS)
         self.assertEqual(
             payload["client"],
-            EXPECTED_LEGACY_COLUMNS[:16] + ["Intent Signal", "Intent Details"] + EXPECTED_LEGACY_COLUMNS[17:],
+            EXPECTED_LEGACY_COLUMNS[:16] + ["Intent Signal", "Signals"] + EXPECTED_LEGACY_COLUMNS[16:],
         )
         self.assertEqual(payload["rows"][0]["Intent Signal"], "warehouse_system_integration")
-        self.assertEqual(payload["rows"][0]["Intent Details"], "The project covers inventory visibility & fulfillment.")
+        row = payload["rows"][0]
+        self.assertEqual(row["Description"], document["accepted"][0]["company"]["description"])
+        self.assertEqual(row["Intent Details"], document["accepted"][0]["intent_details"])
+        self.assertIn("Source date: 2026-08-12", row["Signals"])
+        self.assertIn("inventory visibility & fulfillment", row["Signals"])
+        self.assertIn("Source: https://example.com/news/wms-project", row["Signals"])
+        self.assertTrue(payload["unchanged"])
+
+    def test_signals_include_only_confirmed_tagged_checks_and_preserve_sources(self):
+        document = client_document(date_basis="observed_current")
+        evidence = {"url": "https://example.com/jobs/product-manager", "date": "2026-08-20",
+                    "date_basis": "observed_current", "text": "Open product manager role.",
+                    "source": _source("public_web", "hiring-1")}
+        document["accepted"][0]["qualification_checks"] = [
+            {"criterion": "Hiring", "signal": "HIRING", "importance": "preferred", "status": "pass",
+             "claim": "Hiring a product manager", "evidence": [evidence, dict(evidence)]},
+            {"criterion": "Funding", "signal": "FUNDING", "importance": "preferred", "status": "unknown",
+             "claim": "Not verified", "evidence": [dict(evidence, text="Funding not verified.")]},
+            {"criterion": "Expansion", "signal": "EXPANSION", "importance": "preferred", "status": "fail",
+             "claim": "Not expanding", "evidence": [dict(evidence, text="Expansion did not proceed.")]},
+            {"criterion": "employee_count", "importance": "required", "status": "pass",
+             "claim": "Size fits", "evidence": [dict(evidence, text="Employee size evidence.")]},
+        ]
+        result = self.run_rows_json(document)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        signals = payload["rows"][0]["Signals"]
+        self.assertIn("Observed on: 2026-08-12", signals)
+        self.assertIn("HIRING\nObserved on: 2026-08-20\nOpen product manager role.", signals)
+        self.assertEqual(signals.count(evidence["url"]), 1)
+        for value in ("Source date:", "FUNDING", "EXPANSION", "Employee size evidence."):
+            self.assertNotIn(value, signals)
+        self.assertTrue(any(row["Field"] == "Signals" and row["Source URL"] == evidence["url"]
+                            for row in payload["sources"]))
+        self.assertTrue(any(row["Field"] == "Funding" for row in payload["sources"]))
         self.assertTrue(payload["unchanged"])
 
     def test_legacy_document_keeps_legacy_row_shape_and_values(self):
@@ -185,7 +227,7 @@ class ClientOutputTests(unittest.TestCase):
         )
         self.assertEqual(by_field["Description"]["Company"], "Example Products, Inc.")
         self.assertEqual(by_field["Description"]["Signal"], "")
-        self.assertEqual(by_field["Intent Details"]["Signal"], "warehouse_system_integration")
+        self.assertEqual(by_field["Signals"]["Signal"], "warehouse_system_integration")
         self.assertEqual(by_field["Role"]["Signal"], "")
         self.assertEqual(by_field["employee_count"]["Signal"], "")
         self.assertEqual(by_field["employee_count"]["Evidence Text"], "Exact evidence: 240 employees & growing.")
@@ -309,6 +351,16 @@ class ClientOutputTests(unittest.TestCase):
                 document["accepted"][0]["intent_details"] = narrative
                 self.assertTrue(any("intent_details" in error for error in VALIDATOR.validate_run(document)))
 
+    def test_description_is_required_by_validator_and_exporter(self):
+        for description in (None, "", "   ", 42):
+            with self.subTest(description=description):
+                document = client_document()
+                document["accepted"][0]["company"]["description"] = description
+                self.assertTrue(any("company.description" in error for error in VALIDATOR.validate_run(document)))
+                result = self.run_rows_json(document)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("company.description", result.stderr)
+
     def test_validator_keeps_1_0_and_1_1_legacy_documents_valid(self):
         for version in ("1.0", "1.1"):
             document = client_document(schema_version=version)
@@ -351,18 +403,19 @@ class ClientOutputTests(unittest.TestCase):
                 capture_output=True, text=True, check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout.splitlines()[-1])["columns"], 19)
+            self.assertEqual(json.loads(result.stdout.splitlines()[-1])["columns"], 20)
             rows = _export_module.read_first_sheet_rows(destination)
-            self.assertEqual(rows[0], EXPECTED_LEGACY_COLUMNS[:16] + ["Intent Signal"] + EXPECTED_LEGACY_COLUMNS[16:])
+            self.assertEqual(rows[0], EXPECTED_LEGACY_COLUMNS[:16] + ["Intent Signal", "Signals"] + EXPECTED_LEGACY_COLUMNS[16:])
             self.assertEqual(rows[1][16], document["accepted"][0]["signal_evidence"]["signal"])
-            self.assertEqual(rows[1][17], document["accepted"][0]["intent_details"])
+            self.assertIn(document["accepted"][0]["signal_evidence"]["evidence_url"], rows[1][17])
+            self.assertEqual(rows[1][18], document["accepted"][0]["intent_details"])
             source_rows = _export_module.read_first_sheet_rows(destination, sheet_number=2)
             self.assertEqual(source_rows[1][8], document["accepted"][0]["account_fit"]["evidence_text"])
             tag = lambda name: "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}" + name
             with zipfile.ZipFile(destination) as archive:
                 workbook = ET.fromstring(archive.read("xl/workbook.xml"))
                 self.assertEqual([sheet.attrib["name"] for sheet in workbook.iter(tag("sheet"))], ["Leads", "Sources"])
-                self.assertIn(b'A1:S2', archive.read("xl/tables/table1.xml"))
+                self.assertIn(b'A1:T2', archive.read("xl/tables/table1.xml"))
                 self.assertIn(b'SourcesTable', archive.read("xl/tables/table2.xml"))
                 sheet = ET.fromstring(archive.read("xl/worksheets/sheet2.xml"))
                 cells = {cell.attrib["r"]: cell for cell in sheet.iter(tag("c"))}

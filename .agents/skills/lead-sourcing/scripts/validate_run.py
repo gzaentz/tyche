@@ -1077,6 +1077,8 @@ def _validate_client_output(accepted: list, errors: list[str]) -> None:
         company = row.get("company")
         if not isinstance(company, dict):
             continue
+        if not isinstance(company.get("description"), str) or not company["description"].strip():
+            errors.append(f"{path}.company.description is required; write exactly two factual sentences")
         note = company.get("classification_note")
         if "classification_note" in company and (not isinstance(note, str) or not note.strip()):
             errors.append(f"{path}.company.classification_note must be a non-empty string")

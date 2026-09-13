@@ -206,7 +206,7 @@ class ExportXlsxTests(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(
             match.group(1).split(","),
-            EXPECTED_COLUMNS[:16] + ["Intent Signal"] + EXPECTED_COLUMNS[16:],
+            EXPECTED_COLUMNS[:16] + ["Intent Signal", "Signals"] + EXPECTED_COLUMNS[16:],
         )
 
     def test_maps_all_contact_and_company_columns(self):

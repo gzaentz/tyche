@@ -32,7 +32,7 @@ export const XLSX_COLUMNS = [
 ];
 
 export const CLIENT_XLSX_COLUMNS = [
-  ...XLSX_COLUMNS.slice(0, 16), "Intent Signal", ...XLSX_COLUMNS.slice(16),
+  ...XLSX_COLUMNS.slice(0, 16), "Intent Signal", "Signals", ...XLSX_COLUMNS.slice(16),
 ];
 export const SOURCE_COLUMNS = [
   "Company", "Domain", "Field", "Signal", "Evidence Date", "Date Basis",
@@ -67,6 +67,9 @@ function validateClientRow(row, index) {
     throw new ExportError(`accepted[${index}].intent_details must be a non-empty string`);
   }
   const company = object(row.company);
+  if (typeof company.description !== "string" || !company.description.trim()) {
+    throw new ExportError(`accepted[${index}].company.description is required; write exactly two factual sentences`);
+  }
   if ("classification_note" in company && (typeof company.classification_note !== "string" || !company.classification_note.trim())) {
     throw new ExportError(`accepted[${index}].company.classification_note must be a non-empty string`);
   }
@@ -166,6 +169,26 @@ function intentDetails(signal) {
     .filter(([, value]) => value)
     .map(([label, value]) => `${label}: ${value}`)
     .join("; ");
+}
+
+function signalsFor(row) {
+  const signals = [object(row.signal_evidence)];
+  for (const check of row.qualification_checks || []) {
+    if (check.status !== "pass" || !text(check.signal)) continue;
+    for (const evidence of check.evidence || []) {
+      signals.push({ signal: check.signal, evidence_date: evidence.date,
+        evidence_date_basis: evidence.date_basis, evidence_text: evidence.text,
+        evidence_url: evidence.url });
+    }
+  }
+  return [...new Set(signals.map((signal) => {
+    const dateLabel = signal.evidence_date_basis === "observed_current" ? "Observed on" : "Source date";
+    return [text(signal.signal),
+      text(signal.evidence_date) ? `${dateLabel}: ${text(signal.evidence_date)}` : "",
+      text(signal.evidence_text),
+      text(signal.evidence_url) ? `Source: ${text(signal.evidence_url)}` : "",
+    ].filter(Boolean).join("\n");
+  }))].join("\n\n");
 }
 
 function requestedContactFields(document) {
@@ -351,7 +374,7 @@ export function rowsFor(document) {
       "HQ Country": text(company.hq_country),
       "Company Employee Range": range,
       Description: text(company.description),
-      ...(clientOutput ? { "Intent Signal": text(signal.signal) } : {}),
+      ...(clientOutput ? { "Intent Signal": text(signal.signal), Signals: signalsFor(acceptedRow) } : {}),
       "Intent Details": clientOutput ? text(acceptedRow.intent_details) : intentDetails(signal),
       Phone: phone,
     };
@@ -406,12 +429,15 @@ export function sourcesFor(document) {
     if (typeof signal.signal !== "string" || !signal.signal.trim()) {
       throw new ExportError(`accepted[${index}].signal_evidence.signal is required`);
     }
-    add("Intent Details", signal, signal.signal, "signal_evidence");
+    add("Signals", signal, signal.signal, "signal_evidence");
     add("Role", row.primary_contact, "", "primary_contact");
     add("Contact Location", row.primary_contact.location_evidence, "", "primary_contact.location_evidence");
     add("Company Employee Range", company.employee_range_evidence, "", "company.employee_range_evidence");
     for (const check of row.qualification_checks || []) {
-      for (const evidence of check.evidence || []) add(check.criterion, evidence);
+      for (const evidence of check.evidence || []) {
+        add(check.status === "pass" && text(check.signal) ? "Signals" : check.criterion,
+          evidence, text(check.signal), `qualification_checks.${check.criterion}`);
+      }
     }
     if (text(company.classification_note)) {
       rows.push({
@@ -451,7 +477,7 @@ export async function exportXlsx(document, destination, options = {}) {
   const clientOutput = isClientOutput(document);
   const columns = clientOutput ? CLIENT_XLSX_COLUMNS : XLSX_COLUMNS;
   const sourceRows = clientOutput ? sourcesFor(document) : [];
-  const lastColumn = clientOutput ? "S" : "R";
+  const lastColumn = clientOutput ? "T" : "R";
   const { Workbook, SpreadsheetFile } = await loadArtifactTool(options.nodeModules);
   const workbook = Workbook.create();
   const sheet = workbook.worksheets.add("Leads");
@@ -482,7 +508,7 @@ export async function exportXlsx(document, destination, options = {}) {
       rowHeight: 66,
     };
     sheet.getRange(`C2:C${lastRow}`).format.wrapText = true;
-    sheet.getRange(`P2:${clientOutput ? "R" : "Q"}${lastRow}`).format.wrapText = true;
+    sheet.getRange(`P2:${clientOutput ? "S" : "Q"}${lastRow}`).format.wrapText = true;
     sheet.getRange(`O2:O${lastRow}`).format.numberFormat = "#,##0";
 
     const table = sheet.tables.add(usedRangeAddress, true, "LeadsTable");
@@ -490,15 +516,15 @@ export async function exportXlsx(document, destination, options = {}) {
     table.showFilterButton = true;
   }
 
-  const widths = clientOutput ? [...COLUMN_WIDTHS.slice(0, 16), 30, ...COLUMN_WIDTHS.slice(16)] : COLUMN_WIDTHS;
-  const letters = clientOutput ? [...COLUMN_LETTERS, "S"] : COLUMN_LETTERS;
+  const widths = clientOutput ? [...COLUMN_WIDTHS.slice(0, 16), 30, 72, ...COLUMN_WIDTHS.slice(16)] : COLUMN_WIDTHS;
+  const letters = clientOutput ? [...COLUMN_LETTERS, "S", "T"] : COLUMN_LETTERS;
   letters.forEach((column, index) => {
     sheet.getRange(`${column}1:${column}${lastRow}`).format.columnWidth = widths[index];
   });
   if (clientOutput) {
-    if (rows.length) sheet.getRange(`A2:S${lastRow}`).format.wrapText = true;
+    if (rows.length) sheet.getRange(`A2:${lastColumn}${lastRow}`).format.wrapText = true;
     rows.forEach((row, index) => {
-      sheet.getRange(`A${index + 2}:S${index + 2}`).format.rowHeight = wrappedRowHeight(
+      sheet.getRange(`A${index + 2}:${lastColumn}${index + 2}`).format.rowHeight = wrappedRowHeight(
         columns.map((column) => row[column]), widths,
       );
     });
@@ -536,6 +562,7 @@ export async function exportXlsx(document, destination, options = {}) {
     }
   }
 
+  workbook.recalculate();
   const regionInspection = await workbook.inspect({
     kind: "region",
     sheetId: "Leads",

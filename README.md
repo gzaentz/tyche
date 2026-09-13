@@ -351,11 +351,14 @@ provider credentials directly.
   contact. Its fixed columns are:
 
 ```text
-Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Intent Signal,Intent Details,Phone
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Intent Signal,Signals,Intent Details,Phone
 ```
 
 Generate it from the structured result instead of assembling rows by hand. The
-agent writes readable `intent_details` from saved evidence and selects exact
+agent writes a two-sentence factual business description and an `intent_details`
+paragraph covering the activity, context and why the company matters now.
+`Signals` shows verified signal facts, source dates and links from existing
+evidence. The agent selects exact
 industry/sub-industry labels from the bundled PP taxonomy. Uncertain
 classifications stay blank with a `classification_note`. A `Sources` worksheet
 preserves supporting evidence and separates evidence dates from observations.

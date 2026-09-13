@@ -315,6 +315,7 @@ top-level result list or hide rejected/unresolved rows in a count.
               "required": ["intent_details"],
               "properties": {
                 "company": {
+                  "required": ["description"],
                   "anyOf": [
                     {"required": ["industry", "sub_industry"]},
                     {
@@ -418,6 +419,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "required": ["criterion", "importance", "status", "claim", "evidence"],
       "properties": {
         "criterion": {"type": "string", "minLength": 1},
+        "signal": {"type": "string", "pattern": "\\S"},
         "importance": {"enum": ["required", "preferred"]},
         "status": {"enum": ["pass", "fail", "unknown"]},
         "claim": {"type": "string", "minLength": 1},
@@ -1340,11 +1342,11 @@ For version `1.2`, write a workbook with `Leads` and `Sources` worksheets.
 The first row of `Leads` is the fixed, ordered header:
 
 ```text
-Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Intent Signal,Intent Details,Phone
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Intent Signal,Signals,Intent Details,Phone
 ```
 
 Versions `1.0` and `1.1` keep their single `Leads` worksheet, 18-column
-layout (without `Intent Signal`), and labelled signal/date/details/source text
+layout (without `Intent Signal` or `Signals`), and labelled signal/date/details/source text
 in `Intent Details`, with the same clarified location/range headers on new exports.
 Do not silently migrate or overwrite historical runs.
 
@@ -1369,9 +1371,10 @@ route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 | `HQ State` | `company.hq_state`, otherwise blank |
 | `HQ Country` | `company.hq_country`, otherwise blank |
 | `Company Employee Range` | required `company.employee_range` from LinkedIn through HarvestAPI |
-| `Description` | `company.description`, otherwise blank |
+| `Description` | required `company.description`, exactly two factual sentences |
 | `Intent Signal` | short signal label from `signal_evidence.signal` |
-| `Intent Details` | `intent_details`, written by the sourcing agent from verified evidence |
+| `Signals` | `signal_evidence` plus passed `qualification_checks` explicitly tagged with `signal`; facts, original source dates and available source URLs |
+| `Intent Details` | `intent_details`, a natural paragraph explaining the activity, its context and why the company matters now |
 | `Phone` | `primary_contact.phone`, otherwise blank |
 
 Rejected, unresolved, backup contacts and provider receipts remain in
@@ -1384,6 +1387,14 @@ leave `Evidence Date` blank and put the original evidence date in `Observed On`.
 Otherwise use the run's retrieval date for `Observed On`. Export dates as typed
 Excel dates. An unresolved classification note gets an `Industry` source row
 with blank URL and dates; it is a limitation, not a verification receipt.
+The `Signals` cell uses one block per signal/source, labels observation dates
+`Observed on` and other evidence dates `Source date`, and omits missing values.
+It does not infer event dates. Store additional signals in the existing
+`qualification_checks` with an optional short `signal` label and supporting
+evidence; only `pass` checks enter `Signals`. Unknown/failed checks remain in
+the audit and must not be presented as verified activity. No duplicate prose
+field is needed for this column. The `Sources` rows for verified signals use
+`Field: Signals`; they also support the factual claims in `Intent Details`.
 
 `Email` and `Phone` are blank unless the
 input requests them and a verified value is available. Generate the file with
@@ -1397,14 +1408,24 @@ unverified optional values as empty cells rather than placeholder text.
 
 ### Client writing and taxonomy (version `1.2`)
 
-- Write `company.description` as a factual explanation of what the company does.
-  Keep contact-validation warnings, scoring and internal diagnostics out of it.
-- Every accepted company requires non-empty `intent_details`. Usually use 2-4
-  sentences: what happened or exists, when supported, why it may matter to the
-  requested product, and any material caveat. This is writing guidance, not a
-  sentence-count gate. Keep inference conditional; a new leader is not proof of
-  layoffs, an existing service is not unmet demand, and an old opening is not
-  newly dated intent. Do not turn observation dates into event dates.
+- Write `company.description` as exactly two factual sentences explaining the
+  business naturally from verified information. Sentence one describes what it
+  does or sells, typically "[Company name] provides...". Sentence two adds its
+  customers, specialization or another useful business detail, typically
+  "It serves...". These openings are examples, not fixed templates. Support both
+  sentences with account-fit or qualification evidence. Keep signals, inferred
+  needs, contact-validation warnings, scoring and internal diagnostics out of it.
+- Write `intent_details` as one natural paragraph. Describe what the company
+  did with specific facts and supported dates. Explain what that activity shows
+  about its needs and why it is relevant. Close with a sentence tying the evidence
+  together to explain why the company matters now in terms of its own situation.
+  Focus on the company's activity, not a pitch for our product. Keep inferred
+  needs conditional and material uncertainty clear; do not invent urgency,
+  purchasing intent or an event date from an observation date. Use `Signals` for
+  source URLs and evidence details, not labels such as "Required:" or "Bonus:"
+  in the paragraph. Unknown optional hiring is not affirmative hiring intent.
+  A new leader is not proof of layoffs, an existing service is not unmet demand,
+  and an old opening is not newly dated intent.
 - Keep `signal_evidence.signal` short and consistent within the request, such as
   `New HR leader`, `Announced layoffs` or `Housing expansion`. Use
   `Inferred use case` when intent is optional and only a grounded hypothesis
@@ -1413,6 +1434,10 @@ unverified optional values as empty cells rather than placeholder text.
   supported by the saved signal or qualification evidence for that company.
   Save additional supporting sources as existing qualification-check evidence;
   do not combine unsupported events into a more persuasive story.
+- Before export, review both authored fields against their saved evidence and
+  check the two-sentence description and paragraph structure. The helpers require
+  these fields and preserve the authored text; factual accuracy and natural prose
+  are sourcing-agent review responsibilities, not regex or extra model-call gates.
 - Use `assets/leadpoet_industry_taxonomy.json`, a versioned PP snapshot with
   pinned provenance. Select the company's business activity from evidence, not
   the customer's industry or the technology merely mentioned in a job posting.
