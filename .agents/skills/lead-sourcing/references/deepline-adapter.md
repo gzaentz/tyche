@@ -115,6 +115,15 @@ raw responses without another provider call; preserve the original receipt and
 record any local normalization continuation with zero new calls and no duplicate
 charge.
 
+For required [LinkedIn location and company size](output-contract.md#linkedin-location-and-company-size),
+use the matched URL with the live HarvestAPI company/profile getters. The adapter
+preserves the raw response and exposes `employee_range` from `employeeCountRange`,
+and `country`, `state`, `city`, `location_text` from the person's own `location`.
+It does not derive a range from `employeeCount` or a city from a broad region.
+Save field evidence with the exact getter's tool/route ID before accepting a lead.
+Reference response shapes: [company](https://elrix.mintlify.app/linkedin-api-reference/company/get)
+and [person](https://elrix.mintlify.app/linkedin-api-reference/profile/get).
+
 For recognized event and post envelopes, the wrapper retains optional
 top-level `pagination`, `meta`, and `links` metadata with secrets redacted.
 HarvestAPI's known `pagination.paginationToken` is exposed separately as

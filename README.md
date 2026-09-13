@@ -143,6 +143,13 @@ the exact address with ZeroBounce through Deepline. The demo above says “Do no
 find email or phone,” so it is an explicit opt-out. A structured request can
 use `contact_fields: []` to opt out or `["phone"]` to request phone only.
 
+Contact location and company size come from LinkedIn through HarvestAPI.
+Every accepted contact requires `country`; `city` and `state` are populated
+when supported by the person's profile. Every accepted company requires its
+published `employee_range`, not LinkedIn's associated-member count. Saved field
+evidence links each value to a successful HarvestAPI getter. These requirements
+also apply when email/phone fields are optional.
+
 For grouped contact requests, keep `requested_roles` as the required union of
 the optional `contact_role_groups.primary` and `.secondary` arrays. TYCHE
 searches and ranks primary roles first, then uses secondary roles when no
@@ -344,7 +351,7 @@ provider credentials directly.
   contact. Its fixed columns are:
 
 ```text
-Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Signal,Intent Details,Phone
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Intent Signal,Intent Details,Phone
 ```
 
 Generate it from the structured result instead of assembling rows by hand. The

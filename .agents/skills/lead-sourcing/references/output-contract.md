@@ -345,7 +345,7 @@ top-level result list or hide rejected/unresolved rows in a count.
     "company": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["canonical_name", "domain"],
+      "required": ["canonical_name", "domain", "employee_range", "employee_range_evidence"],
       "properties": {
         "canonical_name": {"type": "string", "minLength": 1},
         "domain": {"type": "string", "minLength": 1},
@@ -357,9 +357,23 @@ top-level result list or hide rejected/unresolved rows in a count.
         "hq_state": {"type": "string", "minLength": 1},
         "hq_country": {"type": "string", "minLength": 1},
         "employee_count": {"type": "integer", "minimum": 0},
+        "employee_range": {"type": "string", "minLength": 3},
+        "employee_range_evidence": {"$ref": "#/$defs/linkedin_field_evidence"},
         "owner_group": {"type": "string", "minLength": 1},
         "aliases": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "description": {"type": "string", "minLength": 1}
+      }
+    },
+    "linkedin_field_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_url", "evidence_date", "evidence_date_basis", "evidence_text", "source"],
+      "properties": {
+        "evidence_url": {"$ref": "#/$defs/url"},
+        "evidence_date": {"$ref": "#/$defs/date"},
+        "evidence_date_basis": {"const": "observed_current"},
+        "evidence_text": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"}
       }
     },
     "source": {
@@ -479,7 +493,7 @@ top-level result list or hide rejected/unresolved rows in a count.
     "contact": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["full_name", "current_title", "requested_role", "role_match", "company", "domain", "contact_url", "evidence_url", "evidence_date", "evidence_date_basis", "evidence_text", "source"],
+      "required": ["full_name", "current_title", "requested_role", "role_match", "company", "domain", "contact_url", "country", "location_evidence", "evidence_url", "evidence_date", "evidence_date_basis", "evidence_text", "source"],
       "properties": {
         "full_name": {"type": "string", "minLength": 1},
         "current_title": {"type": "string", "minLength": 1},
@@ -493,6 +507,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "city": {"type": "string", "minLength": 1},
         "state": {"type": "string", "minLength": 1},
         "country": {"type": "string", "minLength": 1},
+        "location_evidence": {"$ref": "#/$defs/linkedin_field_evidence"},
         "evidence_url": {"$ref": "#/$defs/url"},
         "evidence_date": {"$ref": "#/$defs/date"},
         "evidence_date_basis": {"enum": ["published", "posted", "updated", "observed_current"]},
@@ -1288,18 +1303,50 @@ A report link alone does not satisfy Sources Used. Check timing arithmetic and
 source-count reconciliation against the saved receipts. This is a final-answer
 self-check, not an additional sourcing step or a JSON-validator guarantee.
 
+## LinkedIn location and company size
+
+Retrieve the exact matched company and person LinkedIn profiles through
+HarvestAPI via Deepline. Discover/describe the current company/profile getters,
+execute through the existing budgeted attempt helper, and reuse matching saved
+receipts. Search results and another provider's estimates cannot replace these
+field sources.
+
+- Save LinkedIn `employeeCountRange` as `company.employee_range`, e.g. `11-50`
+  or `10001+`. LinkedIn is authoritative for company size. Do not use
+  `employeeCount` (associated member profiles), an exact headcount, or a range
+  endpoint for qualification or export. Compare the whole range with the saved
+  ICP: full containment passes, no overlap fails, partial overlap stays unknown.
+- Use the person's own `location.parsed.countryFull`/`country`, `state`, and
+  `city`; retain `location.linkedinText` and country codes from the response.
+  Normalize unambiguous location text/codes when parsed fields are missing.
+  Never substitute employment location, company headquarters, profile language,
+  or a guessed city for the person's location. Country is required for every
+  accepted primary/backup contact; populate city and state whenever supported.
+- Save `company.employee_range_evidence` and each contact's `location_evidence`
+  using `evidence_url`, `evidence_date`, `evidence_date_basis: observed_current`,
+  `evidence_text`, and `source: {provider: deepline, operation: execute, tool,
+  route_id}`. Keep the original range/location wording in the text. The URL must
+  match the corresponding LinkedIn entity and the route must be a successful
+  HarvestAPI company/profile getter. Missing facts or evidence stay unresolved.
+
+These fields are required independently of email/phone opt-outs.
+The validator, review acceptance, and exporter enforce the requirements. Old
+saved runs may need enrichment before re-export; do not invent evidence, change
+their requests, or overwrite historical files to make them pass.
+
 ## `leads.xlsx` contract
 
 For version `1.2`, write a workbook with `Leads` and `Sources` worksheets.
 The first row of `Leads` is the fixed, ordered header:
 
 ```text
-Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,City,State,Country,HQ State,HQ Country,Employee Count,Description,Intent Signal,Intent Details,Phone
+Name,Email,Role,Company,LinkedIn,Website,Company LinkedIn,Industry,Sub Industry,Contact City,Contact State,Contact Country,HQ State,HQ Country,Company Employee Range,Description,Intent Signal,Intent Details,Phone
 ```
 
-Versions `1.0` and `1.1` keep their original single `Leads` worksheet, 18-column
+Versions `1.0` and `1.1` keep their single `Leads` worksheet, 18-column
 layout (without `Intent Signal`), and labelled signal/date/details/source text
-in `Intent Details`. Do not silently migrate or overwrite historical runs.
+in `Intent Details`, with the same clarified location/range headers on new exports.
+Do not silently migrate or overwrite historical runs.
 
 `leads.xlsx` is the clean flattened deliverable. Write exactly one row for each
 accepted primary company-contact pair and no rows for rejected, unresolved, or
@@ -1316,12 +1363,12 @@ route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 | `Company LinkedIn` | `company.linkedin_url`, otherwise blank |
 | `Industry` | `company.industry`, otherwise blank |
 | `Sub Industry` | `company.sub_industry`, otherwise blank |
-| `City` | `primary_contact.city`, otherwise blank |
-| `State` | `primary_contact.state`, otherwise blank |
-| `Country` | `primary_contact.country`, otherwise blank |
+| `Contact City` | `primary_contact.city`, otherwise blank |
+| `Contact State` | `primary_contact.state`, otherwise blank |
+| `Contact Country` | required `primary_contact.country` from LinkedIn through HarvestAPI |
 | `HQ State` | `company.hq_state`, otherwise blank |
 | `HQ Country` | `company.hq_country`, otherwise blank |
-| `Employee Count` | `company.employee_count`, otherwise blank; never turn a range into an exact count |
+| `Company Employee Range` | required `company.employee_range` from LinkedIn through HarvestAPI |
 | `Description` | `company.description`, otherwise blank |
 | `Intent Signal` | short signal label from `signal_evidence.signal` |
 | `Intent Details` | `intent_details`, written by the sourcing agent from verified evidence |
@@ -1329,7 +1376,7 @@ route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 
 Rejected, unresolved, backup contacts and provider receipts remain in
 `results.json` and `report.md`. `Sources` contains the accepted company's fit,
-signal, primary-role and qualification-check evidence, preserving source text
+signal, primary-role, contact-location, employee-range and qualification-check evidence, preserving source text
 and URLs. Its columns are `Company,Domain,Field,Signal,Evidence Date,Date Basis,
 Observed On,Source URL,Evidence Text`. `Evidence Date` is the stored published,
 posted or updated date, not necessarily the event date. For `observed_current`,

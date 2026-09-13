@@ -130,7 +130,7 @@ class StopPolicyTests(unittest.TestCase):
             substantive_account_reviews=1,
             provider_call_capacity={"deepline": "unknown", "scrapingdog": "available", "paid_calls_remaining": 140},
             route_frontier=[dict(route_id=r["route_id"], state="exhausted",
-                reason="All returned records reviewed.", exhaustion_basis="no_new_unique_candidates") for r in routes])
+                reason="All returned records reviewed.", exhaustion_basis="no_new_unique_candidates") for r in document["routes"]])
         self.assertEqual(VALIDATOR.validate_run(document), [])
         document["stop_check"] = {"started_at": STARTED_AT, "next_actions": [
             action("independent-discovery", provider="deepline", paid_calls=1, cost_upper_bound_credits=0.55)]}

@@ -20,12 +20,12 @@ export const XLSX_COLUMNS = [
   "Company LinkedIn",
   "Industry",
   "Sub Industry",
-  "City",
-  "State",
-  "Country",
+  "Contact City",
+  "Contact State",
+  "Contact Country",
   "HQ State",
   "HQ Country",
-  "Employee Count",
+  "Company Employee Range",
   "Description",
   "Intent Details",
   "Phone",
@@ -95,7 +95,10 @@ function text(value) {
   return "";
 }
 
-function isLinkedInUrl(value) {
+function isLinkedInUrl(value, kind) {
+  if (kind) return typeof value === "string" && new RegExp(
+    `^https?://(?:[a-z0-9-]+\\.)*linkedin\\.com/${kind}/[a-z0-9_%~.-]+/?(?:[?#][^\\s]*)?$`, "i",
+  ).test(value.trim());
   if (!value) return false;
   try {
     const host = new URL(value).hostname.toLowerCase();
@@ -121,11 +124,34 @@ function website(company) {
   return `https://${domain.replace(/^\/+/, "")}`;
 }
 
-function employeeCount(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  const normalized = text(value);
-  if (/^\d+$/.test(normalized)) return Number(normalized);
+function employeeRange(value, field) {
+  const normalized = text(value).replace(/[\s,]/g, "").replace(/[–—]/g, "-");
+  const match = /^(\d+)(?:-(\d+)|(\+))$/.exec(normalized);
+  if (!match || (match[2] !== undefined && Number(match[2]) < Number(match[1]))) {
+    throw new ExportError(`${field} requires the LinkedIn employee range`);
+  }
   return normalized;
+}
+
+function validateHarvestEvidence(document, evidence, linkedin, kind, field) {
+  const item = object(evidence);
+  const source = object(item.source);
+  const url = item.evidence_url;
+  const slug = (value) => value.match(new RegExp(`/${kind}/([^/?#]+)`, "i"))[1].toLowerCase();
+  if (!isLinkedInUrl(url, kind) || (isLinkedInUrl(linkedin, kind) && slug(url) !== slug(linkedin))) {
+    throw new ExportError(`${field}.evidence_url requires the same LinkedIn /${kind}/ entity`);
+  }
+  if (!calendarDate(item.evidence_date) || item.evidence_date_basis !== "observed_current" || !text(item.evidence_text)) {
+    throw new ExportError(`${field} requires dated observed_current LinkedIn source text`);
+  }
+  const tool = text(source.tool).toLowerCase().replace(/[^a-z0-9]/g, "");
+  const routes = (document.routes || []).filter((route) => text(route.route_id) === text(source.route_id));
+  if (source.provider !== "deepline" || source.operation !== "execute"
+      || !tool.includes("harvestapi") || !tool.endsWith(kind === "company" ? "getcompany" : "getprofile")
+      || routes.length !== 1 || routes[0].provider !== "deepline" || routes[0].operation !== "execute"
+      || routes[0].tool !== source.tool || !["ok", "partial"].includes(routes[0].provider_status)) {
+    throw new ExportError(`${field}.source requires a matching successful HarvestAPI execute route`);
+  }
 }
 
 function intentDetails(signal) {
@@ -279,6 +305,26 @@ export function rowsFor(document) {
       if (!value) throw new ExportError(`accepted[${index}] requires ${label}`);
     }
 
+    const range = employeeRange(company.employee_range, `accepted[${index}].company.employee_range`);
+    validateHarvestEvidence(document, company.employee_range_evidence, company.linkedin_url,
+      "company", `accepted[${index}].company.employee_range_evidence`);
+    const contacts = [[`accepted[${index}].primary_contact`, contact],
+      ...(acceptedRow.backup_contacts || []).map((backup, i) => [`accepted[${index}].backup_contacts[${i}]`, object(backup)])];
+    for (const [field, candidate] of contacts) {
+      const linkedin = Object.hasOwn(candidate, "linkedin_url") ? candidate.linkedin_url
+        : isLinkedInUrl(candidate.contact_url, "in") ? candidate.contact_url : undefined;
+      const country = typeof candidate.country === "string" ? candidate.country.trim() : "";
+      if (!country || ["unknown", "n/a", "na", "none", "null", "remote", "-"].includes(country.toLowerCase())) {
+        throw new ExportError(`${field}.country is required from the person's LinkedIn location`);
+      }
+      for (const key of ["city", "state"]) {
+        if (candidate[key] != null && (typeof candidate[key] !== "string" || !candidate[key].trim())) {
+          throw new ExportError(`${field}.${key} must be text when supplied`);
+        }
+      }
+      validateHarvestEvidence(document, candidate.location_evidence, linkedin, "in", `${field}.location_evidence`);
+    }
+
     const email = requestedValue(contact, "email", requestedFields, index);
     const phone = requestedValue(contact, "phone", requestedFields, index);
     const storedEmail = text(contact.email);
@@ -298,12 +344,12 @@ export function rowsFor(document) {
       "Company LinkedIn": text(company.linkedin_url),
       Industry: text(company.industry),
       "Sub Industry": text(company.sub_industry),
-      City: text(contact.city),
-      State: text(contact.state),
-      Country: text(contact.country),
+      "Contact City": text(contact.city),
+      "Contact State": text(contact.state),
+      "Contact Country": text(contact.country),
       "HQ State": text(company.hq_state),
       "HQ Country": text(company.hq_country),
-      "Employee Count": employeeCount(company.employee_count),
+      "Company Employee Range": range,
       Description: text(company.description),
       ...(clientOutput ? { "Intent Signal": text(signal.signal) } : {}),
       "Intent Details": clientOutput ? text(acceptedRow.intent_details) : intentDetails(signal),
@@ -362,6 +408,8 @@ export function sourcesFor(document) {
     }
     add("Intent Details", signal, signal.signal, "signal_evidence");
     add("Role", row.primary_contact, "", "primary_contact");
+    add("Contact Location", row.primary_contact.location_evidence, "", "primary_contact.location_evidence");
+    add("Company Employee Range", company.employee_range_evidence, "", "company.employee_range_evidence");
     for (const check of row.qualification_checks || []) {
       for (const evidence of check.evidence || []) add(check.criterion, evidence);
     }

@@ -272,12 +272,13 @@ while repeatedly starting new country searches.
 `results.json.request` is the authoritative normalized ICP. Check decisions
 against it, not an earlier candidate's band or a rewritten interpretation.
 Do not turn a service area into an office requirement or a preferred signal
-into a requirement. Save an exact sourced employee count in
-`company.employee_count` (accepted) or `candidate.employee_count` (unresolved or
-rejected). The validator compares it to `request.icp.company_size`; an in-range
-count cannot fail that gate. Retain evidence for the count. When only a range
-or an uncertain estimate is known, preserve that uncertainty in the check;
-do not invent an exact count. Missing intent remains unknown even when size passes.
+into a requirement. Use the HarvestAPI LinkedIn `employee_range` for company-size
+decisions, retaining field evidence. Full containment in `request.icp.company_size`
+passes; no overlap fails; partial overlap stays unknown. Member counts and other
+providers' estimates do not override LinkedIn's range. Require a HarvestAPI-sourced
+country for each accepted contact and populate supported city/state fields from
+that person's location. Follow the [field contract](output-contract.md#linkedin-location-and-company-size).
+Missing intent remains unknown even when size passes.
 
 The account gate requires canonical `company` and `domain`, an evidenced
 `account_fit`, and separate `signal_evidence`. Apply the qualification policy:

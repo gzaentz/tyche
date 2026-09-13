@@ -11,13 +11,14 @@ runner = fixtures.runner
 
 
 def company(domain, count=3, size_status="pass"):
+    band = "1-10" if count <= 10 else "51-200" if count <= 200 else "201-500"
     return {"stage": "account", "candidate": {"company": "Example Builder", "domain": domain,
-            "employee_count": count}, "reason_code": "missing_account_evidence",
+            "employee_range": band}, "reason_code": "missing_account_evidence",
             "reason_text": "Size fits the requested range; the dated steel-project signal remains unknown.",
             "qualification_checks": [
                 {"criterion": "company_size", "importance": "required", "status": size_status,
-                 "claim": "The company reports three employees.",
-                 "evidence": [{"url": "https://" + domain + "/about", "text": "3 employees"}]},
+                 "claim": "LinkedIn company size is " + band,
+                 "evidence": [{"url": "https://" + domain + "/about", "text": band}]},
                 {"criterion": "recent_intent", "importance": "required", "status": "unknown",
                  "claim": "A dated steel project has not been established.", "evidence": []}]}
 
@@ -141,7 +142,7 @@ class SaveReviewTests(unittest.TestCase):
         doc["unresolved"] = [company("builder.example", 201)]
         doc["unresolved"][0]["stage"] = "contact"
         self.assertTrue(VALIDATOR.qualification_errors(doc))
-        doc["unresolved"][0]["candidate"].pop("employee_count")
+        doc["unresolved"][0]["candidate"].pop("employee_range")
         doc["unresolved"][0]["stage"] = "account"
         self.assertEqual(VALIDATOR.qualification_errors(doc), [])
 

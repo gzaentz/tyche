@@ -11,6 +11,8 @@ import unittest
 import xml.etree.ElementTree as ET
 import zipfile
 
+from linkedin_fixtures import add_linkedin_fields
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXPORTER_PATH = ROOT / "scripts" / "export_xlsx.mjs"
@@ -26,12 +28,12 @@ EXPECTED_COLUMNS = [
     "Company LinkedIn",
     "Industry",
     "Sub Industry",
-    "City",
-    "State",
-    "Country",
+    "Contact City",
+    "Contact State",
+    "Contact Country",
     "HQ State",
     "HQ Country",
-    "Employee Count",
+    "Company Employee Range",
     "Description",
     "Intent Details",
     "Phone",
@@ -103,7 +105,7 @@ def accepted_document(contact_fields: list[str] | None = None) -> dict:
     if "phone" in effective_fields:
         contact["phone"] = "+1 555 010 0200"
 
-    return {
+    return add_linkedin_fields({
         "request": request,
         "routes": routes,
         "accepted": [
@@ -132,7 +134,7 @@ def accepted_document(contact_fields: list[str] | None = None) -> dict:
                 "primary_contact": contact,
             }
         ],
-    }
+    })
 
 
 def read_first_sheet_rows(workbook_path: pathlib.Path, sheet_number: int = 1) -> list[list[str]]:
@@ -226,12 +228,12 @@ class ExportXlsxTests(unittest.TestCase):
         )
         self.assertEqual(row["Industry"], "Manufacturing")
         self.assertEqual(row["Sub Industry"], "Consumer products")
-        self.assertEqual(row["City"], "Columbus")
-        self.assertEqual(row["State"], "Ohio")
-        self.assertEqual(row["Country"], "United States")
+        self.assertEqual(row["Contact City"], "Columbus")
+        self.assertEqual(row["Contact State"], "Ohio")
+        self.assertEqual(row["Contact Country"], "United States")
         self.assertEqual(row["HQ State"], "Ohio")
         self.assertEqual(row["HQ Country"], "United States")
-        self.assertEqual(row["Employee Count"], 240)
+        self.assertEqual(row["Company Employee Range"], "201-500")
         self.assertEqual(
             row["Description"], "Makes packaged goods, tools, and accessories."
         )
@@ -320,7 +322,7 @@ class ExportXlsxTests(unittest.TestCase):
             "description",
         ):
             company.pop(key)
-        for key in ("linkedin_url", "city", "state", "country"):
+        for key in ("linkedin_url", "city", "state"):
             contact.pop(key)
         result = self.run_rows_json(document)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -328,7 +330,7 @@ class ExportXlsxTests(unittest.TestCase):
         self.assertEqual(row["Website"], "https://example.com")
         self.assertEqual(row["LinkedIn"], "")
         self.assertEqual(row["Company LinkedIn"], "")
-        self.assertEqual(row["Employee Count"], "")
+        self.assertEqual(row["Company Employee Range"], "201-500")
 
     def test_malformed_accepted_row_fails_closed(self):
         result = self.run_rows_json(
@@ -412,7 +414,7 @@ class ExportXlsxTests(unittest.TestCase):
         result_schema = json.loads(blocks[1])
         company = result_schema["$defs"]["company"]
         contact = result_schema["$defs"]["contact"]
-        self.assertEqual(company["required"], ["canonical_name", "domain"])
+        self.assertEqual(company["required"], ["canonical_name", "domain", "employee_range", "employee_range_evidence"])
         self.assertTrue(
             {
                 "website",

@@ -6,6 +6,8 @@ import pathlib
 import re
 import unittest
 
+from linkedin_fixtures import add_linkedin_fields
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "references" / "output-contract.md"
@@ -87,7 +89,7 @@ def email_validation_receipt(status="valid", route_id="email-validation-1", tool
 
 
 def accepted_email_result(status="valid"):
-    return {
+    return add_linkedin_fields({
         "request": {"target_count": 1},
         "summary": {"accepted_companies": 1},
         "accepted": [
@@ -112,7 +114,7 @@ def accepted_email_result(status="valid"):
             }
         ],
         "stop_reason": "target_met",
-    }
+    })
 
 
 def cost_result(routes, accepted_contacts=1):
@@ -160,6 +162,7 @@ def cost_result(routes, accepted_contacts=1):
         },
         "stop_reason": "target_met",
     }
+    add_linkedin_fields(result)
     result["cost_summary"] = VALIDATOR.calculate_cost_summary(result)
     return result
 
@@ -356,6 +359,7 @@ class OutputContractExtensionTests(unittest.TestCase):
             ],
             "stop_reason": "target_met",
         }
+        add_linkedin_fields(reached)
         self.assertEqual(VALIDATOR.validate_run(reached), [])
 
         reached["accepted"][0]["primary_contact"]["role_group"] = "primary"
@@ -546,6 +550,7 @@ class OutputContractExtensionTests(unittest.TestCase):
             ],
             "stop_reason": "target_met",
         }
+        add_linkedin_fields(result)
         self.assertEqual(VALIDATOR.validate_run(result), [])
 
         result["accepted"][0]["backup_contacts"][0]["requested_role"] = "Chief Financial Officer"
@@ -1103,6 +1108,7 @@ class OutputContractExtensionTests(unittest.TestCase):
             ],
             "stop_reason": "target_met",
         }
+        add_linkedin_fields(reached)
         self.assertEqual(VALIDATOR.validate_run(reached), [])
 
         short = shortfall_result()

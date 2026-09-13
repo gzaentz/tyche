@@ -34,8 +34,9 @@ once. The default shared provider budget is USD 0.50 per requested lead.
    Apply the [qualification policy](references/workflow-rules.md#qualification-policy).
    Required unknown facts stay unresolved; evidenced mismatches reject; preferred
    signals only rank. Corroborate sources for the same project, preserving dates.
-   Record exact observed headcounts in `company.employee_count` or
-   `candidate.employee_count`; compare them with the saved range.
+   Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size)
+   for company size and contact location. Every accepted contact needs a country;
+   every accepted company needs its published employee range and saved source.
 3. **Save the review and repeat.** Use [one review file](references/adapter-io.md#save-a-review)
    to save company decisions, close checked routes and add useful next actions.
    The helper updates counts and retires completed work. Read its next decision;

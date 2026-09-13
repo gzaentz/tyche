@@ -89,18 +89,21 @@ def qualification_errors(document: dict) -> list[str]:
             icp = request.get("icp", {}) if isinstance(request, dict) else {}
             band = icp.get("company_size", {}) if isinstance(icp, dict) else {}
             company = row.get("company", row.get("candidate", {}))
-            count = company.get("employee_count") if isinstance(company, dict) else None
-            if count is not None and (type(count) is not int or count < 0):
-                errors.append(f"{path}: employee_count must be a nonnegative integer")
-            elif count is not None and isinstance(band, dict) and band:
+            employee_range = company.get("employee_range") if isinstance(company, dict) else None
+            bounds = employee_range_bounds(employee_range)
+            if employee_range is not None and bounds is None:
+                errors.append(f"{path}: employee_range must be a LinkedIn range")
+            elif bounds is not None and isinstance(band, dict) and band:
                 lower, upper = band.get("min_employees", 0), band.get("max_employees")
                 if type(lower) is int and (upper is None or type(upper) is int):
-                    fits = count >= lower and (upper is None or count <= upper)
-                    size_checks = [c for c in required if _identity(c.get("criterion")) in {"companysize", "employeecount"}]
-                    if any(c.get("status") in {"pass", "fail"} and (c["status"] == "pass") != fits for c in size_checks):
+                    start, end = bounds
+                    fits = start >= lower and (upper is None or end is not None and end <= upper)
+                    outside = end is not None and end < lower or upper is not None and start > upper
+                    size_checks = [c for c in required if _identity(c.get("criterion")) in {"companysize", "employeecount", "employeerange"}]
+                    if any(c.get("status") == "pass" and not fits or c.get("status") == "fail" and not outside for c in size_checks):
                         errors.append(f"{path}: company_size decision contradicts request.icp.company_size")
                     if not fits and (state == "accepted" or (state == "unresolved" and row.get("stage") == "contact")):
-                        errors.append(f"{path}: employee_count is outside request.icp.company_size")
+                        errors.append(f"{path}: employee_range is outside or only partly inside request.icp.company_size")
             failed = [c for c in required if c.get("status") == "fail" and c.get("evidence")]
             if state == "accepted" or (state == "unresolved" and row.get("stage") == "contact"):
                 if excluded_company(document.get("request", {}), row):
@@ -1089,9 +1092,97 @@ def _validate_client_output(accepted: list, errors: list[str]) -> None:
         ):
             errors.append(f"{path}.company requires an exact canonical industry/sub_industry pair")
 
+def _linkedin_url(value: Any, kind: str) -> bool:
+    """Require a direct company/profile URL, not a post, search or lookalike host."""
+    return isinstance(value, str) and re.fullmatch(
+        rf"https?://(?:[a-z0-9-]+\.)*linkedin\.com/{kind}/[a-z0-9_%~.-]+/?(?:[?#][^\s]*)?",
+        value.strip(), re.IGNORECASE,
+    ) is not None
+
+
+def employee_range_bounds(value: Any) -> Optional[tuple[int, Optional[int]]]:
+    """Read a published range without converting a member count into a band."""
+    if not isinstance(value, str):
+        return None
+    value = re.sub(r"[\s,]", "", value).replace("–", "-").replace("—", "-")
+    match = re.fullmatch(r"(\d+)(?:-(\d+)|(\+))", value)
+    if not match:
+        return None
+    lower, upper = int(match[1]), int(match[2]) if match[2] else None
+    return (lower, upper) if upper is None or upper >= lower else None
+
+
+def _validate_harvest_evidence(evidence: Any, linkedin: Any, kind: str, path: str,
+                              routes: dict, errors: list[str]) -> None:
+    evidence = evidence if isinstance(evidence, dict) else {}
+    url = evidence.get("evidence_url")
+    if not _linkedin_url(url, kind):
+        errors.append(f"{path}.evidence_url requires the LinkedIn /{kind}/ source")
+    elif _linkedin_url(linkedin, kind):
+        slug = lambda value: re.search(rf"/{kind}/([^/?#]+)", value, re.IGNORECASE)[1].casefold()
+        if slug(url) != slug(linkedin):
+            errors.append(f"{path}.evidence_url must match the same LinkedIn entity")
+    try:
+        date = evidence.get("evidence_date")
+        if not isinstance(date, str) or datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%d") != date:
+            raise ValueError
+    except ValueError:
+        errors.append(f"{path}.evidence_date requires an ISO calendar date")
+    if evidence.get("evidence_date_basis") != "observed_current" or not _nonempty_text(evidence.get("evidence_text")):
+        errors.append(f"{path} requires observed_current evidence and the LinkedIn source text")
+    source = evidence.get("source")
+    source = source if isinstance(source, dict) else {}
+    tool = source.get("tool")
+    route_id = source.get("route_id")
+    matching = routes.get(route_id.strip(), []) if isinstance(route_id, str) else []
+    if (source.get("provider") != "deepline" or source.get("operation") != "execute"
+            or not isinstance(tool, str) or "harvestapi" not in tool.casefold()
+            or not _identity(tool).endswith("getcompany" if kind == "company" else "getprofile")
+            or len(matching) != 1
+            or matching[0].get("provider") != "deepline"
+            or matching[0].get("operation") != "execute"
+            or matching[0].get("tool") != tool
+            or matching[0].get("provider_status") not in {"ok", "partial"}):
+        errors.append(f"{path}.source requires a matching successful HarvestAPI execute route")
+
+
+def linkedin_field_errors(document: dict) -> list[str]:
+    """Required LinkedIn field enrichment, independent of email/phone opt-outs."""
+    errors = []
+    routes: dict[str, list[dict]] = {}
+    for route in document.get("routes", []):
+        if isinstance(route, dict) and isinstance(route.get("route_id"), str):
+            routes.setdefault(route["route_id"].strip(), []).append(route)
+    for index, row in enumerate(document.get("accepted", [])):
+        if not isinstance(row, dict):
+            continue
+        path = f"accepted[{index}]"
+        company = row.get("company")
+        company = company if isinstance(company, dict) else {}
+        if employee_range_bounds(company.get("employee_range")) is None:
+            errors.append(f"{path}.company.employee_range requires the LinkedIn employee range")
+        _validate_harvest_evidence(company.get("employee_range_evidence"), company.get("linkedin_url"),
+                                  "company", f"{path}.company.employee_range_evidence", routes, errors)
+        contacts = [(f"{path}.primary_contact", row.get("primary_contact"))]
+        backups = row.get("backup_contacts", [])
+        contacts += [(f"{path}.backup_contacts[{i}]", c) for i, c in enumerate(backups if isinstance(backups, list) else [])]
+        for contact_path, contact in contacts:
+            if not isinstance(contact, dict):
+                continue
+            country = _nonempty_text(contact.get("country"))
+            if not country or country.casefold() in {"unknown", "n/a", "na", "none", "null", "remote", "-"}:
+                errors.append(f"{contact_path}.country is required from the person's LinkedIn location")
+            for field in ("city", "state"):
+                if field in contact and contact[field] is not None and not _nonempty_text(contact[field]):
+                    errors.append(f"{contact_path}.{field} must be text when supplied")
+            _validate_harvest_evidence(contact.get("location_evidence"), contact.get("linkedin_url", contact.get("contact_url")),
+                                      "in", f"{contact_path}.location_evidence", routes, errors)
+    return errors
+
+
 def accepted_errors(document: dict) -> list[str]:
     """Shared accepted-lead contract for saving a review and final delivery."""
-    errors = []
+    errors = linkedin_field_errors(document)
     request, accepted = document.get("request", {}), document.get("accepted", [])
     if document.get("schema_version") == "1.2":
         _validate_client_output(accepted, errors)

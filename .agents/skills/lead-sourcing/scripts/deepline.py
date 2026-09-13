@@ -462,6 +462,28 @@ def normalize_evidence(
     result["provider"] = _text(_first(source, "provider")) or provider
     result["tool"] = _text(_first(source, "tool", "tool_name")) or tool
 
+    # These are LinkedIn profile fields, not company HQ or associated-member
+    # counts. Preserve the raw HarvestAPI fields alongside the stable output.
+    if "harvestapi" in (tool or "").lower():
+        linkedin = _text(source.get("linkedinUrl"))
+        if _is_linkedin_company_url(linkedin):
+            result["company"] = _text(source.get("name")) or result["company"]
+            result["company_linkedin_url"] = linkedin
+            band = source.get("employeeCountRange")
+            if isinstance(band, dict):
+                start, end = band.get("start"), band.get("end")
+                if type(start) is int and start >= 0 and (end is None and start == 10001 or type(end) is int and end >= start):
+                    result["employee_range"] = f"{start}-{end}" if end is not None else f"{start}+"
+        elif linkedin and re.search(r"linkedin\.com/in/[^/?#]+", linkedin, re.IGNORECASE):
+            location = source.get("location")
+            if isinstance(location, dict):
+                parsed = location.get("parsed")
+                parsed = parsed if isinstance(parsed, dict) else {}
+                result["location_text"] = _text(location.get("linkedinText")) or _text(parsed.get("text"))
+                result["country"] = _text(_first(parsed, "countryFull", "country", "countryCode")) or _text(location.get("countryCode"))
+                for field in ("state", "city"):
+                    result[field] = _text(parsed.get(field))
+
     # Contact-capable tools use several common names for person data. Keep the
     # source fields untouched, but expose stable contact fields for callers
     # that request a people/entity route. A bare ``name`` is only considered a
@@ -546,7 +568,7 @@ def normalize_evidence(
             "emailAddress",
         )
     )
-    has_contact = not company_entity and not is_email_validation and any(
+    has_contact = not company_entity and not _is_linkedin_company_url(source.get("linkedinUrl")) and not is_email_validation and any(
         value is not None for value in (contact, contact_url, contact_title, contact_email)
     )
     if has_contact:
@@ -945,7 +967,9 @@ def _records(value: Any) -> List[Any]:
             "evidence_text",
             "url",
         )
-    ) or any(key in value for key in _CONTACT_RECORD_KEYS):
+    ) or any(key in value for key in _CONTACT_RECORD_KEYS) or (
+        _is_linkedin_company_url(value.get("linkedinUrl")) and _text(value.get("name"))
+    ):
         return [value]
     scalar = _scalar_result(value)
     if scalar is not None:
@@ -1152,7 +1176,9 @@ def _known_envelope(value: Any) -> bool:
             "evidence_text",
             "evidence_url",
         )
-    ) or any(key in value for key in _CONTACT_RECORD_KEYS):
+    ) or any(key in value for key in _CONTACT_RECORD_KEYS) or (
+        _is_linkedin_company_url(value.get("linkedinUrl")) and _text(value.get("name"))
+    ):
         return True
     if _is_email_validation_record(value):
         return True

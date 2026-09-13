@@ -115,7 +115,8 @@ def client_document(*, date_basis: str = "published", schema_version: str = "1.2
     )
     document["stop_reason"] = "target_met"
     for route in document["routes"]:
-        route.update({"cost_credits": 0.1, "cost_upper_bound_credits": 0.1, "cost_basis": "actual"})
+        cost = 0.1 if route.get("paid_calls") else 0
+        route.update({"cost_credits": cost, "cost_upper_bound_credits": cost, "cost_basis": "actual"})
     document["cost_summary"] = VALIDATOR.calculate_cost_summary(document)
     return document
 

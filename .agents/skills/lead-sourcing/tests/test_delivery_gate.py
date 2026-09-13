@@ -37,7 +37,7 @@ def checkpoint_document():
         route_frontier=[
             {"route_id": route["route_id"], "state": "exhausted",
              "reason": "Returned rows reviewed.", "exhaustion_basis": "no_new_unique_candidates"}
-            for route in routes
+            for route in document["routes"]
         ],
     )
     document["stop_check"] = {"started_at": STARTED_AT, "next_actions": [
