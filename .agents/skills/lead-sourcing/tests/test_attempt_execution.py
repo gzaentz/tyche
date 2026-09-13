@@ -434,6 +434,51 @@ class AttemptExecutionTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), before)
         self.assertEqual(budget_guard.load_ledger(self.path)["calls"], {})
 
+    def test_all_batch_inputs_are_validated_before_planning_or_spending(self):
+        for change in ("paid_calls", "payload", "bound", "scrapingdog"):
+            with self.subTest(change=change):
+                specs = self.company_specs()
+                if change == "paid_calls": specs[1]["action"].pop("paid_calls")
+                if change == "payload": specs[1]["request"]["payload"] = "not an object"
+                if change == "bound": specs[1]["action"]["cost_upper_bound_credits"] = -1
+                if change == "scrapingdog":
+                    specs[1]["action"]["provider"] = "scrapingdog"
+                    specs[1]["request"] = {"operation": "scrape", "url": "not a URL"}
+                before = self.path.read_bytes(), budget_guard.ledger_path(self.path).read_bytes()
+                execute = Mock()
+                with self.assertRaisesRegex(ValueError, r"batch\[1\]"):
+                    runner.run_batch(self.path, specs, execute=execute)
+                execute.assert_not_called()
+                self.assertEqual((self.path.read_bytes(), budget_guard.ledger_path(self.path).read_bytes()), before)
+                self.assertFalse((self.path.parent / "receipts").exists())
+
+    def test_batch_field_error_does_not_recommend_a_discovery_action(self):
+        specs = self.company_specs()
+        specs[1]["action"].pop("description")
+        with self.assertRaises(ValueError) as raised:
+            runner.run_batch(self.path, specs)
+        self.assertIn("batch[1].action.description", str(raised.exception))
+        self.assertNotIn('"phase": "account_discovery"', str(raised.exception))
+
+    def test_scrapingdog_preflight_dispatch_and_receipt_keep_credentials_out_of_identity(self):
+        import scrapingdog
+        spec = self.spec(paid=True)
+        spec["action"]["provider"] = "scrapingdog"
+        spec["request"] = {"operation": "google_search", "query": "payments"}
+        with patch.dict(os.environ, {}, clear=True):
+            first = runner._validate_spec(spec)
+        with patch.dict(os.environ, {"SCRAPINGDOG_API_KEY": "fixture-key"}), \
+                patch.object(scrapingdog, "_http_get", return_value=(
+                    200, '{"organic_results": []}', {})) as remote:
+            self.assertEqual(runner._validate_spec(spec)[1]["request_fingerprint"], first[1]["request_fingerprint"])
+            result = runner.run_attempt(self.path, spec)
+        self.assertEqual(result["provider_status"], "no_results")
+        remote.assert_called_once()
+        receipt = Path(result["receipt_file"]).read_text()
+        self.assertNotIn("fixture-key", receipt)
+        self.assertNotIn("api_key", json.loads(receipt)["attempt"]["request"])
+        self.assertEqual(budget_guard.audit_ledger(self.path, json.loads(self.path.read_text())), [])
+
     def test_receipt_cli_is_compact_read_only_and_preserves_material_results(self):
         runner.run_attempt(self.path, self.spec(), execute=self.free_response)
         receipt = self.path.parent / "receipts/one.json"

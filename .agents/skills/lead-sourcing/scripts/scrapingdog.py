@@ -1023,10 +1023,6 @@ def validate_request(request: Any) -> Dict[str, Any]:
     result["operation_kind"] = operation_kind
     if "api_key" in result:
         raise InputError("api_key input is not supported; use the environment")
-    api_key = os.environ.get("SCRAPINGDOG_API_KEY")
-    if not isinstance(api_key, str) or not api_key.strip():
-        raise ConfigError("ScrapingDog API key is not configured")
-    result["api_key"] = api_key.strip()
     if operation_kind in {
         "google_search",
         "universal_search",
@@ -1183,7 +1179,6 @@ def validate_request(request: Any) -> Dict[str, Any]:
             result["query_type"] = query_type
     if result.get("base_url") not in (None, ""):
         raise InputError("base_url override is not supported")
-    result["base_url"] = API_HOST
     result["timeout_seconds"] = _timeout_seconds(result.get("timeout_seconds"))
     result["limit"] = _limit(result.get("limit"))
     return result
@@ -1846,6 +1841,10 @@ def _continuation_cursor(payload: Any) -> Optional[str]:
 
 def run(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any], int]:
     request = validate_request(request)
+    api_key = os.environ.get("SCRAPINGDOG_API_KEY")
+    if not isinstance(api_key, str) or not api_key.strip():
+        raise ConfigError("ScrapingDog API key is not configured")
+    request["api_key"] = api_key.strip()
     return guarded_call(request, "scrapingdog", lambda: _run_validated(request, capture))
 
 
@@ -1853,7 +1852,7 @@ def _run_validated(request: Dict[str, Any], capture=None) -> Tuple[Dict[str, Any
     operation = request["operation"]
     operation_kind = request["operation_kind"]
     path, params = _params(request)
-    url = request["base_url"] + path + "?" + urlencode(params)
+    url = API_HOST + path + "?" + urlencode(params)
     status_code = 0
     body = ""
     try:

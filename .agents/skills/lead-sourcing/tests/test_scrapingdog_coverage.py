@@ -53,7 +53,10 @@ class ScrapingDogCoverageTests(unittest.TestCase):
                 with self.subTest(alias=alias):
                     a = SCRAPINGDOG.validate_request({"operation": alias, **inputs[canonical]})
                     c = SCRAPINGDOG.validate_request({"operation": canonical, **inputs[canonical]})
-                    self.assertEqual(SCRAPINGDOG._params(a), SCRAPINGDOG._params(c))
+                    self.assertNotIn("api_key", a)
+                    self.assertEqual(SCRAPINGDOG.validate_request(a), a)
+                    self.assertEqual(SCRAPINGDOG._params(dict(a, api_key="fixture")),
+                                     SCRAPINGDOG._params(dict(c, api_key="fixture")))
                     actual = SCRAPINGDOG.normalize_result(row, alias)
                     expected = SCRAPINGDOG.normalize_result(row, canonical)
                     for field in ("company", "domain", "evidence_text", "evidence_url", "signal"):

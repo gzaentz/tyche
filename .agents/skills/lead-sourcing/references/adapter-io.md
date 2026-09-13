@@ -98,7 +98,9 @@ or a historical role without an end date does not establish the current title.
 Finder email flags never replace ZeroBounce or eligible BounceBan validation.
 Repeated progress snapshots, request metadata and duplicate evidence stay in
 the receipt. Reopen it with `run_attempt.py <results.json> --receipt <route-id>`
-to reuse this compact view without dispatching or changing state. Inspect specific
+to reuse this compact view without dispatching or changing state. The view checks
+run ownership and the saved route's request/provider identity, including pending
+receipts; mismatches require origin reconciliation. Inspect specific
 raw fields only for a missing fact or contradiction; full receipts remain saved.
 
 ## Save a review
@@ -158,7 +160,9 @@ python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
 
 The existing `--batch-files` option remains compatible with one array file or
 multiple individual attempt files. All paths use the same execution, independence
-and budget checks. Missing input fields identify their item before dispatch.
+and budget checks. The helper validates every input with the existing provider
+validators before planning or spending. Malformed fields identify their batch item
+and stop the entire batch without changing run state.
 
 Give each action a unique route ID and its canonical company domain as `scope`.
 Batch mode accepts account verification, contact discovery, contact verification
@@ -171,7 +175,8 @@ requests for the same company at once.
 The helper plans serially, runs up to three provider calls concurrently, and
 records results serially. Each call has its own receipt. Budget reservations and
 settlements share the existing ledger and are serialized; pending costs still
-count against all caps and the verification reserve. A refused or failed member
+count against all caps and the verification reserve. After input validation,
+a member refused by eligibility/budget checks or a failed provider call
 does not discard successful siblings. The batch returns all outcomes and exits
 nonzero if any member fails; recover saved receipts with `--complete`, never
 rerun the whole batch or retry an uncertain billed request.

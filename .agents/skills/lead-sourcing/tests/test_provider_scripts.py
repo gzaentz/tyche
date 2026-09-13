@@ -1733,13 +1733,13 @@ class ProviderScriptTests(unittest.TestCase):
             ads_request = SCRAPINGDOG.validate_request(
                 {"operation": "google_ads_transparency", "text": "Acme", "limit": 3}
             )
-            _, ads_params = SCRAPINGDOG._params(ads_request)
+            _, ads_params = SCRAPINGDOG._params(dict(ads_request, api_key="fixture"))
             self.assertEqual(ads_params["num"], 3)
 
             tiktok_ads_request = SCRAPINGDOG.validate_request(
                 {"operation": "tiktok_ads", "advertiser_id": "adv-1"}
             )
-            _, tiktok_ads_params = SCRAPINGDOG._params(tiktok_ads_request)
+            _, tiktok_ads_params = SCRAPINGDOG._params(dict(tiktok_ads_request, api_key="fixture"))
             self.assertEqual(tiktok_ads_params["query_type"], 2)
 
 

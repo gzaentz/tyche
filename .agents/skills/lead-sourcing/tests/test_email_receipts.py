@@ -106,7 +106,7 @@ class EmailReceiptTests(unittest.TestCase):
 
     def test_actual_pending_fallback_cannot_be_repeated_with_a_different_mode(self):
         fixture, spec = self.prepared_run()
-        run_attempt._start_attempt(fixture.path, spec)
+        run_attempt._start_attempt(fixture.path, run_attempt._validate_spec(spec))
         pending = json.loads(fixture.path.read_text())['stop_audit']['route_frontier'][-1]
         self.assertNotIn('tool', pending)
         spec['action']['id'] = 'bounceban-repeated'
@@ -143,12 +143,12 @@ class EmailReceiptTests(unittest.TestCase):
         path = fixture.path.parent / 'receipts/zerobounce-original.json'
         saved = json.loads(path.read_text())
         self.assertTrue(saved.get('provider_response', {}).get('timed_out'))
-        run_attempt._start_attempt(fixture.path, spec)
+        run_attempt._start_attempt(fixture.path, run_attempt._validate_spec(spec))
 
     def test_actual_service_failure_allows_fallback(self):
         raw = {'ok': False, 'status': 'rate_limited', 'error': {'message': 'Too many requests'}}
         fixture, spec = self.prepared_run(raw, exit_code=1)
-        run_attempt._start_attempt(fixture.path, spec)
+        run_attempt._start_attempt(fixture.path, run_attempt._validate_spec(spec))
 
     def test_failure_envelope_cannot_override_an_explicit_hard_negative(self):
         raw = {'status': 'provider_error', 'error': {'message': 'Upstream unavailable'},
@@ -161,7 +161,7 @@ class EmailReceiptTests(unittest.TestCase):
 
     def test_pending_fallback_does_not_block_another_email(self):
         fixture, spec = self.prepared_run()
-        run_attempt._start_attempt(fixture.path, spec)
+        run_attempt._start_attempt(fixture.path, run_attempt._validate_spec(spec))
         second = copy.deepcopy(spec)
         second['action'].update(id='zerobounce-second', approach='zerobounce-validation')
         second['request'].update(tool='zerobounce_validate', payload={'email': 'other@target.example'})
@@ -170,7 +170,7 @@ class EmailReceiptTests(unittest.TestCase):
             run_attempt.run_attempt(fixture.path, second)
         second['action'].update(id='bounceban-other-email', approach='bounceban-validation')
         second['request']['tool'] = 'bounceban_verify_single'
-        run_attempt._start_attempt(fixture.path, second)
+        run_attempt._start_attempt(fixture.path, run_attempt._validate_spec(second))
 
     def verification_chain(self, response_email=False):
         fixture, spec = self.prepared_run()

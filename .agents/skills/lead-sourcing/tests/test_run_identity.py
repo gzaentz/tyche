@@ -92,6 +92,36 @@ class RunIdentityTests(unittest.TestCase):
             runner.finish_attempt(self.source.path, "one", body)
         self.assertEqual(self.source.path.read_bytes(), before)
 
+    def test_receipt_view_rejects_foreign_missing_and_mismatched_identity_without_writes(self):
+        foreign = self.execute(self.source)["result"]
+        own = self.execute(self.target)["result"]
+        receipt = self.target.path.parent / "receipts/one.json"
+        missing = dict(own)
+        missing.pop("run_fingerprint")
+        for body in (foreign, missing, dict(own, request_fingerprint="f" * 64), dict(own, provider="scrapingdog")):
+            with self.subTest(keys=list(body)):
+                receipt.write_text(json.dumps(body))
+                files = (self.target.path, budget_guard.ledger_path(self.target.path), receipt)
+                before = [p.read_bytes() for p in files]
+                result = self.cli(self.target, "--receipt", "one")
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual([p.read_bytes() for p in files], before)
+
+    def test_receipt_view_accepts_pending_capture_and_validates_frontier_identity(self):
+        spec = self.source.spec()
+        runner._start_attempt(self.source.path, runner._validate_spec(spec))
+        receipt = self.source.path.parent / "receipts/one.json"
+        own = json.loads(receipt.read_text())
+        files = (self.source.path, budget_guard.ledger_path(self.source.path), receipt)
+        before = [p.read_bytes() for p in files]
+        result = self.cli(self.source, "--receipt", "one")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["result"]["receipt_status"], "pending")
+        self.assertEqual([p.read_bytes() for p in files], before)
+        receipt.write_text(json.dumps(dict(own, request_fingerprint="f" * 64)))
+        self.assertEqual(self.cli(self.source, "--receipt", "one").returncode, 2)
+
     def test_unbound_legacy_ledger_is_read_only_and_never_reset(self):
         self.execute(self.source)
         path = budget_guard.ledger_path(self.source.path)

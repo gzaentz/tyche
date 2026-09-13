@@ -228,42 +228,51 @@ def _fingerprint(provider, request):
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def _validate_spec(spec, label="input"):
-    """Reject malformed input before any member of a batch is planned or sent."""
-    example = ('Use {"action": {"id": "lookup-1", "scope": "discovery", '
-               '"phase": "account_discovery", "approach": "tool-discovery", '
-               '"description": "Find research tools", "provider": "deepline", '
-               '"paid_calls": 0, "cost_upper_bound_credits": 0}, '
-               '"request": {"operation": "search", "query": "company research"}}.')
+def _validate_spec(spec, label="input", *, plan_only=False):
+    """Normalize input without touching run state, receipts, budgets or providers."""
     if not isinstance(spec, dict):
-        raise ValueError(f"{label} must be an action/request object. {example}")
+        raise ValueError(f"{label} must be an object containing action and request objects")
     for field in ("action", "request"):
         if not isinstance(spec.get(field), dict):
-            raise ValueError(f"{label}.{field} must be an object. {example}")
-    action = spec["action"]
+            raise ValueError(f"{label}.{field} must be an object")
+    action, request = copy.deepcopy(spec["action"]), copy.deepcopy(spec["request"])
     if not isinstance(action.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", action["id"]):
-        raise ValueError(f"{label}.action.id must be a safe unique route ID. {example}")
+        raise ValueError(f"{label}.action.id must be a safe unique route ID")
     for field in ("scope", "description", "phase", "approach", "provider"):
         if not isinstance(action.get(field), str) or not action[field].strip():
-            raise ValueError(f"{label}.action.{field} is required. {example}")
+            raise ValueError(f"{label}.action.{field} must be a non-empty string")
     if action["phase"] not in {"account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"}:
         raise ValueError(f"{label}.action.phase is not a sourcing phase")
     if action["provider"] not in {"deepline", "scrapingdog", "public_web"}:
         raise ValueError(f"{label}.action.provider must use an existing provider wrapper")
-
-
-def _prepare(run_file, spec):
-    action, request = copy.deepcopy(spec["action"]), copy.deepcopy(spec["request"])
     provider = action["provider"]
+    if provider == "public_web" and not plan_only:
+        raise ValueError("public web: use --plan-only, then record the observed result with --complete")
+    if plan_only and provider != "public_web":
+        raise ValueError("--plan-only is for external public-web actions, not provider calls")
     adapter = None if provider == "public_web" else importlib.import_module(provider)
     if adapter:
-        request = (adapter._validate_request(request) if provider == "deepline" else adapter.validate_request(request))
+        try:
+            request = (adapter._validate_request(request) if provider == "deepline" else adapter.validate_request(request))
+        except ValueError as exc:
+            raise ValueError(f"{label}.request: {exc}") from exc
     operation = request.get("operation")
+    if not isinstance(operation, str) or not operation.strip():
+        raise ValueError(f"{label}.request.operation must be a non-empty string")
     paid = int(provider == "scrapingdog" or (provider == "deepline" and operation == "execute"))
-    if action.get("paid_calls") != paid:
-        raise ValueError("paid_calls must match the wrapper operation (execute is reserved even if priced free)")
+    if type(action.get("paid_calls")) is not int or action["paid_calls"] != paid:
+        raise ValueError(f"{label}.action.paid_calls must match the wrapper operation (execute is reserved even if priced free)")
+    if "cost_upper_bound_credits" not in action:
+        raise ValueError(f"{label}.action.cost_upper_bound_credits is required; use null only for unknown pricing")
+    bound = action["cost_upper_bound_credits"]
+    if bound is not None:
+        if isinstance(bound, bool) or not isinstance(bound, (int, float)):
+            raise ValueError(f"{label}.action.cost_upper_bound_credits must be a finite nonnegative number or null")
+        budget_guard.amount(bound, f"{label}.action.cost_upper_bound_credits")
+    if provider == "public_web" and bound != 0:
+        raise ValueError(f"{label}.action.cost_upper_bound_credits must be zero for public web")
     if "status_read" in action and type(action["status_read"]) is not bool:
-        raise ValueError("status_read must be boolean")
+        raise ValueError(f"{label}.action.status_read must be boolean")
     if action.get("status_read") and (provider != "deepline" or operation != "execute"
                                      or action.get("cost_upper_bound_credits") != 0):
         raise ValueError("status_read requires a described free Deepline job-status getter")
@@ -278,8 +287,13 @@ def _prepare(run_file, spec):
     action["operation"] = operation
     if request.get("tool"):
         action["tool"] = request["tool"]
-    fingerprint = _fingerprint(provider, request)
-    action["request_fingerprint"] = fingerprint
+    action["request_fingerprint"] = _fingerprint(provider, request)
+    return adapter, action, request
+
+
+def _prepare(run_file, validated):
+    adapter, action, request = validated
+    provider, operation, fingerprint = action["provider"], action["operation"], action["request_fingerprint"]
     prepared = {}
 
     def plan(document):
@@ -331,7 +345,7 @@ def _prepare(run_file, spec):
         return document
 
     mutate(run_file, plan)
-    if paid:
+    if action["paid_calls"]:
         request["spend"] = {"run_file": str(run_file), "route_id": action["id"],
                             "max_cost_credits": action["cost_upper_bound_credits"]}
     return adapter, request, prepared
@@ -392,14 +406,9 @@ def finish_attempt(run_file, route_id, body, *, check_stop=True):
         return evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))
 
 
-def _start_attempt(run_file, spec, *, plan_only=False):
-    _validate_spec(spec)
+def _start_attempt(run_file, validated):
     budget_guard.load_ledger(run_file)  # Refuse imported state before planning or dispatch.
-    if spec["action"]["provider"] == "public_web" and not plan_only:
-        raise ValueError("public web: use --plan-only, then record the observed result with --complete")
-    if plan_only and spec["action"]["provider"] != "public_web":
-        raise ValueError("--plan-only is for external public-web actions, not provider calls")
-    adapter, request, prepared = _prepare(run_file, spec)
+    adapter, request, prepared = _prepare(run_file, validated)
     receipts = run_file.parent / "receipts"
     receipts.mkdir(exist_ok=True)
     output = receipts / (prepared["action"]["id"] + ".json")
@@ -433,7 +442,7 @@ def _dispatch(adapter, request, capture, *, execute=None, plan_only=False):
 
 def run_attempt(run_file, spec, *, execute=None, plan_only=False):
     run_file = Path(run_file).resolve(strict=True)
-    prepared = _start_attempt(run_file, spec, plan_only=plan_only)
+    prepared = _start_attempt(run_file, _validate_spec(spec, plan_only=plan_only))
     result = _dispatch(*prepared, execute=execute, plan_only=plan_only)
     if not plan_only:
         result["stop_decision"] = finish_attempt(run_file, spec["action"]["id"], result["result"])
@@ -445,29 +454,28 @@ def run_batch(run_file, specs, *, execute=None, plan_only=False):
     run_file = Path(run_file).resolve(strict=True)
     if not isinstance(specs, list) or not 1 <= len(specs) <= 3:
         raise ValueError("a batch requires 1-3 independent company checks")
-    ids, scopes = set(), set()
+    ids, scopes, inputs = set(), set(), []
     for index, spec in enumerate(specs):
-        _validate_spec(spec, f"batch[{index}]")
-        action = spec["action"]
+        validated = _validate_spec(spec, f"batch[{index}]", plan_only=plan_only)
+        action = validated[1]
         rid, scope = action["id"], action["scope"]
         scope = scope.strip().lower()
         if rid in ids or scope in scopes:
             raise ValueError("batch actions need unique route IDs and distinct canonical company scopes")
         if action["phase"] not in {"account_verification", "contact_discovery", "contact_verification", "email_validation"}:
             raise ValueError("batch mode is for company checks; run discovery pilots separately")
-        if (action["provider"] == "public_web") != plan_only:
-            raise ValueError("public-web batches require --plan-only; provider batches cannot use it")
         ids.add(rid)
         scopes.add(scope)
+        inputs.append(validated)
 
     results, prepared = [], []
     # Save every plan before any network work. A refused member does not discard
     # its siblings, and a failed dispatch is never automatically resubmitted.
-    for spec in specs:
-        result = {"route_id": spec["action"]["id"], "exit_code": 0}
+    for validated in inputs:
+        result = {"route_id": validated[1]["id"], "exit_code": 0}
         results.append(result)
         try:
-            prepared.append((result, _start_attempt(run_file, spec, plan_only=plan_only)))
+            prepared.append((result, _start_attempt(run_file, validated)))
         except Exception as exc:
             result.update(exit_code=2, error=str(exc), error_stage="prepare")
 
@@ -535,8 +543,18 @@ def read_receipt(run_file, route_id):
     """Read saved evidence through the same display projection used at dispatch."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", route_id):
         raise ValueError("invalid route ID")
-    path = Path(run_file).resolve(strict=True).parent / "receipts" / (route_id + ".json")
-    return {"route_id": route_id, "receipt_file": str(path), "result": budget_guard.read_object(path)}
+    run_file = Path(run_file).resolve(strict=True)
+    path = run_file.parent / "receipts" / (route_id + ".json")
+    body = budget_guard.read_object(path)
+    if body.get("run_fingerprint") != budget_guard.run_fingerprint(run_file):
+        raise ValueError("saved response belongs to another run or lacks run identity; preserve it and reconcile its origin")
+    document = budget_guard.read_object(run_file)
+    routes = document.get("routes", []) + document.get("stop_audit", {}).get("route_frontier", [])
+    for route in routes:
+        if isinstance(route, dict) and route.get("route_id") == route_id:
+            if any(route.get(key) != body.get(key) for key in ("request_fingerprint", "provider")):
+                raise ValueError("saved response does not match this route's request/provider; preserve it and reconcile its origin")
+    return {"route_id": route_id, "receipt_file": str(path), "result": body}
 
 
 def main():
