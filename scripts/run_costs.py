@@ -118,7 +118,7 @@ def execute_with_usage(command, cwd, env, receipt):
         receipt.finish(code)
 
 
-def report(results, receipt_paths, monitoring=None, run_directory=None):
+def report(results, receipt_paths, run_directory=None):
     providers = results.get('cost_summary', {})
     deepline = providers.get('deepline', {})
     scraping = providers.get('scrapingdog', {})
@@ -148,22 +148,21 @@ def report(results, receipt_paths, monitoring=None, run_directory=None):
             worker_high += Decimal(str(cost['maximum']))
     if not workers:
         missing.append('Sourcing model usage was not captured')
-    monitor_cost = monitoring.get('estimated_usd') if monitoring else None
-    if monitor_cost is None:
-        missing.append('Monitoring/rework model usage not supplied or incomplete')
-    subtotal_low = Decimal(str(low or 0)) + worker_low + Decimal(str((monitor_cost or {}).get('minimum', 0)))
-    subtotal_high = Decimal(str(high or low or 0)) + worker_high + Decimal(str((monitor_cost or {}).get('maximum', 0)))
+    subtotal_low = Decimal(str(low or 0)) + worker_low
+    subtotal_high = Decimal(str(high or low or 0)) + worker_high
     subtotal = {'minimum': float(subtotal_low), 'maximum': float(subtotal_high)}
     count = len(results.get('accepted', []))
     return {'status': 'incomplete' if missing else 'estimated',
+        'scope': 'tyche_run_only',
         'basis': 'provider_charges_plus_standard_api_equivalent_models_not_actual_invoice',
         'provider_usd': {'confirmed': low, 'maximum': high}, 'worker_invocations': workers,
-        'monitoring': monitoring, 'known_subtotal_standard_equivalent_usd': subtotal,
+        'known_subtotal_standard_equivalent_usd': subtotal,
         'combined_standard_equivalent_usd': None if missing else subtotal,
         'cost_per_accepted_lead_standard_equivalent_usd': None if missing or not count else
             {k: float(Decimal(str(v)) / count) for k, v in subtotal.items()},
         'accepted_leads': count, 'missing': missing,
-        'limitations': ['Not an actual full-cost invoice: model Fast/priority premiums, hosted-tool charges and subscription allocation are not priced.',
+        'limitations': ['Outer chat, monitoring and development costs are outside this run cost.',
+                        'Not an actual full-cost invoice: model Fast/priority premiums, hosted-tool charges and subscription allocation are not priced.',
                         'Supply every invocation from this run, including interrupted attempts; never omit an unpriced attempt.']}
 
 
@@ -171,12 +170,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('results', type=Path)
     parser.add_argument('--model-receipts', type=Path, nargs='*', default=None)
-    parser.add_argument('--monitoring-cost', type=Path)
     args = parser.parse_args()
     try:
         receipts = args.model_receipts if args.model_receipts is not None else sorted((args.results.parent / 'model-usage').glob('*.json'))
-        output = report(json.loads(args.results.read_text()), receipts,
-                        json.loads(args.monitoring_cost.read_text()) if args.monitoring_cost else None, args.results.parent)
+        output = report(json.loads(args.results.read_text()), receipts, args.results.parent)
         print(json.dumps(output, indent=2))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         parser.exit(2, str(exc) + '\n')

@@ -1209,13 +1209,15 @@ Codex model cost is not part of direct provider cost.
 Direct provider cost is not the full run cost. The outer launcher saves numeric
 worker usage in `model-usage/<invocation-id>.json` beside each request file.
 After completion, use the repository-root `scripts/run_costs.py` with every
-invocation and a run-scoped monitoring/rework cost file, as described in
-`docs/codex-isolated-testing.md`. Report the separate components, combined
+invocation, including sourcing retries and continuations, as described in
+`docs/codex-isolated-testing.md`. The run cost includes provider calls and
+sourcing workers only; exclude outer chat, monitoring and development costs.
+Report the separate components, combined
 Standard API-equivalent estimate and per-accepted-lead estimate. If any component
 is missing, show the known subtotal and mark the full total incomplete; do not
 price a bare `tokens used` footer or treat unknown usage as zero. Model estimates
 are not actual subscription/credit charges. The provider budget does not cap
-model usage or monitoring costs.
+model usage.
 
 Route cost values are totals, not per-call rates. When `paid_calls` is greater
 than one, both cost fields cover all paid calls represented by that route.

@@ -72,23 +72,26 @@ class RunCostsTests(unittest.TestCase):
         self.assertEqual(receipt.data['exit_code'], 0)
         self.assertEqual(receipt.data['status'], 'incomplete')
 
-    def test_all_components_and_unknowns_are_exposed_in_combined_report(self):
+    def test_run_total_needs_worker_usage_but_excludes_outer_chat(self):
         results = {'accepted':[{}]*5, 'cost_summary':{'deepline':{'confirmed_usd':0.266,'maximum_usd':0.608},
                                                     'scrapingdog':{'maximum_credits':0}}}
         missing = report(results, [])
         self.assertEqual(missing['status'], 'incomplete')
         self.assertIsNone(missing['combined_standard_equivalent_usd'])
+        self.assertEqual(missing['missing'], ['Sourcing model usage was not captured'])
         receipt = self.receipt()
         receipt.observe({'type':'turn.completed','usage':{'input_tokens':1000,'cached_input_tokens':800,'cache_write_input_tokens':0,'output_tokens':100}})
         receipt.finish(0)
-        monitor = {'estimated_usd':{'minimum':1,'maximum':1}, 'basis':'standard_api_equivalent_not_actual_billing'}
-        complete = report(results, [receipt.path], monitor, self.root)
-        self.assertEqual(complete['combined_standard_equivalent_usd'], {'minimum':1.266176,'maximum':1.608176})
-        self.assertEqual(complete['cost_per_accepted_lead_standard_equivalent_usd']['minimum'], 0.2532352)
+        complete = report(results, [receipt.path], self.root)
+        self.assertEqual(complete['scope'], 'tyche_run_only')
+        self.assertNotIn('monitoring', complete)
+        self.assertEqual(complete['status'], 'estimated')
+        self.assertEqual(complete['combined_standard_equivalent_usd'], {'minimum':0.266176,'maximum':0.608176})
+        self.assertEqual(complete['cost_per_accepted_lead_standard_equivalent_usd']['minimum'], 0.0532352)
         with self.assertRaisesRegex(ValueError, 'duplicate'):
-            report(results, [receipt.path, receipt.path], monitor, self.root)
+            report(results, [receipt.path, receipt.path], self.root)
         with self.assertRaisesRegex(ValueError, 'different run'):
-            report(results, [receipt.path], monitor, self.root / 'another-run')
+            report(results, [receipt.path], self.root / 'another-run')
 
 
 if __name__ == '__main__':

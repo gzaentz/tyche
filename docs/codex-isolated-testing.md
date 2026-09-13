@@ -119,16 +119,14 @@ capture; its old aggregate `tokens used` footer is not a pricing breakdown.
 After the run, combine its provider summary and every invocation receipt:
 
 ```bash
-python3 scripts/run_costs.py reports/<run-id>/results.json \
-  --monitoring-cost reports/<run-id>/monitoring-cost.json
+python3 scripts/run_costs.py reports/<run-id>/results.json
 ```
 
-The optional monitoring file contains a run-scoped Standard API-equivalent
-`estimated_usd: {minimum, maximum}` breakdown from the outer task's usage
-collector. Keep monitoring/rework separate from sourcing worker usage; never
-substitute the whole conversation's cost or sum overlapping time windows.
-Missing monitoring or worker usage makes the combined estimate and per-lead
-cost null, while preserving the known subtotal. Provider confirmed/maximum
+The scope is only the TYCHE run: its provider calls and sourcing workers,
+including retries and continuations. Outer chat, monitoring and development
+costs are excluded and must not be supplied to this report. Missing worker
+usage makes the combined estimate and per-lead cost null, while preserving the
+known subtotal. Provider confirmed/maximum
 figures retain unsettled reservations. Model estimates reflect distinct input,
 cached-input and output rates, with a range when request-size/cache-write details
 are absent. They are not invoices and exclude Fast/priority premiums,
