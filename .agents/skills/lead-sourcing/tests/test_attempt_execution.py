@@ -730,6 +730,114 @@ class AttemptExecutionTests(unittest.TestCase):
         self.assertEqual(json.loads(self.path.read_text())["routes"][0]["rows_returned"], 1)
         self.assertEqual(budget_guard.load_ledger(self.path)["calls"], {})
 
+    def plan_web(self, rid="web"):
+        spec = self.spec(rid)
+        spec["action"]["provider"] = "public_web"
+        spec["request"] = {"operation": "search", "query": "payments partnerships"}
+        execute = Mock()
+        result = runner.run_attempt(self.path, spec, execute=execute, plan_only=True)
+        execute.assert_not_called()
+        return Path(result["receipt_file"])
+
+    def test_web_response_cli_keeps_helper_metadata_and_saved_role_plan(self):
+        self.doc["request"].update(requested_roles=["Head of Payments", "Chief Operating Officer"],
+            contact_role_groups={"primary": ["Head of Payments"], "secondary": ["Chief Operating Officer"]},
+            contacts_per_company=1)
+        self.path.write_text(json.dumps(self.doc))
+        receipt = self.plan_web()
+        before = json.loads(receipt.read_text())
+        response = {"status": "ok", "results": [{"url": "https://example.org/news", "text": "Payments partnership — announced."}]}
+        response_file = self.path.parent / "observed.json"
+        response_file.write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")
+        command = [sys.executable, runner.__file__, str(self.path), "--complete", "web", "--response-file", str(response_file)]
+        subprocess.run(command, capture_output=True, text=True, check=True)
+        saved = json.loads(receipt.read_text())
+        for key in ("run_fingerprint", "request_fingerprint", "provider", "attempt", "progress_before", "accepted_before"):
+            self.assertEqual(saved[key], before[key])
+        self.assertEqual(saved["results"], response["results"])
+        self.assertEqual(saved["operation"], "search")
+        self.assertEqual(saved["receipt_status"], "complete")
+        subprocess.run(command, capture_output=True, text=True, check=True)
+        document = json.loads(self.path.read_text())
+        self.assertEqual(document["request"], self.doc["request"])
+        self.assertEqual(len(document["routes"]), 1)
+        self.assertEqual(budget_guard.load_ledger(self.path)["calls"], {})
+
+    def test_web_completion_preserves_response_when_state_recording_is_interrupted(self):
+        receipt = self.plan_web()
+        response = {"status": "ok", "results": [{"url": "https://example.org/news"}]}
+        with patch.object(runner, "finish_attempt", side_effect=OSError("interrupted")):
+            with self.assertRaisesRegex(OSError, "interrupted"):
+                runner.complete_public_web(self.path, "web", response)
+        self.assertEqual(json.loads(receipt.read_text())["results"], response["results"])
+        self.assertEqual(json.loads(self.path.read_text())["routes"], [])
+        saved = receipt.read_bytes()
+        subprocess.run([sys.executable, runner.__file__, str(self.path), "--complete", "web"],
+                       capture_output=True, text=True, check=True)
+        self.assertEqual(receipt.read_bytes(), saved)
+        self.assertEqual(len(json.loads(self.path.read_text())["routes"]), 1)
+        self.assertEqual(budget_guard.load_ledger(self.path)["calls"], {})
+
+    def test_web_response_refuses_metadata_overwrites_and_invalid_outcomes(self):
+        receipt = self.plan_web()
+        original = receipt.read_bytes()
+        for response in (
+                {"status": "ok", "results": [], "request_fingerprint": "mistyped"},
+                {"status": "ok", "results": [], "operation": "fetch"},
+                {"status": "no_results", "results": [{"url": "https://example.org"}]},
+                {"status": "pending", "results": []}):
+            with self.subTest(response=response), self.assertRaises(ValueError):
+                runner.complete_public_web(self.path, "web", response)
+            self.assertEqual(receipt.read_bytes(), original)
+        for key in ("request_fingerprint", "run_fingerprint"):
+            body = json.loads(original)
+            body[key] = "0" * 64
+            receipt.write_text(json.dumps(body))
+            with self.subTest(identity=key), self.assertRaises(ValueError):
+                runner.complete_public_web(self.path, "web", {"status": "ok", "results": []})
+            self.assertEqual(json.loads(receipt.read_text()), body)
+        receipt.write_bytes(original)
+        document = json.loads(self.path.read_text())
+        document["stop_audit"]["route_frontier"] = []
+        self.path.write_text(json.dumps(document))
+        with self.assertRaisesRegex(ValueError, "no planned route"):
+            runner.complete_public_web(self.path, "web", {"status": "ok", "results": []})
+        self.assertEqual(receipt.read_bytes(), original)
+
+    def test_web_failure_remains_blocked_and_cannot_be_replaced(self):
+        receipt = self.plan_web()
+        runner.complete_public_web(self.path, "web", {"status": "provider_error", "results": [], "error": "Source unavailable"})
+        document = json.loads(self.path.read_text())
+        self.assertEqual(document["routes"][0]["provider_status"], "provider_error")
+        self.assertEqual(document["stop_audit"]["route_frontier"][0]["state"], "blocked")
+        original = receipt.read_bytes()
+        with self.assertRaisesRegex(ValueError, "cannot be replaced"):
+            runner.complete_public_web(self.path, "web", {"status": "no_results", "results": []})
+        self.assertEqual(receipt.read_bytes(), original)
+
+    def test_observed_web_response_cannot_edit_paid_provider_receipt(self):
+        runner.run_attempt(self.path, self.spec(paid=True), execute=self.paid_response)
+        receipt = self.path.parent / "receipts/one.json"
+        original, ledger = receipt.read_bytes(), budget_guard.load_ledger(self.path)
+        with self.assertRaisesRegex(ValueError, "only for planned public-web"):
+            runner.complete_public_web(self.path, "one", {"status": "ok", "results": []})
+        self.assertEqual(receipt.read_bytes(), original)
+        self.assertEqual(budget_guard.load_ledger(self.path), ledger)
+
+    def test_mislabeled_email_validation_batch_is_refused_before_any_plan_or_spend(self):
+        for location in ("action", "request"):
+            specs = self.company_specs()
+            specs[1]["action"]["phase"] = "contact_verification"
+            specs[1][location]["entity_type"] = "email_validation"
+            original, ledger = self.path.read_bytes(), budget_guard.load_ledger(self.path)
+            execute = Mock()
+            with self.subTest(location=location), self.assertRaisesRegex(ValueError, r"batch\[1\].action.phase must be email_validation"):
+                runner.run_batch(self.path, specs, execute=execute)
+            execute.assert_not_called()
+            self.assertEqual(self.path.read_bytes(), original)
+            self.assertEqual(budget_guard.load_ledger(self.path), ledger)
+            self.assertFalse((self.path.parent / "receipts").exists())
+
     def test_excluded_company_blocked_before_contact_spend(self):
         self.doc["request"]["icp"] = {"exclusions": ["Tissage de Luz"]}
         self.doc["unresolved"] = [dict(stage="contact", candidate={"domain": "tissagedeluz.com", "company": "Tissage de Luz"},

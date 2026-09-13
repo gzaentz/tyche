@@ -73,10 +73,22 @@ missing actual charges remain unknown, even when the reserved bound is zero.
 
 For built-in public-web tools, set `provider: "public_web"`, zero cost/calls and
 use `--plan-only`. Execute the planned search/read through the available tool.
-Update the returned receipt file with the observed normalized `status`,
-`operation`, and `results` array, retaining the helper's provider, fingerprint,
-attempt and progress metadata, then use `--complete`. This path records evidence; it
-does not invent a browser, scrape or API response.
+Write only the observed response to a separate UTF-8 JSON file, for example
+`{"status":"ok","results":[{"url":"https://example.com/news","text":"Observed source text"}]}`,
+then attach it to the planned route:
+
+```bash
+python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
+  reports/<run-id>/results.json --complete <route-id> \
+  --response-file reports/<run-id>/web-response.json
+```
+
+The helper retains run/route identity and progress metadata, saves the response,
+then records it. `operation` is optional but must match the plan; `error` may
+describe an observed failure. Do not label a failed check `no_results` or a pending
+outcome complete. Do not edit receipt metadata. A saved response cannot be
+replaced; recover an interrupted update using `--complete <route-id>` alone.
+This path records observed evidence and never invokes a browser or paid provider.
 
 The helper never infers qualification or market exhaustion. Assess the saved
 evidence and submit company/route decisions together with `--review-file` below.
@@ -133,7 +145,8 @@ parked/terminal companies, and refreshes counts and cost summaries. Receipts,
 ledger charges and the saved request remain intact. The CLI response includes
 `request_file` and the next decision, without repeating the full request.
 No separate route-closing script, manual summary edits or duplicate stop check
-is needed. `--status` includes the authoritative request for setup/resume,
+is needed. Use the returned next decision for the next batch; reopen receipts
+only for a missing fact or contradiction. `--status` includes the authoritative request for setup/resume,
 without a write.
 
 Routes default to `exhausted`; the helper derives the existing exhaustion basis
@@ -191,8 +204,8 @@ that decision without a separate status or stop-check command.
 For built-in public-web checks, add `--plan-only` to prepare up to three receipts,
 then execute those independent searches/reads together through the available
 tool's parallel-call facility. Python only plans and records this work; it does
-not invoke the built-in browser. Save observed responses to their own receipts
-and run `--complete` for each serially.
+not invoke the built-in browser. Save each observed response to a separate file
+and attach it with `--complete <route-id> --response-file <response.json>` serially.
 
 Wait for the batch to finish, then save its decisions with `--review-file` and
 use the returned next step. Batch completion alone does not qualify leads.

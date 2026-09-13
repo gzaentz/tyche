@@ -19,6 +19,9 @@ from validate_run import (DETERMINATE_PROVIDER_STATUSES, _company_key,
                           progress_snapshot, qualification_errors, _reviewed_company_scopes, accepted_errors,
                           validate_run)
 
+ATTEMPT_STATUSES = DETERMINATE_PROVIDER_STATUSES | {
+    "rate_limited", "auth_failed", "quota_exceeded", "timeout", "schema_error", "provider_error", "config_error"}
+
 
 def refresh(document):
     """Recompute bookkeeping only; never qualify leads or declare routes exhausted."""
@@ -280,6 +283,8 @@ def _validate_spec(spec, label="input", *, plan_only=False):
         action["entity_type"] = "tool_catalog"
     elif "tool_catalog" in {request.get("entity_type"), action.get("entity_type")}:
         raise ValueError("tool_catalog is reserved for live catalog operations")
+    elif "email_validation" in {request.get("entity_type"), action.get("entity_type")} and action["phase"] != "email_validation":
+        raise ValueError(f"{label}.action.phase must be email_validation for an email-validation request")
     if action.get("entity_type") and action["entity_type"] != "tool_catalog":
         request["entity_type"] = action["entity_type"]
     if action["phase"] == "email_validation" and action.get("entity_type") != "tool_catalog":
@@ -365,7 +370,7 @@ def finish_attempt(run_file, route_id, body, *, check_stop=True):
         if body.get("request_fingerprint") != entry["request_fingerprint"] or body.get("provider") != entry["provider"]:
             raise ValueError("saved response does not match this request/provider")
         status = body.get("status")
-        if status not in DETERMINATE_PROVIDER_STATUSES | {"rate_limited", "auth_failed", "quota_exceeded", "timeout", "schema_error", "provider_error", "config_error"}:
+        if status not in ATTEMPT_STATUSES:
             raise ValueError("save a normalized response with a determinate provider status")
         paid = action["paid_calls"]
         call = ledger.get("calls", {}).get(route_id) if ledger else None
@@ -550,11 +555,42 @@ def read_receipt(run_file, route_id):
         raise ValueError("saved response belongs to another run or lacks run identity; preserve it and reconcile its origin")
     document = budget_guard.read_object(run_file)
     routes = document.get("routes", []) + document.get("stop_audit", {}).get("route_frontier", [])
+    if not any(isinstance(route, dict) and route.get("route_id") == route_id for route in routes):
+        raise ValueError("saved response has no planned route in this run")
     for route in routes:
         if isinstance(route, dict) and route.get("route_id") == route_id:
             if any(route.get(key) != body.get(key) for key in ("request_fingerprint", "provider")):
                 raise ValueError("saved response does not match this route's request/provider; preserve it and reconcile its origin")
     return {"route_id": route_id, "receipt_file": str(path), "result": body}
+
+
+def complete_public_web(run_file, route_id, response):
+    """Attach observed web results to their saved plan, never to a paid receipt."""
+    if not isinstance(response, dict) or set(response) - {"status", "operation", "results", "error"}:
+        raise ValueError("web response accepts only status, operation, results and error; receipt metadata is helper-owned")
+    if response.get("status") not in ATTEMPT_STATUSES or not isinstance(response.get("results"), list):
+        raise ValueError("web response needs an observed result or failure status and a results array; pending outcomes must be recovered")
+    if response["status"] == "no_results" and response["results"]:
+        raise ValueError("no_results cannot contain result rows")
+    run_file = Path(run_file).resolve(strict=True)
+    receipt = read_receipt(run_file, route_id)
+    path = Path(receipt["receipt_file"])
+    with budget_guard.transaction(path) as body:
+        # Recheck identity while holding the receipt lock. Save before recording
+        # run state so --complete can recover without another search.
+        read_receipt(run_file, route_id)
+        if body.get("provider") != "public_web":
+            raise ValueError("--response-file is only for planned public-web checks; recover provider receipts with --complete")
+        operation = body["attempt"]["request"]["operation"]
+        observed = dict(response, operation=response.get("operation", operation))
+        if observed["operation"] != operation:
+            raise ValueError("web response operation does not match the planned request")
+        if body.get("status") != "pending":
+            if any(body.get(key) != value for key, value in observed.items()):
+                raise ValueError("a saved response cannot be replaced; use --complete to recover it")
+        else:
+            body.update(observed, receipt_status="complete")
+    return finish_attempt(run_file, route_id, body)
 
 
 def main():
@@ -569,7 +605,10 @@ def main():
     mode.add_argument("--status", action="store_true", help="show the authoritative request and compact current work")
     mode.add_argument("--finalize", action="store_true", help="prepare reviewed completion metadata and run strict delivery validation")
     parser.add_argument("--plan-only", action="store_true", help="reserve public-web work before using the browser/search tool")
+    parser.add_argument("--response-file", type=Path, help="with --complete, attach observed web results without editing receipt metadata")
     args = parser.parse_args()
+    if args.response_file and (not args.complete or args.plan_only):
+        parser.error("--response-file requires --complete and cannot be used with --plan-only")
     try:
         if args.finalize:
             result = finalize_run(args.results)
@@ -580,7 +619,9 @@ def main():
             result = save_review(args.results, load_json(args.review_file.read_text()))
             result = {"request_file": str(args.results), **{k: v for k, v in result.items() if k != "request"}}
         elif args.complete:
-            result = finish_attempt(args.results, args.complete, read_receipt(args.results, args.complete)["result"])
+            result = (complete_public_web(args.results, args.complete, load_json(args.response_file.read_text(encoding="utf-8")))
+                      if args.response_file else
+                      finish_attempt(args.results, args.complete, read_receipt(args.results, args.complete)["result"]))
         elif args.receipt:
             result = read_receipt(args.results, args.receipt)
         elif args.batch_files:

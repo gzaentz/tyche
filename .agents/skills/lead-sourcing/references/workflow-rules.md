@@ -188,15 +188,31 @@ fields, and per-provider budget caps.
 Do not add `budget.max_deepline_credits_per_next_lead` when it is omitted; carry
 it through only when the user explicitly requests a per-next-lead hard cap.
 Email is required by default; apply `["email"]` when the field is omitted, while
-preserving an explicit empty or phone-only override. It may set a one-to-three contact
-target per company, `signal_match_mode` (`any` or `all`, default `any`),
+preserving an explicit empty or phone-only override. Default new requests to one
+verified contact per company; preserve explicit one-to-three targets and saved
+requests on resume. It may set `signal_match_mode` (`any` or `all`, default `any`),
 per-signal `min_age_days`/`max_age_days`, run ID, and as-of date. Validate that
 each signal's lower bound is no greater than its upper bound. It may also set
-`contact_role_groups` with `primary` and `secondary` role arrays. Keep the
-required `requested_roles` as their deduplicated union for compatibility. If
-groups are present, search primary roles first and use secondary roles only as
-valid fallbacks; do not turn a secondary fallback into a contact false
-negative. Resolve obvious company identity ambiguity before paid work.
+`contact_role_groups` with `primary` and `secondary` role arrays. Resolve these
+once during setup, using the existing research agent:
+
+- Prioritize explicit buyer/contact roles and equivalent responsibilities in
+  `primary`. Relevant alternatives may go in `secondary` unless the user says
+  "only", "must", or otherwise makes the role restriction mandatory.
+- If contact roles are omitted, infer functions and appropriate seniority from
+  the target business, product/service, use case and company size. Search actual
+  responsibilities, not just exact titles. A CEO is not an automatic fallback.
+- Roles inside a hiring signal describe company activity, not contact limits.
+  For payments infrastructure without buyer-role instructions, operations,
+  payments or integrations leaders are sensible primary roles; product and
+  partnerships owners can be relevant alternatives. Include risk only where
+  its responsibilities fit. Do not restrict contacts to the advertised vacancies.
+
+Keep `requested_roles` as the deduplicated union and record the brief rationale
+in the existing report. Search primary roles first; secondary roles are valid
+fallbacks. Resume the saved plan rather than infer it again. Stop contact lookup
+once the requested number of relevant verified contacts is reached. Resolve
+obvious company identity ambiguity before paid work.
 Numeric employee filters use inclusive range semantics: a company passes when
 its verified count is between the requested minimum and maximum. Translate that
 range to the provider's live field semantics. For discovery, include every

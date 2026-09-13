@@ -33,7 +33,7 @@ complete artifact. All applicable semantic rules still apply.
    separate gates.
 3. Each accepted result has exactly one `primary_contact` and two or fewer
    `backup_contacts`. The stored candidate count is 1 to 3. Target the
-   requested count (default 3), but keep a company accepted when one valid
+   requested count (default 1 for new runs), but keep a company accepted when one valid
    contact is found and record `backup_shortfall`. If no approved role passes,
    put the company in `unresolved` with `no_current_role_contact`. When role
    groups are present, a secondary-role contact is a valid fallback for that
@@ -138,7 +138,7 @@ this default. No new JSON fields are required.
       "type": "integer",
       "minimum": 1,
       "maximum": 3,
-      "default": 3
+      "default": 1
     },
     "time_window": {"$ref": "#/$defs/time_window"},
     "contact_fields": {
@@ -241,8 +241,10 @@ this default. No new JSON fields are required.
 ```
 
 The account gate is per company: contact lookup starts as soon as that company
-has passed the account evidence gate. `contacts_per_company` defaults to 3 and
-may be set from 1 to 3. Provider credit caps are separate because Deepline and
+has passed the account evidence gate. New requests default `contacts_per_company`
+to 1 and may explicitly set 1 to 3. Resume the saved count without applying new
+defaults. Resolve contact roles once using [request normalization](workflow-rules.md#request-normalization).
+Provider credit caps are separate because Deepline and
 ScrapingDog units are not interchangeable; a cap of 0 disables that provider.
 At least one provider credit cap is required. `hard_stop` is mandatory and
 true. Stop limits are monetary budgets and explicit time limits, never call
@@ -1450,6 +1452,10 @@ unverified optional values as empty cells rather than placeholder text.
   One signal will often take three sentences and two signals five; these are
   examples, not sentence-count requirements. Combine related evidence naturally,
   and do not repeat one event just because it has multiple sources or labels.
+  During the existing source review, check the paragraph in this order:
+  signal facts, supporting relevance, next distinct signal and relevance, then
+  the final synthesis. Save the reviewed paragraph with the company decision;
+  revisit it only when evidence changes or a specific error is found.
   When the ICP product/service describes the target company's offering, connect
   the signals to that offering and its operations, not an imagined external
   purchase. Focus on the company's activity, not a pitch for our product. Keep inferred

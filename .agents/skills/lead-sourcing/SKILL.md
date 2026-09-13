@@ -5,24 +5,26 @@ description: Source evidence-backed companies with buying signals and requested-
 
 # TYCHE Lead Sourcing
 
-Use one research agent and the existing Python helpers. Do not add services,
-databases, CRM writes or outreach.
+Use one research agent and existing helpers. No additional services, databases,
+CRM writes or outreach.
 
 ## Setup
 
-Normalize criteria, roles, signals, dates and budget once into authoritative
-`results.json.request`; preserve wording in `request.txt`. Only the user can
-change criteria. Resume with `run_attempt.py <results.json> --status`.
+Normalize the request once into authoritative `results.json.request`; preserve
+user wording in `request.txt`. Follow [request normalization](references/workflow-rules.md#request-normalization)
+to prioritize explicit buyer roles, infer omitted roles and separate hiring signals.
+Default to one verified contact per company. Only the user can change criteria.
+Resume the saved plan with `run_attempt.py <results.json> --status`.
 Keep results, ledger, receipts and request/review files in the original run
 directory. Never import another run or rewrite continuation accounting.
-Run helpers from the repository root. Adapt successful same-run requests;
-inspect code only for documented commands or concrete errors.
+Run helpers from the repository root. Reuse same-run requests and descriptions;
+follow CLI examples, inspecting code only for concrete errors.
 
 Read the [workflow rules](references/workflow-rules.md), [input contract](references/output-contract.md#input-contract),
 [lifecycle invariants](references/output-contract.md#lifecycle-invariants) and
-[timing](references/output-contract.md#timing) at setup. Load repository provider
-credentials and initialize the [existing ledger](references/adapter-io.md#paid-call-budget)
-once. The default shared provider budget is USD 0.50 per requested lead.
+[timing](references/output-contract.md#timing) at setup. Load provider credentials
+and initialize the [ledger](references/adapter-io.md#paid-call-budget) once.
+Default provider budget: USD 0.50 per requested lead.
 
 ## Research loop
 
@@ -52,13 +54,13 @@ once. The default shared provider budget is USD 0.50 per requested lead.
    qualified leads immediately; keep incomplete candidates unresolved. The helper
    updates counts and retires completed work. After two comparable research attempts
    within the same company and phase without verified progress, change strategy.
+   Reopen reviewed evidence only for a specific gap, contradiction or useful new source.
    Independent profile/email checks remain eligible; never repeat an uncertain call.
 
 Use `--receipt <route-id>` for compact saved evidence. Never read the live launcher's log from the
 worker; it recursively repeats history. Use `--status` for progress.
 
-Continue useful affordable work across batches; report checkpoints in commentary.
-Do not ask permission to continue. Respect user pauses.
+Continue useful affordable work; report checkpoints. Respect user pauses.
 
 ## Authorization
 
@@ -73,20 +75,20 @@ only for eligible failures or catch-all/unknown. Never override a hard negative.
 
 ## Delivery
 
-Keep results current. After review, save `results.json` and `report.md`, then run
+After review, save `results.json` and `report.md`, then run
 `node .agents/skills/lead-sourcing/scripts/export_xlsx.mjs <results.json>`.
 It derives completion metadata, validates, exports and verifies the workbook
-using shared delivery checks. Review attempted routes and recover pending
-verification; unused research may remain saved at target. Fix gaps without forcing
-completion flags. Inspect the PNG preview; regenerate only for changed content.
+using shared checks. Review routes and recover pending verification; unused
+research may remain at target. Never force completion flags. Inspect the PNG
+preview; regenerate only for changed content.
 The launcher supplies runtime paths. Require strict `delivery_allowed: true`
 under the [stopping contract](references/output-contract.md#stopping-check).
 Report shortfalls honestly; exhausted searches do not prove an empty market.
 
 ## Full cost
 
-Report provider and run-scoped model costs, combined total and cost per accepted
-lead. Include retries without double counting; label estimates and unknowns.
+Report provider and run-scoped model costs, total and cost per accepted lead.
+Count retries once; label estimates and unknowns.
 
 ## References
 

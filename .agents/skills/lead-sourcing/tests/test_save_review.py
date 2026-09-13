@@ -40,6 +40,10 @@ class SaveReviewTests(unittest.TestCase):
         runner.run_attempt(self.path, spec, execute=self.fixture.paid_response)
 
     def test_one_cli_review_parks_company_closes_source_and_keeps_discovery(self):
+        self.doc["request"].update(requested_roles=["Head of Payments", "Chief Operating Officer"],
+            contact_role_groups={"primary": ["Head of Payments"], "secondary": ["Chief Operating Officer"]},
+            contacts_per_company=3)  # An explicit or historical target survives the new default.
+        self.path.write_text(json.dumps(self.doc))
         self.attempt()
         before = json.loads(self.path.read_text())
         before["stop_check"]["next_actions"] = [

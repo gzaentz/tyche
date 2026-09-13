@@ -218,6 +218,7 @@ class OutputContractExtensionTests(unittest.TestCase):
         self.assertNotIn("min_age_days", request["buying_signals"][0])
         self.assertNotIn("contact_role_groups", request)
         input_schema, result_schema = load_schemas()
+        self.assertEqual(input_schema["properties"]["contacts_per_company"]["default"], 1)
         self.assertEqual(
             input_schema["properties"]["contact_fields"]["default"], ["email"]
         )
