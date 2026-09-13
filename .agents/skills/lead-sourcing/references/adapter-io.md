@@ -71,6 +71,11 @@ The helper never infers qualification or market exhaustion. Assess the saved
 evidence and submit company/route decisions together with `--review-file` below.
 Full strict validation remains required before delivery.
 
+The attempt CLI prints normalized provider results once, with the full receipt
+path. Repeated progress snapshots, request metadata and duplicate evidence stay
+in that receipt. Inspect specific saved fields when needed; the CLI view does
+not truncate or replace the underlying evidence or accounting.
+
 ## Save a review
 
 After a completed batch, write one review file. Use existing company rows and
@@ -97,10 +102,11 @@ python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
 One atomic update saves the selected company rows, closes reviewed routes,
 retires their completed actions, removes speculative follow-ups for reviewed
 parked/terminal companies, and refreshes counts and cost summaries. Receipts,
-ledger charges and the saved request remain intact. The response includes the
-authoritative request and next decision. No separate route-closing script,
-manual summary edits or duplicate stop check is needed. `--status` returns the
-same compact view without a write.
+ledger charges and the saved request remain intact. The CLI response includes
+`request_file` and the next decision, without repeating the full request.
+No separate route-closing script, manual summary edits or duplicate stop check
+is needed. `--status` includes the authoritative request for setup/resume,
+without a write.
 
 Routes default to `exhausted`; the helper derives the existing exhaustion basis
 from the saved receipt. Use `state: "continuable"` for genuinely unfinished
@@ -115,13 +121,19 @@ you. Full strict output validation still checks delivery.
 
 After the pilot, use one agent and up to three ready checks for different
 companies. Use fewer when fewer checks are ready or the remaining lead shortfall
-is smaller. Each file uses the same `action`/`request` format above:
+is smaller. Batch ready checks instead of calling them one by one; different
+companies may be at different phases. Do not wait to fill a batch.
+Each file uses the same `action`/`request` format above:
 
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
   reports/<run-id>/results.json --batch-files \
   reports/<run-id>/check-a.json reports/<run-id>/check-b.json reports/<run-id>/check-c.json
 ```
+
+Alternatively, save those 1-3 objects as a JSON array in `batch.json` and pass
+`--batch-files reports/<run-id>/batch.json`. Use either one array file or
+individual attempt files; the same independence and budget checks apply.
 
 Give each action a unique route ID and its canonical company domain as `scope`.
 Batch mode accepts account verification, contact discovery, contact verification
@@ -138,6 +150,8 @@ count against all caps and the verification reserve. A refused or failed member
 does not discard successful siblings. The batch returns all outcomes and exits
 nonzero if any member fails; recover saved receipts with `--complete`, never
 rerun the whole batch or retry an uncertain billed request.
+The batch returns one final `stop_decision` after recording its outcomes; use
+that decision without a separate status or stop-check command.
 
 For built-in public-web checks, add `--plan-only` to prepare up to three receipts,
 then execute those independent searches/reads together through the available

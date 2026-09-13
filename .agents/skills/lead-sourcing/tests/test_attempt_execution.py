@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -211,7 +212,8 @@ class AttemptExecutionTests(unittest.TestCase):
         invalid[1]["action"]["scope"] = None
         before = self.path.read_bytes()
         execute = Mock()
-        for batch in ([], specs + [specs[0]], same_company, same_id, discovery, invalid):
+        for batch in ([], specs + [specs[0]], same_company, same_id, discovery, invalid,
+                      [None], [specs], [{"action": [], "request": {}}], [{"action": {}, "request": None}]):
             with self.subTest(batch=batch), self.assertRaises(ValueError):
                 runner.run_batch(self.path, batch, execute=execute)
         execute.assert_not_called()
@@ -287,10 +289,10 @@ class AttemptExecutionTests(unittest.TestCase):
 
     def test_record_failure_can_complete_without_repeating_successful_siblings(self):
         finish = runner.finish_attempt
-        def interrupted(path, rid, body):
+        def interrupted(path, rid, body, **kwargs):
             if rid == "check-1":
                 raise OSError("interrupted state write")
-            return finish(path, rid, body)
+            return finish(path, rid, body, **kwargs)
         with patch.object(runner, "finish_attempt", side_effect=interrupted):
             result = runner.run_batch(self.path, self.company_specs(), execute=self.paid_response)
         self.assertEqual(result["exit_code"], 2)
@@ -313,6 +315,12 @@ class AttemptExecutionTests(unittest.TestCase):
         self.assertEqual(budget_guard.audit_ledger(self.path, json.loads(self.path.read_text())), [])
 
     def test_batch_cli_saves_actual_wrapper_receipts_and_passes_stop_check(self):
+        self.check_batch_cli()
+
+    def test_batch_array_uses_same_wrapper_receipts_and_budget(self):
+        self.check_batch_cli(array_file=True)
+
+    def check_batch_cli(self, array_file=False):
         stub = self.path.parent / "fake-deepline"
         stub.write_text(f"#!{sys.executable}\nimport json\n"
                         "print(json.dumps({'status': 'no_results', 'results': [], "
@@ -323,15 +331,29 @@ class AttemptExecutionTests(unittest.TestCase):
             path = self.path.parent / (spec["action"]["id"] + ".json")
             path.write_text(json.dumps(spec))
             files.append(str(path))
+        if array_file:
+            batch = self.path.parent / "batch.json"
+            batch.write_text(json.dumps(self.company_specs()))
+            files = [str(batch)]
         result = subprocess.run([sys.executable, runner.__file__, str(self.path), "--batch-files", *files],
                                 env=dict(os.environ, DEEPLINE_BIN=str(stub)), capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        attempts = json.loads(result.stdout)["attempts"]
+        output = json.loads(result.stdout)
+        attempts = output["attempts"]
+        document = json.loads(self.path.read_text())
+        self.assertEqual(output["stop_decision"], VALIDATOR.evaluate_stop(
+            document, now=datetime.fromisoformat(output["stop_decision"]["checked_at"]),
+            execution_budget=budget_guard.load_ledger(self.path)))
         self.assertEqual(len(attempts), 3)
         for attempt in attempts:
             receipt = json.loads(Path(attempt["receipt_file"]).read_text())
             self.assertEqual(receipt["receipt_status"], "complete")
             self.assertEqual(receipt["spend_receipt"]["state"], "settled")
+            self.assertIn("progress_before", receipt)
+            self.assertIn("attempt", receipt)
+            self.assertNotIn("progress_before", attempt["result"])
+            self.assertNotIn("attempt", attempt["result"])
+            self.assertEqual(attempt["result"]["results"], receipt["results"])
         checked = subprocess.run([sys.executable, str(Path(runner.__file__).with_name("validate_run.py")),
                                   str(self.path), "--check-stop"], capture_output=True, text=True, timeout=15)
         self.assertEqual(checked.returncode, 0, checked.stderr + checked.stdout)
@@ -352,6 +374,27 @@ class AttemptExecutionTests(unittest.TestCase):
             runner.finish_attempt(self.path, attempt["route_id"], saved)
         self.assertEqual(len(json.loads(self.path.read_text())["routes"]), 3)
         self.assertEqual(budget_guard.load_ledger(self.path)["calls"], {})
+
+    def test_cli_compacts_repeated_metadata_without_changing_evidence_or_errors(self):
+        rows = [{"company": "Example", "evidence_text": "Exact source text", "url": "https://example.org"}]
+        result = {"receipt_file": "/tmp/receipt.json", "provider_status": "partial", "exit_code": 2,
+                  "result": {"status": "partial", "results": rows, "evidence": copy.deepcopy(rows),
+                             "error": "One source failed", "billing": {"credits_charged": 0.1},
+                             "pending_verification": {"job_id": "saved-job"},
+                             "progress_before": ["old-company:account"] * 1000,
+                             "attempt": {"request": {"query": "saved query"}}}}
+        original = copy.deepcopy(result)
+        compact = runner.cli_output({"attempts": [result], "exit_code": 2,
+                                     "stop_decision": {"decision": "continue"}})
+        body = compact["attempts"][0]["result"]
+        self.assertLess(len(json.dumps(compact)), len(json.dumps(result)) / 10)
+        self.assertEqual(body["results"], rows)
+        for field in ("status", "error", "billing", "pending_verification"):
+            self.assertEqual(body[field], result["result"][field])
+        self.assertEqual(compact["stop_decision"], {"decision": "continue"})
+        self.assertEqual(result, original)
+        result["result"]["evidence"] = [{"text": "Additional independent evidence"}]
+        self.assertEqual(runner.cli_output(result)["result"]["evidence"], result["result"]["evidence"])
 
     def test_records_receipt_cost_and_retires_action(self):
         result = runner.run_attempt(self.path, self.spec(paid=True), execute=self.paid_response)

@@ -30,7 +30,9 @@ once. The default shared provider budget is USD 0.50 per requested lead.
    Select tools through [tools.md](references/tools.md); describe a live tool
    before paid execution. Reuse relevant saved catalog reviews and receipts.
 2. **Check up to three companies concurrently.** Use the [batch helper](references/adapter-io.md#concurrent-company-checks).
-   Verify account fit before buyer lookup, then the requested role and fields.
+   Batch ready independent checks, including companies at different phases;
+   do not wait to fill a batch. Review the actual sources for required fit and
+   signals before buyer lookup, then verify the requested role and fields.
    Apply the [qualification policy](references/workflow-rules.md#qualification-policy).
    Required unknown facts stay unresolved; evidenced mismatches reject; preferred
    signals only rank. Corroborate sources for the same project, preserving dates.
@@ -43,6 +45,10 @@ once. The default shared provider budget is USD 0.50 per requested lead.
    do not rerun the same checks or manually recalculate totals. Park reviewed
    gaps and move on; reopen only for a concrete new source. After two attempts
    without verified progress, change source family or evidence target.
+
+Read current companies and relevant receipts after setup. Reuse returned
+decisions; call `--status` after interruptions or missing state. Keep full
+receipts on disk and avoid repeatedly dumping results, ledgers or logs.
 
 Continue while useful affordable work remains. Use commentary for checkpoints;
 do not stop because a batch ended or ask permission to continue. An interruption
@@ -61,6 +67,8 @@ only for eligible failures or catch-all/unknown. Never override a hard negative.
 
 ## Delivery
 
+Generate the report and workbook after source review, then regenerate only
+when corrections change their content. Keep structured results current throughout.
 Before delivery, write `report.md`, `results.json` and `leads.xlsx`, then run
 `python3 scripts/validate_run.py <results.json> --show-progress`. Full strict
 `delivery_allowed: true` is required. Follow the [stopping contract](references/output-contract.md#stopping-check)

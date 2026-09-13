@@ -267,7 +267,7 @@ def _prepare(run_file, spec):
     return adapter, request, prepared
 
 
-def finish_attempt(run_file, route_id, body):
+def finish_attempt(run_file, route_id, body, *, check_stop=True):
     """Record a saved response without dispatching anything (also the resume path)."""
     def finish(document):
         entry = next(r for r in document["stop_audit"]["route_frontier"] if r["route_id"] == route_id)
@@ -315,8 +315,9 @@ def finish_attempt(run_file, route_id, body):
         document["stop_check"]["next_actions"] = [a for a in document["stop_check"]["next_actions"] if a["id"] != route_id]
         return refresh(document)
     mutate(run_file, finish)
-    document = budget_guard.read_object(run_file)
-    return evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))
+    if check_stop:
+        document = budget_guard.read_object(run_file)
+        return evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))
 
 
 def _start_attempt(run_file, spec, *, plan_only=False):
@@ -368,6 +369,8 @@ def run_batch(run_file, specs, *, execute=None, plan_only=False):
         raise ValueError("a batch requires 1-3 independent company checks")
     ids, scopes = set(), set()
     for spec in specs:
+        if not isinstance(spec, dict) or not isinstance(spec.get("action"), dict) or not isinstance(spec.get("request"), dict):
+            raise ValueError("each batch item requires action and request objects")
         action = spec["action"]
         rid, scope = action["id"], action["scope"]
         if not isinstance(rid, str) or not isinstance(scope, str):
@@ -403,11 +406,27 @@ def run_batch(run_file, specs, *, execute=None, plan_only=False):
                 result.update(future.result())
                 if not plan_only:
                     stage = "record"
-                    finish_attempt(run_file, result["route_id"], result["result"])
+                    finish_attempt(run_file, result["route_id"], result["result"], check_stop=False)
             except Exception as exc:
                 result.update(exit_code=2, error=str(exc), error_stage=stage,
                               receipt_file=str(run_file.parent / "receipts" / (result["route_id"] + ".json")))
-    return {"attempts": results, "exit_code": 2 if any(r["exit_code"] for r in results) else 0}
+    document = budget_guard.read_object(run_file)
+    return {"attempts": results, "exit_code": 2 if any(r["exit_code"] for r in results) else 0,
+            "stop_decision": evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))}
+
+
+def cli_output(result):
+    """Trim repeated audit metadata only from stdout; saved receipts stay complete."""
+    output = {k: v for k, v in result.items() if k != "progress_before"}
+    if "attempts" in output:
+        output["attempts"] = [cli_output(attempt) for attempt in output["attempts"]]
+    if isinstance(output.get("result"), dict):
+        body = {k: v for k, v in output["result"].items()
+                if k not in {"progress_before", "accepted_before", "request_fingerprint", "attempt"}}
+        if "results" in body and body.get("evidence") == body["results"]:
+            body.pop("evidence", None)
+        output["result"] = body
+    return output
 
 
 def main():
@@ -415,7 +434,7 @@ def main():
     parser.add_argument("results", type=Path)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--input-file", type=Path, help="JSON containing action and wrapper request")
-    mode.add_argument("--batch-files", type=Path, nargs="+", help="1-3 attempt files for distinct company checks")
+    mode.add_argument("--batch-files", type=Path, nargs="+", help="1-3 company checks, as attempt files or one JSON array")
     mode.add_argument("--complete", help="record this route's saved normalized receipt, without dispatch")
     mode.add_argument("--review-file", type=Path, help="save company decisions and close reviewed routes together")
     mode.add_argument("--status", action="store_true", help="show the authoritative request and compact current work")
@@ -427,17 +446,20 @@ def main():
             result = run_status(document, evaluate_stop(document, execution_budget=budget_guard.load_ledger(args.results)))
         elif args.review_file:
             result = save_review(args.results, load_json(args.review_file.read_text()))
+            result = {"request_file": str(args.results), **{k: v for k, v in result.items() if k != "request"}}
         elif args.complete:
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", args.complete):
                 raise ValueError("invalid route ID")
             body = load_json((args.results.parent / "receipts" / (args.complete + ".json")).read_text())
             result = finish_attempt(args.results, args.complete, body)
         elif args.batch_files:
-            result = run_batch(args.results, [load_json(path.read_text()) for path in args.batch_files],
-                               plan_only=args.plan_only)
+            specs = [load_json(path.read_text()) for path in args.batch_files]
+            if len(specs) == 1 and isinstance(specs[0], list):
+                specs = specs[0]
+            result = run_batch(args.results, specs, plan_only=args.plan_only)
         else:
             result = run_attempt(args.results, load_json(args.input_file.read_text()), plan_only=args.plan_only)
-        print(json.dumps(result, ensure_ascii=True, allow_nan=False))
+        print(json.dumps(cli_output(result), ensure_ascii=True, allow_nan=False))
         if args.batch_files:
             return result["exit_code"]
     except (ValueError, OSError, KeyError, TypeError, StopIteration) as exc:
