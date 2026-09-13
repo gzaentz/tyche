@@ -455,6 +455,45 @@ class ProviderScriptTests(unittest.TestCase):
         self.assertIsNone(row["contact_title"])
         self.assertEqual(row["position_review"], "no_current_position")
 
+    def test_harvest_equivalent_roles_merge_richer_metadata(self):
+        current = {"companyName": "Example", "companyLinkedinUrl": "https://www.linkedin.com/company/example/",
+                   "position": "Chief Product Officer"}
+        richer = dict(current, companyLinkedinUrl="https://uk.linkedin.com/company/EXAMPLE?trk=source",
+                      companyName="EXAMPLE", position="chief product officer", companyId="123",
+                      company={"website": "https://example.org"}, description="Leads product development",
+                      startDate={"year": 2025}, endDate={"text": "Present"})
+        source = {"firstName": "Ada", "linkedinUrl": "https://www.linkedin.com/in/ada-example/",
+                  "currentPosition": [current], "experience": [richer]}
+        before = json.dumps(source, sort_keys=True)
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                data = source if not reverse else dict(source, currentPosition=[richer],
+                    experience=[dict(current, endDate={"text": "Present"})])
+                row = DEEPLINE.normalize_evidence(data, tool="harvestapi_get_profile",
+                    target_company_linkedin_url="https://www.linkedin.com/company/example/")
+                self.assertEqual(row["position_review"], "matched")
+                self.assertEqual(row["contact_title"].casefold(), "chief product officer")
+                self.assertEqual(len(row["current_positions"]), 1)
+                position = row["current_positions"][0]
+                for key, value in (("company_id", "123"), ("domain", "example.org"),
+                                   ("description", richer["description"]), ("start_date", richer["startDate"])):
+                    self.assertEqual(position[key], value)
+        self.assertEqual(json.dumps(source, sort_keys=True), before)
+
+    def test_harvest_conflicting_roles_remain_ambiguous(self):
+        current = {"companyName": "Example", "companyLinkedinUrl": "https://www.linkedin.com/company/example/",
+                   "companyId": "123", "position": "Chief Product Officer"}
+        for changed in ({"companyId": "456"}, {"position": "Chief Operating Officer"},
+                        {"companyLinkedinUrl": "https://www.linkedin.com/company/other/"},
+                        {"companyLinkedinUrl": None, "companyId": "456"}):
+            with self.subTest(changed=changed):
+                source = {"firstName": "Ada", "currentPosition": [current],
+                          "experience": [dict(current, endDate={"text": "Present"}, **changed)]}
+                row = DEEPLINE.normalize_evidence(source, tool="harvestapi_get_profile")
+                self.assertEqual(len(row["current_positions"]), 2)
+                self.assertEqual(row["position_review"], "ambiguous")
+                self.assertIsNone(row["contact_title"])
+
     def test_harvest_target_context_stays_out_of_provider_payload(self):
         seen = {}
         def fake_run(command, **kwargs):

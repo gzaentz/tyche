@@ -74,6 +74,90 @@ def saved_result(run_file, routes, source, email):
     raise ValueError("original provider response must identify exactly one matching email")
 
 
+def _pending_job(run_file, route):
+    saved = _saved_receipt(run_file, route)
+    if (route.get("phase") != "email_validation" or saved.get("receipt_status") != "complete"
+            or route.get("provider_status") != "partial" or saved.get("status") != "partial"
+            or route.get("provider") != "deepline" or route.get("operation") != "execute"
+            or any(saved.get(k) != route.get(k) for k in ("provider", "operation", "tool"))):
+        raise ValueError("requires a captured pending email-validation receipt")
+    request = saved.get("attempt", {}).get("request", {})
+    if any(request.get(k) != route.get(k) for k in ("operation", "tool")):
+        raise ValueError("pending job request must match its provider route")
+    normalized, _ = deepline.normalize_response(dict(request, entity_type="email_validation", limit=1), saved["provider_response"])
+    pending = normalized.get("pending_verification")
+    if not pending or normalized.get("status") != "partial" or pending != saved.get("pending_verification"):
+        raise ValueError("pending job must match the original provider response")
+    return pending, request.get("payload", {})
+
+
+def verification_finished(run_file, document, route_id, pending, links=None):
+    """Bind a completed getter to its saved submission's job and exact email."""
+    job_id = pending.get("id")
+    if not job_id:
+        return False
+    try:
+        frontier = {r["route_id"]: r for r in document.get("stop_audit", {}).get("route_frontier", [])}
+        routes = {r["route_id"]: r for r in document.get("routes", [])}
+        # A pending getter can omit email too. Follow its recorded parents back
+        # to the submission; response emails only corroborate that request.
+        todo, seen, emails, response_emails = [route_id], set(), set(), set()
+        while todo:
+            rid = todo.pop()
+            if rid in seen:
+                continue
+            seen.add(rid)
+            route = routes[rid]
+            actual, payload = _pending_job(run_file, route)
+            if actual["id"] != job_id or (rid == route_id and actual != pending):
+                return False
+            if _text(actual.get("email")):
+                response_emails.add(_text(actual["email"]))
+            if route.get("status_read"):
+                if payload.get("id") != job_id:
+                    return False
+                parents = [key for key, r in frontier.items() if rid in r.get("continuation_route_ids", [])]
+                if not parents:
+                    return False
+                todo.extend(parents)
+            elif _text(payload.get("email")):
+                emails.add(_text(payload["email"]))
+            else:
+                return False
+        if len(emails) != 1 or response_emails - emails:
+            return False
+        email = next(iter(emails))
+        todo = list(links if links is not None else frontier.get(route_id, {}).get("continuation_route_ids", []))
+        seen = {route_id}
+        while todo:
+            rid = todo.pop()
+            if rid in seen:
+                continue
+            seen.add(rid)
+            route = routes.get(rid, {})
+            if not route.get("status_read"):
+                continue
+            saved = _saved_receipt(run_file, route)
+            payload = saved.get("attempt", {}).get("request", {}).get("payload", {})
+            if payload.get("id") != job_id or (_text(payload.get("email")) and _text(payload["email"]) != email):
+                continue
+            if route.get("provider_status") == "partial":
+                actual, _ = _pending_job(run_file, route)
+                if actual["id"] == job_id and (not _text(actual.get("email")) or _text(actual["email"]) == email):
+                    todo.extend(frontier.get(rid, {}).get("continuation_route_ids", []))
+            elif route.get("provider_status") == "ok":
+                saved_result(run_file, document["routes"],
+                             {k: route.get(k) for k in ("route_id", "provider", "operation", "tool")}, email)
+                return True
+            elif route.get("provider_status") in FAILURES:
+                # A failed read does not cancel the job; a later linked read
+                # still has to prove the same request ID and address verdict.
+                todo.extend(frontier.get(rid, {}).get("continuation_route_ids", []))
+    except (ValueError, OSError, KeyError, TypeError):
+        pass
+    return False
+
+
 def _sources(routes, validator):
     for route in reversed(routes):
         if (isinstance(route, dict) and route.get("provider") == "deepline" and route.get("operation") == "execute"
@@ -81,6 +165,21 @@ def _sources(routes, validator):
                 and validator in _text(route.get("tool"))):
             yield {"provider": "deepline", "operation": "execute", "validator": validator,
                    "tool": route["tool"], "route_id": route["route_id"]}
+
+
+def pending_verification_errors(document, run_file):
+    errors = []
+    for route in document.get("routes", []):
+        if not isinstance(route, dict) or route.get("phase") != "email_validation" or route.get("provider_status") != "partial":
+            continue
+        try:
+            pending, _ = _pending_job(run_file, route)
+            if verification_finished(run_file, document, route["route_id"], pending):
+                continue
+        except (ValueError, OSError, KeyError, TypeError):
+            pass
+        errors.append("Pending verification needs status recovery: " + str(route.get("route_id")))
+    return errors
 
 
 def fallback_allowed(verdict):

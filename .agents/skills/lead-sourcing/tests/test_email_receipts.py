@@ -172,28 +172,93 @@ class EmailReceiptTests(unittest.TestCase):
         second['request']['tool'] = 'bounceban_verify_single'
         run_attempt._start_attempt(fixture.path, second)
 
-    def test_free_status_getter_recovers_pending_job_without_resubmitting(self):
+    def verification_chain(self, response_email=False):
         fixture, spec = self.prepared_run()
-        with patch.object(receipts.deepline, '_invoke', return_value=(0, json.dumps({
-                'status': 'verifying', 'id': 'saved-job', 'email': 'buyer@target.example'}), '')):
+        pending = {'status': 'verifying', 'id': 'saved-job'}
+        if response_email:
+            pending['email'] = 'buyer@target.example'
+        with patch.object(receipts.deepline, '_invoke', return_value=(0, json.dumps(pending), '')):
             result = run_attempt.run_attempt(fixture.path, spec)
         self.assertEqual(result['provider_status'], 'partial')
-        original = fixture.path.parent / 'receipts/bounceban-first.json'
-        before = original.read_bytes()
+        submission = fixture.path.parent / 'receipts/bounceban-first.json'
+        before = submission.read_bytes()
         getter = copy.deepcopy(spec)
-        getter['action'].update(id='bounceban-getter', status_read=True, cost_upper_bound_credits=0)
+        getter['action'].update(id='bounceban-wait', status_read=True, cost_upper_bound_credits=0)
         getter['request'].update(tool='bounceban_get_verification', payload={'id': 'saved-job'})
+        with patch.object(receipts.deepline, '_invoke', return_value=(0, json.dumps(pending), '')):
+            run_attempt.run_attempt(fixture.path, getter)
+        getter['action']['id'] = 'bounceban-getter'
         with patch.object(receipts.deepline, '_invoke', return_value=(0, json.dumps({
                 'status': 'success', 'result': 'deliverable', 'email': 'buyer@target.example'}), '')) as provider:
             run_attempt.run_attempt(fixture.path, getter)
-        self.assertEqual(provider.call_count, 1)
+        provider.assert_called_once()
         self.assertEqual(provider.call_args.args[0][3], 'bounceban_get_verification')
-        self.assertEqual(original.read_bytes(), before)
+        self.assertEqual(submission.read_bytes(), before)
         document = json.loads(fixture.path.read_text())
-        source = {'provider': 'deepline', 'operation': 'execute', 'tool': 'bounceban_get_verification',
-                  'validator': 'bounceban', 'route_id': 'bounceban-getter'}
-        verdict = receipts.saved_result(fixture.path, document['routes'], source, 'buyer@target.example')
-        self.assertEqual((verdict['status'], verdict['result']), ('success', 'deliverable'))
+        frontier = {r['route_id']: r for r in document['stop_audit']['route_frontier']}
+        frontier['bounceban-first']['continuation_route_ids'] = ['bounceban-wait']
+        frontier['bounceban-wait']['continuation_route_ids'] = ['bounceban-getter']
+        fixture.path.write_text(json.dumps(document))
+        return fixture, document, pending
+
+    def test_status_chain_uses_original_submission_email_without_resubmitting(self):
+        for response_email in (False, True):
+            with self.subTest(response_email=response_email):
+                fixture, document, pending = self.verification_chain(response_email)
+                paths = fixture.path.parent / 'receipts'
+                original = {p: p.read_bytes() for p in paths.iterdir()}
+                ledger = run_attempt.budget_guard.ledger_path(fixture.path)
+                ledger_before = ledger.read_bytes()
+                for rid in ('bounceban-first', 'bounceban-wait'):
+                    self.assertTrue(receipts.verification_finished(fixture.path, document, rid, pending))
+                self.assertEqual(receipts.pending_verification_errors(document, fixture.path), [])
+                with patch.object(receipts.deepline, '_invoke', side_effect=AssertionError('Unexpected provider call')):
+                    run_attempt.save_review(fixture.path, {'routes': [
+                        {'route_id': rid, 'reason': 'Completed status receipt reviewed'}
+                        for rid in ('bounceban-getter', 'bounceban-wait', 'bounceban-first')]})
+                after = json.loads(fixture.path.read_text())
+                self.assertTrue(all(r['state'] == 'exhausted' for r in after['stop_audit']['route_frontier']
+                                    if r['route_id'].startswith('bounceban')))
+                self.assertEqual({p: p.read_bytes() for p in paths.iterdir()}, original)
+                self.assertEqual(ledger.read_bytes(), ledger_before)
+
+    def test_status_chain_rejects_conflicting_or_unbound_receipts(self):
+        fixture, document, pending = self.verification_chain()
+        paths = fixture.path.parent / 'receipts'
+        original = {p: p.read_bytes() for p in paths.iterdir()}
+        mutations = [
+            ('bounceban-first', lambda s: s['attempt']['request']['payload'].update(email='other@example.org')),
+            ('bounceban-first', lambda s: s.update(run_fingerprint='another-run')),
+            ('bounceban-first', lambda s: s.update(request_fingerprint='another-request')),
+            ('bounceban-first', lambda s: (s['pending_verification'].update(email='other@example.org'),
+                                         s['provider_response']['body'].update(email='other@example.org'))),
+            ('bounceban-wait', lambda s: s['attempt']['request']['payload'].update(id='other-job')),
+            ('bounceban-getter', lambda s: s['attempt']['request']['payload'].update(id='other-job')),
+            ('bounceban-getter', lambda s: s['provider_response']['body'].update(email='other@example.org')),
+            ('bounceban-getter', lambda s: s['provider_response'].update(body={'status': 'error', 'error': 'Failed status read'})),
+        ]
+        for rid, change in mutations:
+            with self.subTest(route=rid, change=change):
+                path = paths / (rid + '.json')
+                saved = json.loads(original[path]);change(saved);path.write_text(json.dumps(saved))
+                self.assertFalse(receipts.verification_finished(fixture.path, document, 'bounceban-first', pending))
+                self.assertTrue(receipts.pending_verification_errors(document, fixture.path))
+                path.write_bytes(original[path])
+        document['stop_audit']['route_frontier'][-2].pop('continuation_route_ids')
+        self.assertFalse(receipts.verification_finished(fixture.path, document, 'bounceban-first', pending))
+
+    def test_failed_status_read_requires_a_later_completed_verdict(self):
+        fixture, document, pending = self.verification_chain()
+        route = next(r for r in document['routes'] if r['route_id'] == 'bounceban-wait')
+        path = fixture.path.parent / 'receipts/bounceban-wait.json'
+        saved = json.loads(path.read_text())
+        route['provider_status'] = saved['status'] = 'provider_error'
+        saved.pop('pending_verification')
+        saved['provider_response']['body'] = {'status': 'error', 'error': 'Failed read'}
+        path.write_text(json.dumps(saved))
+        self.assertTrue(receipts.verification_finished(fixture.path, document, 'bounceban-first', pending))
+        document['stop_audit']['route_frontier'][-2].pop('continuation_route_ids')
+        self.assertFalse(receipts.verification_finished(fixture.path, document, 'bounceban-first', pending))
 
     def test_rejected_dispatch_does_not_reserve_or_call_provider(self):
         fixture=attempt_tests.AttemptExecutionTests();fixture.setUp();self.addCleanup(fixture.doCleanups)

@@ -411,10 +411,38 @@ def _harvest_positions(source):
                 "start_date": value.get("startDate"),
                 "source_field": field,
             }
-            identity = (position["company_linkedin_url"], position["company_id"], position["company"], position["title"])
-            if not any(tuple(p[k] for k in ("company_linkedin_url", "company_id", "company", "title")) == identity for p in positions):
+            matches = [p for p in positions if _same_harvest_role(p, position)]
+            if len(matches) == 1:
+                # Keep richer metadata without resolving conflicting current
+                # roles by guesswork. Full source records remain in the receipt.
+                for key, item in position.items():
+                    if not matches[0].get(key) and item:
+                        matches[0][key] = item
+            else:
                 positions.append(position)
     return positions
+
+
+def _same_harvest_role(left, right):
+    title = str(left.get("title") or "").strip().casefold()
+    if not title or title != str(right.get("title") or "").strip().casefold():
+        return False
+    same_identity = False
+    for key in ("company_linkedin_url", "company_id"):
+        a, b = left.get(key), right.get(key)
+        if key == "company_linkedin_url":
+            a, b = _linkedin_company_key(a), _linkedin_company_key(b)
+        if a and b:
+            if a != b:
+                return False
+            same_identity = True
+    if same_identity:
+        return True
+    # Names alone cannot reconcile disjoint LinkedIn identities.
+    if any(p.get(k) for p in (left, right) for k in ("company_linkedin_url", "company_id")):
+        return False
+    name = str(left.get("company") or "").strip().casefold()
+    return bool(name) and name == str(right.get("company") or "").strip().casefold()
 
 
 def _linkedin_company_key(value):

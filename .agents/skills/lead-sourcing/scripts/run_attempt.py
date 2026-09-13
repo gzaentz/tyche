@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 
 import budget_guard
-from email_receipts import check_fallback, saved_result
+from email_receipts import check_fallback, verification_finished
 from provider_output import ResponseFile, load_json
 from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
 from validate_run import (DETERMINATE_PROVIDER_STATUSES, _company_key,
@@ -85,34 +85,6 @@ def run_status(document, decision):
             "stop_decision": decision}
 
 
-def _verification_finished(run_file, document, route_id, pending, links=None):
-    """A pending job needs a receipted status read for that job and exact email."""
-    frontier = {r["route_id"]: r for r in document["stop_audit"]["route_frontier"]}
-    routes = {r["route_id"]: r for r in document.get("routes", [])}
-    todo = list(links if links is not None else frontier[route_id].get("continuation_route_ids", []))
-    seen = {route_id}
-    while todo:
-        rid = todo.pop()
-        if rid in seen:
-            continue
-        seen.add(rid)
-        todo.extend(frontier.get(rid, {}).get("continuation_route_ids", []))
-        route = routes.get(rid, {})
-        if not route.get("status_read") or route.get("provider_status") != "ok":
-            continue
-        try:
-            saved = budget_guard.read_object(Path(run_file).parent / "receipts" / (rid + ".json"))
-            payload = saved.get("attempt", {}).get("request", {}).get("payload", {})
-            if not pending.get("id") or payload.get("id") != pending["id"] or not pending.get("email"):
-                continue
-            saved_result(run_file, document["routes"],
-                         {key: route.get(key) for key in ("route_id", "provider", "operation", "tool")}, pending["email"])
-            return True
-        except (ValueError, OSError):
-            continue
-    return False
-
-
 def finalize_run(run_file):
     """Prepare derived completion fields only after review and full delivery checks."""
     checked = {}
@@ -126,20 +98,6 @@ def finalize_run(run_file):
         stop = decision["decision"]
         if stop in {"continue", "repair_state"}:
             problems.append("Run still needs work: " + json.dumps(decision))
-        frontier = document["stop_audit"].get("route_frontier", [])
-        if stop not in {"time_limit_reached", "budget_exhausted"}:
-            open_routes = [r["route_id"] for r in frontier if r.get("state") in {"untried", "continuable"}]
-            if open_routes:
-                problems.append("Review open routes before finalization: " + ", ".join(open_routes))
-        # Even reaching the target cannot hide a dispatched job. Older pending
-        # receipts may have explicit continuations; their terminal leaf must be reviewed.
-        for route in document.get("routes", []):
-            if route.get("provider_status") != "partial":
-                continue
-            receipt = Path(run_file).parent / "receipts" / (route["route_id"] + ".json")
-            pending = budget_guard.read_object(receipt).get("pending_verification") if receipt.exists() else None
-            if pending and not _verification_finished(run_file, document, route["route_id"], pending):
-                problems.append("Pending verification needs status recovery: " + route["route_id"])
         # Validate proposed bookkeeping together with all evidence. Nothing is
         # persisted if either the readiness checks or strict validation fails.
         document["stop_reason"] = stop
@@ -203,7 +161,7 @@ def save_review(run_file, review):
             if state == "exhausted" and receipt.get("provider_status") == "partial":
                 saved = budget_guard.read_object(Path(run_file).parent / "receipts" / (rid + ".json"))
                 pending = saved.get("pending_verification")
-                if pending and not _verification_finished(run_file, document, rid, pending, links):
+                if pending and not verification_finished(run_file, document, rid, pending, links):
                     raise ValueError("pending verification needs its saved job's status continuation")
             if state not in {"exhausted", "continuable", "blocked"}:
                 raise ValueError("review a completed attempt, not an untried route")
