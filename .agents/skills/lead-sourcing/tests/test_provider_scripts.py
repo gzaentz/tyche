@@ -401,6 +401,77 @@ class ProviderScriptTests(unittest.TestCase):
         self.assertEqual(row["full_name"], "Alex Rivera")
         self.assertEqual(row["current_title"], "Logistics Director")
 
+    def test_harvest_full_profile_selects_target_role_and_preserves_email_flags(self):
+        other = {"companyName": "Other", "companyLinkedinUrl": "https://www.linkedin.com/company/other/",
+                 "position": "Advisor", "endDate": {"text": "Present"}}
+        current = {"companyName": "Example", "companyLinkedinUrl": "https://www.linkedin.com/company/example/",
+                   "companyId": "123", "position": "Chief Product Officer", "endDate": {"text": "Present"},
+                   "company": {"website": "https://example.org/", "description": "Full company profile"}}
+        source = {"firstName": "Ada", "lastName": "Example", "linkedinUrl": "https://www.linkedin.com/in/ada-example/",
+                  "headline": "Building useful products", "currentPosition": [other, current],
+                  "experience": [dict(current), dict(current, position="COO", endDate={"year": 2024})],
+                  "location": {"parsed": {"countryFull": "United States", "state": "Ohio", "city": "Columbus"}},
+                  "emails": [{"email": "ada@example.org", "status": "risky", "catchAllDomain": True, "free": False}]}
+        original = json.dumps(source, sort_keys=True)
+        row = DEEPLINE.normalize_evidence(source, tool="harvestapi_get_profile", entity_type="contact",
+                                         target_company_linkedin_url="https://uk.linkedin.com/company/EXAMPLE/?trk=source")
+        self.assertEqual(row["contact_title"], "Chief Product Officer")
+        self.assertEqual(row["company"], "Example")
+        self.assertEqual(row["country"], "United States")
+        self.assertEqual(row["contact_email"], "ada@example.org")
+        self.assertEqual(row["email_candidates"], source["emails"])
+        self.assertNotIn("email_validation", row)
+        self.assertEqual(row["position_review"], "matched")
+        self.assertEqual(len(row["current_positions"]), 2)
+        self.assertEqual(row["experience"], source["experience"])
+        self.assertEqual(json.dumps(source, sort_keys=True), original)
+
+        ambiguous = DEEPLINE.normalize_evidence(source, tool="harvestapi_get_profile")
+        self.assertIsNone(ambiguous["contact_title"])
+        self.assertIsNone(ambiguous["company"])
+        self.assertEqual(ambiguous["position_review"], "ambiguous")
+        missing = DEEPLINE.normalize_evidence(source, tool="harvestapi_get_profile",
+                                             target_company_linkedin_url="https://www.linkedin.com/company/missing/")
+        self.assertEqual(missing["position_review"], "target_not_found")
+        self.assertIsNone(missing["contact_title"])
+        source["emails"] = [{"email": "ada@previous-employer.test", "type": "work"}]
+        mismatched_email = DEEPLINE.normalize_evidence(source, tool="harvestapi_get_profile",
+            target_company_linkedin_url="https://www.linkedin.com/company/example/")
+        self.assertIsNone(mismatched_email["contact_email"])
+        self.assertEqual(mismatched_email["email_candidates"], source["emails"])
+
+    def test_harvest_experience_requires_explicit_current_evidence(self):
+        source = {"firstName": "Ada", "linkedinUrl": "https://www.linkedin.com/in/ada-example/",
+                  "headline": "Founder and Advisor", "experience": [
+                      {"companyName": "Previous", "position": "CEO", "endDate": None},
+                      {"companyName": "Current", "position": "Director", "endDate": {"text": "Present"}}],
+                  "emails": [{"email": "ada@personal.test", "free": True}]}
+        row = DEEPLINE.normalize_evidence(source, tool="harvestapi_get_profile")
+        self.assertEqual(row["company"], "Current")
+        self.assertEqual(row["contact_title"], "Director")
+        self.assertIsNone(row["contact_email"])
+        source["experience"].pop()
+        row = DEEPLINE.normalize_evidence(source, tool="harvestapi_get_profile")
+        self.assertIsNone(row["contact_title"])
+        self.assertEqual(row["position_review"], "no_current_position")
+
+    def test_harvest_target_context_stays_out_of_provider_payload(self):
+        seen = {}
+        def fake_run(command, **kwargs):
+            payload_path = command[command.index("--input") + 1][1:]
+            seen.update(json.loads(pathlib.Path(payload_path).read_text()))
+            return subprocess.CompletedProcess(command, 0, json.dumps({"status": "ok", "element": {
+                "firstName": "Ada", "linkedinUrl": "https://www.linkedin.com/in/ada-example/",
+                "currentPosition": [{"companyName": "Example", "companyLinkedinUrl": "https://www.linkedin.com/company/example/",
+                                     "position": "CPO"}]}}), "")
+        payload = {"linkedinUrl": "https://www.linkedin.com/in/ada-example/"}
+        with mock.patch.object(DEEPLINE.subprocess, "run", side_effect=fake_run):
+            body, code = DEEPLINE.run({"operation": "execute", "tool": "harvestapi_get_profile", "payload": payload,
+                                      "target_company_linkedin_url": "https://www.linkedin.com/company/example/"})
+        self.assertEqual(code, 0)
+        self.assertEqual(seen, payload)
+        self.assertEqual(body["results"][0]["contact_title"], "CPO")
+
     def test_deepline_current_and_legacy_envelopes_preserve_all_rows(self):
         rows = [
             {"company_name": "Acme", "website": "acme.test"},

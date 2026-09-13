@@ -1438,8 +1438,9 @@ unverified optional values as empty cells rather than placeholder text.
   For each signal, describe what the company did with specific facts and supported
   dates, then explain its relevance to the company's likely needs and the
   requested product/service using supporting business or qualification evidence.
-  Give that explanation in the next sentence when it makes the paragraph flow
-  naturally. Use the same reviewed events and dates displayed in `Signals`. Close with one sentence
+  Normally pair each signal sentence with a supporting relevance sentence
+  immediately after it. Use the same reviewed events and dates displayed in
+  `Signals`. Close with one sentence
   connecting the signals, likely need and requested product/service to explain
   why the company matters now in terms of its own situation. Synthesize the
   evidence rather than repeating the events or merely describing expansion.

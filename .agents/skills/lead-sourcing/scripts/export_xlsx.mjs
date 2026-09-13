@@ -8,6 +8,7 @@ import process from "node:process";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 export const XLSX_COLUMNS = [
   "Name",
@@ -513,13 +514,13 @@ async function main() {
   try {
     const args = process.argv.slice(2);
     const { resultsPath, destination, options } = parseExportArgs(args);
-    const resultText = await fs.readFile(resultsPath, "utf8");
     const validation = spawnSync(process.env.TYCHE_WORKSPACE_PYTHON || "python3", [
-      fileURLToPath(new URL("./validate_run.py", import.meta.url)), resultsPath, "--show-cost-summary",
+      fileURLToPath(new URL("./run_attempt.py", import.meta.url)), resultsPath, "--finalize",
     ], { encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024 });
     const checked = validation.status === 0 ? JSON.parse(validation.stdout) : null;
     if (!checked?.delivery_allowed) throw new ExportError(`Strict delivery validation failed: ${validation.error?.message || validation.stdout || validation.stderr}`);
-    if (await fs.readFile(resultsPath, "utf8") !== resultText) throw new ExportError("Saved results changed during validation");
+    const resultText = await fs.readFile(resultsPath, "utf8");
+    if (createHash("sha256").update(resultText).digest("hex") !== checked.results_sha256) throw new ExportError("Saved results changed during validation");
     const document = JSON.parse(resultText);
     const receipt = await exportXlsx(document, destination, { ...options, resultsPath });
     await fs.writeFile(path.join(path.dirname(destination), "validation.json"), JSON.stringify(checked, null, 2) + "\n");

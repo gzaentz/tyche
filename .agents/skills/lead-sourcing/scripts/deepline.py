@@ -382,11 +382,54 @@ def _is_email_validation_record(value: Any) -> bool:
     }
 
 
+def _harvest_positions(source):
+    """Project explicitly current roles; a missing historical end date is not proof."""
+    positions = []
+    for field in ("currentPositions", "currentPosition", "experience"):
+        values = source.get(field, [])
+        if isinstance(values, dict):
+            values = [values]
+        for value in values if isinstance(values, list) else []:
+            if not isinstance(value, dict):
+                continue
+            end = value.get("endDate")
+            end_text = end.get("text") if isinstance(end, dict) else end
+            present = str(end_text or "").strip().casefold() == "present"
+            if value.get("current") is False or (end and not present):
+                continue
+            if field == "experience" and not (present or value.get("current") is True):
+                continue
+            company = value.get("company")
+            company = company if isinstance(company, dict) else {}
+            position = {
+                "company": _text(_first(value, "companyName", "company_name")) or _text(company.get("name")),
+                "company_linkedin_url": _text(_first(value, "companyLinkedinUrl", "company_linkedin_url")) or _text(company.get("linkedinUrl")),
+                "company_id": _text(value.get("companyId") or company.get("id")),
+                "title": _text(_first(value, "position", "title")),
+                "domain": _domain(company.get("website")),
+                "description": _text(value.get("description")),
+                "start_date": value.get("startDate"),
+                "source_field": field,
+            }
+            identity = (position["company_linkedin_url"], position["company_id"], position["company"], position["title"])
+            if not any(tuple(p[k] for k in ("company_linkedin_url", "company_id", "company", "title")) == identity for p in positions):
+                positions.append(position)
+    return positions
+
+
+def _linkedin_company_key(value):
+    if not isinstance(value, str) or not _is_linkedin_company_url(value):
+        return None
+    parts = urlparse(value if "://" in value else "https://" + value).path.strip("/").split("/")
+    return parts[1].casefold() if len(parts) > 1 else None
+
+
 def normalize_evidence(
     row: Any,
     provider: str = "deepline",
     tool: Optional[str] = None,
     entity_type: Optional[str] = None,
+    target_company_linkedin_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Normalize one provider row while retaining useful provider metadata."""
 
@@ -474,6 +517,7 @@ def normalize_evidence(
                 start, end = band.get("start"), band.get("end")
                 if type(start) is int and start >= 0 and (end is None and start == 10001 or type(end) is int and end >= start):
                     result["employee_range"] = f"{start}-{end}" if end is not None else f"{start}+"
+            result["missing_fields"] = [field for field in ("company", "employee_range") if not result.get(field)]
         elif linkedin and re.search(r"linkedin\.com/in/[^/?#]+", linkedin, re.IGNORECASE):
             location = source.get("location")
             if isinstance(location, dict):
@@ -585,6 +629,33 @@ def normalize_evidence(
         result["contact_title"] = contact_title
         result["current_title"] = contact_title
         result["contact_email"] = contact_email
+        if "harvestapi" in (tool or "").lower():
+            positions = _harvest_positions(source)
+            target = _linkedin_company_key(target_company_linkedin_url)
+            matches = [p for p in positions if not target or target in {
+                _linkedin_company_key(p["company_linkedin_url"]), p["company_id"]}]
+            selected = matches[0] if len(matches) == 1 else {}
+            # A headline is not the title at the target employer. Keep all
+            # current-role candidates visible when selection needs review.
+            result.update(current_positions=positions, company=selected.get("company"),
+                          company_linkedin_url=selected.get("company_linkedin_url"),
+                          contact_title=selected.get("title"), current_title=selected.get("title"))
+            result["domain"] = selected.get("domain") or result["domain"]
+            candidates = source.get("emails", [])
+            candidates = candidates if isinstance(candidates, list) else []
+            result["email_candidates"] = [redact(item) if isinstance(item, dict) else {"email": item}
+                                          for item in candidates if isinstance(item, (dict, str))]
+            work = {item.get("email") for item in result["email_candidates"]
+                    if isinstance(item.get("email"), str) and "@" in item["email"]
+                    and selected and item.get("free") is not True and
+                    (item["email"].rsplit("@", 1)[1].casefold() == result["domain"]
+                     if result.get("domain") else item.get("type") == "work")}
+            if not contact_email and len(work) == 1:
+                result["contact_email"] = next(iter(work))
+            result["missing_fields"] = [field for field in ("company", "contact_title", "country", "contact_email")
+                                        if not result.get(field)]
+            result["position_review"] = ("matched" if selected else "ambiguous" if matches
+                                         else "target_not_found" if target else "no_current_position")
     if is_email_validation:
         result["email"] = _text(_first(source, "address", "email"))
         result["email_status"] = _text(source.get("result") or source.get("status"))
@@ -1338,6 +1409,8 @@ def _validate_request(request: Any) -> Dict[str, Any]:
         # payload sent to the live Deepline tool, whose schema is discovered at
         # runtime and must not be guessed here.
         request["entity_type"] = entity_type.strip()
+    if "target_company_linkedin_url" in request and not _linkedin_company_key(request["target_company_linkedin_url"]):
+        raise InputError("target_company_linkedin_url must be an observed LinkedIn company URL")
     if operation == "search":
         query = request.get("query", request.get("q"))
         if not isinstance(query, str) or not query.strip():
@@ -1444,6 +1517,7 @@ def _execute_output(
     tool: str,
     entity_type: Optional[str] = None,
     limit: int = 10,
+    target_company_linkedin_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     if entity_type and entity_type.strip().casefold() == "email_validation":
         validation = _email_validation_output(parsed, tool, limit)
@@ -1520,7 +1594,7 @@ def _execute_output(
     else:
         final_status = "no_results"
     evidence = records if structured else [
-        normalize_evidence(record, "deepline", tool, entity_type) for record in records
+        normalize_evidence(record, "deepline", tool, entity_type, target_company_linkedin_url) for record in records
     ]
     if (structured or company_failure is not None) and final_status in _FAILURE_STATUSES:
         evidence = []
@@ -1709,6 +1783,7 @@ def normalize_response(request: Dict[str, Any], response: Dict[str, Any]) -> Tup
             request["tool"],
             request.get("entity_type"),
             request["limit"],
+            request.get("target_company_linkedin_url"),
         )
     else:
         body = _catalog_output(request["operation"], parsed, request.get("tool"), request.get("entity_type"))

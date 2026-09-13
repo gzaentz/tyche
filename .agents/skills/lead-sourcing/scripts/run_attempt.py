@@ -11,12 +11,13 @@ from pathlib import Path
 import re
 
 import budget_guard
-from email_receipts import check_fallback
+from email_receipts import check_fallback, saved_result
 from provider_output import ResponseFile, load_json
 from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
 from validate_run import (DETERMINATE_PROVIDER_STATUSES, _company_key,
                           calculate_cost_summary, calculate_review_counts, evaluate_stop, excluded_company,
-                          progress_snapshot, qualification_errors, _reviewed_company_scopes, accepted_errors)
+                          progress_snapshot, qualification_errors, _reviewed_company_scopes, accepted_errors,
+                          validate_run)
 
 
 def refresh(document):
@@ -33,8 +34,9 @@ def refresh(document):
         calls = [r for r in routes if r.get("provider") == provider and r.get("paid_calls", 0)]
         spent[f"{provider}_credits"] = (None if any(r.get("cost_credits") is None for r in calls)
                                         else float(sum(budget_guard.amount(r["cost_credits"], "cost") for r in calls)))
-    document["budget"].update(spent=spent, paid_calls=sum(r.get("paid_calls", 0) for r in routes),
-                              status="unknown" if None in spent.values() else "within_budget")
+    if isinstance(document.get("budget"), dict):
+        document["budget"].update(spent=spent, paid_calls=sum(r.get("paid_calls", 0) for r in routes),
+                                  status="unknown" if None in spent.values() else "within_budget")
     audit = document.setdefault("stop_audit", {})
     audit.update(calculate_review_counts(document), target_shortfall=max(0, target - count))
     capacity = audit.setdefault("provider_call_capacity", {})
@@ -83,6 +85,79 @@ def run_status(document, decision):
             "stop_decision": decision}
 
 
+def _verification_finished(run_file, document, route_id, pending, links=None):
+    """A pending job needs a receipted status read for that job and exact email."""
+    frontier = {r["route_id"]: r for r in document["stop_audit"]["route_frontier"]}
+    routes = {r["route_id"]: r for r in document.get("routes", [])}
+    todo = list(links if links is not None else frontier[route_id].get("continuation_route_ids", []))
+    seen = {route_id}
+    while todo:
+        rid = todo.pop()
+        if rid in seen:
+            continue
+        seen.add(rid)
+        todo.extend(frontier.get(rid, {}).get("continuation_route_ids", []))
+        route = routes.get(rid, {})
+        if not route.get("status_read") or route.get("provider_status") != "ok":
+            continue
+        try:
+            saved = budget_guard.read_object(Path(run_file).parent / "receipts" / (rid + ".json"))
+            payload = saved.get("attempt", {}).get("request", {}).get("payload", {})
+            if not pending.get("id") or payload.get("id") != pending["id"] or not pending.get("email"):
+                continue
+            saved_result(run_file, document["routes"],
+                         {key: route.get(key) for key in ("route_id", "provider", "operation", "tool")}, pending["email"])
+            return True
+        except (ValueError, OSError):
+            continue
+    return False
+
+
+def finalize_run(run_file):
+    """Prepare derived completion fields only after review and full delivery checks."""
+    checked = {}
+
+    def update(document):
+        refresh(document)
+        ledger = budget_guard.load_ledger(run_file)
+        problems = budget_guard.audit_ledger(run_file, document, state=ledger)
+        decision = evaluate_stop(document, execution_budget=ledger)
+        problems.extend(decision["errors"])
+        stop = decision["decision"]
+        if stop in {"continue", "repair_state"}:
+            problems.append("Run still needs work: " + json.dumps(decision))
+        frontier = document["stop_audit"].get("route_frontier", [])
+        if stop not in {"time_limit_reached", "budget_exhausted"}:
+            open_routes = [r["route_id"] for r in frontier if r.get("state") in {"untried", "continuable"}]
+            if open_routes:
+                problems.append("Review open routes before finalization: " + ", ".join(open_routes))
+        # Even reaching the target cannot hide a dispatched job. Older pending
+        # receipts may have explicit continuations; their terminal leaf must be reviewed.
+        for route in document.get("routes", []):
+            if route.get("provider_status") != "partial":
+                continue
+            receipt = Path(run_file).parent / "receipts" / (route["route_id"] + ".json")
+            pending = budget_guard.read_object(receipt).get("pending_verification") if receipt.exists() else None
+            if pending and not _verification_finished(run_file, document, route["route_id"], pending):
+                problems.append("Pending verification needs status recovery: " + route["route_id"])
+        # Validate proposed bookkeeping together with all evidence. Nothing is
+        # persisted if either the readiness checks or strict validation fails.
+        document["stop_reason"] = stop
+        document["stop_audit"]["frontier_complete"] = True
+        problems.extend(validate_run(document, require_stop_check=True, execution_budget=ledger, run_file=run_file))
+        if problems:
+            raise ValueError("; ".join(problems))
+        checked.update(valid=True, errors=[], stop_policy="strict", delivery_allowed=True,
+                       stop_decision=decision, calculated_cost_summary=calculate_cost_summary(document))
+        # Bind the exporter to the exact bytes validated inside the state lock.
+        saved = json.dumps(document, indent=2, ensure_ascii=True, allow_nan=False) + "\n"
+        checked["results_sha256"] = hashlib.sha256(saved.encode("utf-8")).hexdigest()
+        return document
+
+    mutate(run_file, update)
+    return checked
+
+
 def save_review(run_file, review):
     """Save explicit company/route judgments in one transaction; never dispatch."""
     if not isinstance(review, dict) or set(review) - {"companies", "routes", "next_actions"}:
@@ -124,9 +199,11 @@ def save_review(run_file, review):
             receipt = next(r for r in document["routes"] if r["route_id"] == rid)
             reviewed_scopes.add(entry.get("scope"))
             state = item.get("state", "exhausted")
+            links = list(dict.fromkeys(entry.get("continuation_route_ids", []) + item.get("continuation_route_ids", [])))
             if state == "exhausted" and receipt.get("provider_status") == "partial":
                 saved = budget_guard.read_object(Path(run_file).parent / "receipts" / (rid + ".json"))
-                if saved.get("pending_verification"):
+                pending = saved.get("pending_verification")
+                if pending and not _verification_finished(run_file, document, rid, pending, links):
                     raise ValueError("pending verification needs its saved job's status continuation")
             if state not in {"exhausted", "continuable", "blocked"}:
                 raise ValueError("review a completed attempt, not an untried route")
@@ -134,7 +211,6 @@ def save_review(run_file, review):
                 raise ValueError("a successful receipt cannot become a provider blocker")
             if not isinstance(item.get("reason"), str) or not item["reason"].strip():
                 raise ValueError("route review requires the reason this source is complete or still open")
-            links = list(dict.fromkeys(entry.get("continuation_route_ids", []) + item.get("continuation_route_ids", [])))
             entry = {**entry, **item, "state": state}
             if links:
                 entry["continuation_route_ids"] = links
@@ -183,7 +259,7 @@ def save_review(run_file, review):
 
 
 def _fingerprint(provider, request):
-    ignored = {"spend", "timeout_seconds", "entity_type", "output_file"}
+    ignored = {"spend", "timeout_seconds", "entity_type", "output_file", "target_company_linkedin_url"}
     if provider == "deepline":
         ignored.update({"limit", "input", "name", "op", "q"})
     payload = {k: v for k, v in request.items() if k not in ignored}
@@ -233,6 +309,13 @@ def _prepare(run_file, spec):
     def plan(document):
         refresh(document)
         _contact_gate(document, action)
+        if provider == "deepline" and operation == "execute" and request.get("tool") == "harvestapi_get_profile":
+            for row in document.get("accepted", []) + document.get("unresolved", []):
+                company = row.get("company", row.get("candidate", {}))
+                if _company_key(row) == action["scope"] and isinstance(company, dict) and company.get("linkedin_url"):
+                    # Local normalization context only; never sent in the provider payload.
+                    request["target_company_linkedin_url"] = company["linkedin_url"]
+                    break
         audit = document.setdefault("stop_audit", {})
         frontier = audit.setdefault("route_frontier", [])
         # Catalog refreshes can repeat after new substantive work, not in a loop.
@@ -434,10 +517,21 @@ def run_batch(run_file, specs, *, execute=None, plan_only=False):
 
 
 def _harvest_display(value):
-    """Hide media and sidebar suggestions from stdout, never from receipts."""
+    """Project known LinkedIn rows for review, keeping a path to complete receipts."""
     omitted = {"similarOrganizations", "logo", "logos", "backgroundCover",
                "backgroundCovers", "profilePicture", "coverPicture", "photo"}
     if isinstance(value, dict):
+        if value.get("entity_type") in {"contact", "person", "company", "account", "organization"}:
+            fields = {"entity_type", "provider", "tool", "company", "company_linkedin_url", "domain",
+                      "name", "linkedinUrl", "employee_range", "employeeCountRange", "employeeCount",
+                      "description", "tagline", "industries", "specialities", "companyType", "foundedOn",
+                      "locations", "location", "location_text", "country", "state", "city",
+                      "contact_name", "contact_url", "contact_title", "contact_email", "headline",
+                      "current_positions", "position_review", "email_candidates", "missing_fields",
+                      "evidence_url", "evidence_date", "evidence_text", "signal"}
+            projected = {key: _harvest_display(item) for key, item in value.items() if key in fields}
+            projected["omitted_fields"] = sorted(set(value) - fields)
+            return projected
         return {key: _harvest_display(item) for key, item in value.items() if key not in omitted}
     if isinstance(value, list):
         return [_harvest_display(item) for item in value]
@@ -458,7 +552,7 @@ def cli_output(result):
             for field in ("results", "evidence"):
                 if field in body:
                     body[field] = _harvest_display(body[field])
-            body["display_note"] = "Media and similar-company suggestions omitted; full data is in receipt_file."
+            body["display_note"] = "Compact LinkedIn facts; omitted fields and full provider data remain in receipt_file."
         output["result"] = body
     return output
 
@@ -472,10 +566,13 @@ def main():
     mode.add_argument("--complete", help="record this route's saved normalized receipt, without dispatch")
     mode.add_argument("--review-file", type=Path, help="save company decisions and close reviewed routes together")
     mode.add_argument("--status", action="store_true", help="show the authoritative request and compact current work")
+    mode.add_argument("--finalize", action="store_true", help="prepare reviewed completion metadata and run strict delivery validation")
     parser.add_argument("--plan-only", action="store_true", help="reserve public-web work before using the browser/search tool")
     args = parser.parse_args()
     try:
-        if args.status:
+        if args.finalize:
+            result = finalize_run(args.results)
+        elif args.status:
             document = budget_guard.read_object(args.results)
             result = run_status(document, evaluate_stop(document, execution_budget=budget_guard.load_ledger(args.results)))
         elif args.review_file:

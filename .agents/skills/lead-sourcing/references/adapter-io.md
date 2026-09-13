@@ -53,7 +53,8 @@ and billing reconciliation; never erase them, reset spend, or rerun uncertain ca
 Historical ledgers without this marker remain available to the validator's
 read-only `--legacy-stop-policy`; that mode cannot authorize execution or delivery.
 It derives summary/review counts and cost totals from saved outcomes and receipts;
-unknown charges keep provider capacity unknown. It never marks the frontier complete.
+unknown charges keep provider capacity unknown. Attempt recording never marks
+the frontier complete; the export command prepares completion after review.
 Each saved response also retains the action and redacted input in `attempt`,
 so recovering a damaged draft does not require inventing scope or approach labels.
 If only raw response bytes survived, normalize that receipt locally first. A
@@ -85,9 +86,16 @@ the saved same-email ZeroBounce result and refuses ineligible or repeated calls.
 Recover pending jobs with the documented free status getter; never resubmit them.
 
 The attempt CLI prints normalized provider results once, with the full receipt
-path. Repeated progress snapshots, request metadata and duplicate evidence stay
-in that receipt. Inspect specific saved fields when needed; the CLI view does
-not truncate or replace the underlying evidence or accounting.
+path. Harvest rows show company/contact facts, current-role candidates, discovered
+emails and missing fields; `omitted_fields` identifies additional saved data.
+For Harvest profile getters, the helper supplies the reviewed company's LinkedIn
+URL as local `target_company_linkedin_url` metadata to select its current role.
+It is not sent to the provider. Multiple matching roles require review; a headline
+or a historical role without an end date does not establish the current title.
+Finder email flags never replace ZeroBounce or eligible BounceBan validation.
+Repeated progress snapshots, request metadata and duplicate evidence stay in
+the receipt. Inspect specific saved fields when needed; the CLI view does not
+truncate or replace the underlying evidence or accounting.
 
 ## Save a review
 

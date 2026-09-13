@@ -175,6 +175,23 @@ class AttemptExecutionTests(unittest.TestCase):
             spec["action"].update(phase="account_verification", scope=f"company-{i}.example")
         return specs
 
+    def test_profile_attempt_supplies_scoped_company_context_without_changing_dispatch_identity(self):
+        self.doc["unresolved"] = [{"stage": "contact", "candidate": {
+            "company": "Example", "domain": "example.org", "linkedin_url": "https://www.linkedin.com/company/example/"},
+            "account_fit": {"evidence_url": "https://example.org/about", "evidence_text": "Makes the requested product."},
+            "reason_code": "missing_contact_evidence", "reason_text": "Find the requested buyer."}]
+        self.path.write_text(json.dumps(self.doc))
+        spec = self.spec(paid=True)
+        spec["action"].update(scope="example.org", phase="contact_verification", entity_type="contact")
+        spec["request"].update(tool="harvestapi_get_profile", payload={"linkedinUrl": "https://www.linkedin.com/in/ada-example/"})
+        result = runner.run_attempt(self.path, spec, execute=self.paid_response)
+        saved = json.loads(Path(result["receipt_file"]).read_text())
+        request = saved["attempt"]["request"]
+        self.assertEqual(request["target_company_linkedin_url"], self.doc["unresolved"][0]["candidate"]["linkedin_url"])
+        self.assertEqual(request["payload"], spec["request"]["payload"])
+        self.assertEqual(runner._fingerprint("deepline", request), runner._fingerprint("deepline", {
+            **request, "target_company_linkedin_url": "https://www.linkedin.com/company/other/"}))
+
     def test_three_provider_calls_overlap_with_one_result_writer(self):
         gate = threading.Barrier(3, timeout=5)
         writers, providers = set(), set()
@@ -471,6 +488,26 @@ class AttemptExecutionTests(unittest.TestCase):
         self.assertEqual(result, original)
         del result["receipt_file"]
         self.assertEqual(runner.cli_output(result)["result"]["results"], [row])
+
+    def test_normalized_profile_output_is_compact_and_keeps_review_gaps(self):
+        source = {"firstName": "Ada", "linkedinUrl": "https://www.linkedin.com/in/ada-example/",
+                  "headline": "Payments product leader", "currentPosition": [
+                      {"companyName": name, "position": "Advisor", "company": {"description": "nested data " * 2000}}
+                      for name in ("Example", "Another")],
+                  "experience": [{"position": "Previous role", "description": "old history " * 5000}],
+                  "emails": [{"email": "ada@example.org", "catchAllDomain": True}]}
+        row = runner.importlib.import_module("deepline").normalize_evidence(source, tool="harvestapi_get_profile", entity_type="contact")
+        body = {"receipt_file": "receipt.json", "result": {"tool": "harvestapi_get_profile", "results": [row]}}
+        original = copy.deepcopy(body)
+        compact = runner.cli_output(body)
+        shown = compact["result"]["results"][0]
+        self.assertEqual(shown["current_positions"], row["current_positions"])
+        self.assertEqual(shown["position_review"], "ambiguous")
+        self.assertIn("contact_title", shown["missing_fields"])
+        self.assertEqual(shown["email_candidates"], source["emails"])
+        self.assertIn("experience", shown["omitted_fields"])
+        self.assertLess(len(json.dumps(compact)), len(json.dumps(body)) / 10)
+        self.assertEqual(body, original)
 
     def test_records_receipt_cost_and_retires_action(self):
         result = runner.run_attempt(self.path, self.spec(paid=True), execute=self.paid_response)

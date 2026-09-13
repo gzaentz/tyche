@@ -48,6 +48,8 @@ once. The default shared provider budget is USD 0.50 per requested lead.
    signals only rank. Review each requested preferred signal once using an
    appropriate source; record unknown with the gap if it cannot be verified.
    Corroborate sources for the same project, preserving dates.
+   Save the reviewed signal facts, dates and business context once; draft
+   `Signals` and `Intent Details` from that evidence before contact enrichment.
    Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
    Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size)
    for company size and contact location. Every accepted contact needs a country;
@@ -83,7 +85,10 @@ Generate the report and workbook after source review, then regenerate only
 when corrections change their content. Keep structured results current throughout.
 Before delivery, save reviewed `results.json` and `report.md`, then run
 `node .agents/skills/lead-sourcing/scripts/export_xlsx.mjs <results.json>`.
-This validates, exports and verifies the saved workbook. Inspect its PNG preview.
+This derives completion metadata from reviewed state, runs strict validation,
+exports and verifies the saved workbook. It refuses open reviews or pending
+verification; fix the reported gaps instead of manually forcing completion flags.
+Inspect its PNG preview.
 The launcher supplies runtime paths. Full strict `delivery_allowed: true` is required. Follow the [stopping contract](references/output-contract.md#stopping-check)
 for target completion, actual limits/blockers or reviewed `no_productive_route`.
 Report shortfalls honestly; exhausted searches do not prove an empty market.
