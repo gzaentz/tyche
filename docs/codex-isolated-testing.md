@@ -107,16 +107,30 @@ README.md. This launcher does not source `.env` automatically. Paid sourcing
 still requires the existing budgets and adapters. With a ChatGPT Codex login,
 model calls use that login's allowance; provider charges remain separate.
 
-For `--exec-file`, the launcher uses Codex's JSON event stream and automatically
-saves `model-usage/<invocation-id>.json` beside the request file. It retains only
-the model, effort, requested speed, session identity, numeric input/cache/output
-usage and a dated Standard API-equivalent estimate. Each continuation gets its
-own receipt. Failed or interrupted invocations with missing usage remain
-explicitly incomplete, never free. The temporary profile and ephemeral mode
-remain unchanged. An already running invocation cannot gain retrospective usage
-capture; its old aggregate `tokens used` footer is not a pricing breakdown.
+For `--exec-file`, the launcher saves `model-usage/<invocation-id>.json` beside
+the request file. It reads per-response usage from the worker's session journal
+inside the existing temporary profile and reconciles it with the final CLI JSON
+totals. Only model/request identities, timestamps, numeric input, cached input,
+cache writes, output and reasoning output, and dated pricing are retained in
+the receipt. Prompts and tool output are not copied into it. Pricing is applied
+per response so cumulative input does not accidentally trigger long-context
+rates. Reasoning tokens are already included in output and are not billed twice.
 
-After the run, combine its provider summary and every invocation receipt:
+Each continuation gets its own receipt. Failed or interrupted invocations retain
+observed usage but remain incomplete when final totals cannot be reconciled.
+Capture failures do not interrupt the worker; afterward the launcher exits
+nonzero and marks cost incomplete. This does not invalidate saved leads or
+authorize rerunning paid calls.
+
+The launcher automatically writes `run-costs.json` from `results.json` and every
+invocation receipt before deleting the temporary profile. Missing results or
+usage remain explicitly incomplete, never free. The launcher uses a temporary
+session journal for this path instead of `--ephemeral`; sandbox, network, local
+context isolation and cleanup are unchanged. Other execution modes remain
+ephemeral. An already running invocation cannot gain retrospective capture.
+The old `tokens used` footer excludes cached input; it is not a pricing breakdown.
+
+To recalculate the report after provider billing is reconciled:
 
 ```bash
 python3 scripts/run_costs.py reports/<run-id>/results.json
@@ -126,13 +140,24 @@ The scope is only the TYCHE run: its provider calls and sourcing workers,
 including retries and continuations. Outer chat, monitoring and development
 costs are excluded and must not be supplied to this report. Missing worker
 usage makes the combined estimate and per-lead cost null, while preserving the
-known subtotal. Provider confirmed/maximum
-figures retain unsettled reservations. Model estimates reflect distinct input,
-cached-input and output rates, with a range when request-size/cache-write details
-are absent. They are not invoices and exclude Fast/priority premiums,
-hosted-tool fees and subscription allocation; do not label them actual full cost.
+known subtotal. Provider confirmed/maximum figures retain unsettled reservations.
+A complete Standard API-equivalent calculation has status `calculated`; known
+bounds use `estimated_range`; missing components use `incomplete`. These statuses
+refer to the Standard equivalent, not actual billing. Fast/priority premiums,
+hosted-tool fees and subscription allocation are not priced; do not label the
+result an actual full-cost invoice. Actual per-run billed dollars require billing
+records from the account/provider; a ChatGPT token journal does not supply them.
 Historical runs without model receipts cannot be reconstructed from token
 totals alone. Preserve the original reports and add a separate cost audit.
+
+When a provider response has no billing fields, its outcome alone cannot settle
+the charge. Deepline's read-only `billing usage --limit 50 --json` can supply the
+final `charge_state`, credits and request IDs. Match these to saved provider
+`job_id` values. Reconciliation entries can combine several `chargeGroupIds`;
+count a group once and require every member to belong to the run. An explicit
+`free` entry with zero credits settles a no-result request at zero. An absent
+entry remains unknown. This ledger reconciliation is separate from automatic
+worker usage capture; never rerun a paid request to discover its bill.
 
 The temporary profile and its session history are removed when the launcher
 exits. Files saved in the project, including sourcing results and receipts,
@@ -140,6 +165,6 @@ remain. Start a fresh launch after editing the skill to avoid stale context.
 This is a local test workflow, not the production job/recovery host.
 
 The launcher uses the installed Codex app-server's discovery protocol. It was
-checked with Codex CLI 0.153.4 and fails closed if instruction-source reporting
+checked with Codex CLI 0.154.0-alpha.6.2 and fails closed if instruction-source reporting
 or skill discovery is unavailable. Existing desktop conversations already
 contain their earlier context; this launcher does not clean or modify them.

@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 
-from run_costs import UsageReceipt, execute_with_usage
+from run_costs import UsageReceipt, execute_with_usage, save_report
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -197,7 +197,9 @@ def main():
             raise RuntimeError('No reusable file-based Codex login. Run codex login first, or use a separately authenticated profile.')
 
         if args.smoke or args.exec or args.exec_file is not None:
-            command = ['codex', 'exec', '--ephemeral', *overrides]
+            # File-based runs retain a journal only inside this temporary
+            # profile, long enough to capture numeric per-response usage.
+            command = ['codex', 'exec', *([] if args.exec_file is not None else ['--ephemeral']), *overrides]
             if args.exec_file is not None:
                 command.append('--json')
             if args.smoke:
@@ -213,7 +215,10 @@ def main():
             if args.exec_file is not None:
                 receipt = UsageReceipt(args.exec_file, MODEL, REASONING_EFFORT, SERVICE_TIER)
                 print(json.dumps({'model_usage_receipt': str(receipt.path)}), flush=True)
-                return execute_with_usage(command, ROOT, env, receipt)
+                try:
+                    return execute_with_usage(command, ROOT, env, receipt, profile=tyche_codex_home)
+                finally:
+                    print(json.dumps({'run_cost_report': str(save_report(args.exec_file.resolve().parent))}), flush=True)
             return subprocess.call(
                 command, cwd=ROOT, env=env,
                 stdin=subprocess.DEVNULL if args.smoke or args.exec or args.exec_file is not None else None,

@@ -1208,8 +1208,9 @@ Codex model cost is not part of direct provider cost.
 
 Direct provider cost is not the full run cost. The outer launcher saves numeric
 worker usage in `model-usage/<invocation-id>.json` beside each request file.
-After completion, use the repository-root `scripts/run_costs.py` with every
-invocation, including sourcing retries and continuations, as described in
+After completion, it automatically writes `run-costs.json` using every
+invocation, including sourcing retries and continuations. The repository-root
+`scripts/run_costs.py` can recalculate it after reconciliation, as described in
 `docs/codex-isolated-testing.md`. The run cost includes provider calls and
 sourcing workers only; exclude outer chat, monitoring and development costs.
 Report the separate components, combined
