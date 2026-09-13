@@ -143,6 +143,34 @@ class AttemptExecutionTests(unittest.TestCase):
             {"provider": "deepline", "operation": "execute", "status": "no_results", "results": [],
              "billing": {"credits_charged": 0.1, "cost_usd": 0.01}}, 0))
 
+    def test_contact_phase_catalog_calls_need_no_qualified_company_or_spend(self):
+        before = budget_guard.ledger_path(self.path).read_bytes()
+        for phase in ("contact_discovery", "contact_verification", "email_validation"):
+            for operation in ("search", "describe"):
+                with self.subTest(phase=phase, operation=operation):
+                    spec = self.spec(f"catalog-{phase}-{operation}", query=phase)
+                    spec["action"]["phase"] = phase
+                    if operation == "describe":
+                        spec["request"] = {"operation": operation, "tool": f"fixture-{phase}"}
+                    def catalog_response(request, capture):
+                        return {"provider": "deepline", "operation": request["operation"],
+                                "tool": request.get("tool"), "status": "ok", "results": [{"tool": "fixture"}]}, 0
+                    runner.run_attempt(self.path, spec, execute=catalog_response)
+                    route = json.loads(self.path.read_text())["routes"][-1]
+                    self.assertEqual(route["entity_type"], "tool_catalog")
+                    self.assertEqual(route["paid_calls"], 0)
+        self.assertEqual(budget_guard.ledger_path(self.path).read_bytes(), before)
+
+    def test_contact_execution_still_requires_qualified_company_before_spend(self):
+        before = budget_guard.ledger_path(self.path).read_bytes()
+        for phase in ("contact_discovery", "contact_verification", "email_validation"):
+            with self.subTest(phase=phase):
+                spec = self.spec(f"lookup-{phase}", paid=True)
+                spec["action"]["phase"] = phase
+                with self.assertRaisesRegex(ValueError, "account-qualified company"):
+                    runner.run_attempt(self.path, spec, execute=lambda *_: self.fail("Provider dispatched"))
+        self.assertEqual(budget_guard.ledger_path(self.path).read_bytes(), before)
+
     def test_review_demotion_keeps_receipts_and_executes_next_planned_action(self):
         self.doc["accepted"] = [{"company": {"domain": f"company-{i}.example"}} for i in range(7)]
         self.path.write_text(json.dumps(self.doc))

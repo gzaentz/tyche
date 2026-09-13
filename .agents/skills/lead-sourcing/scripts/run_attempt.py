@@ -50,6 +50,9 @@ def refresh(document):
 
 
 def _contact_gate(document, action):
+    # Catalog reads describe available tools; they do not look up contacts.
+    if action.get("provider") == "deepline" and action.get("operation") in {"search", "describe"}:
+        return
     if action["phase"] not in {"contact_discovery", "contact_verification", "email_validation"}:
         return
     # Draft problems belong to their company. Keep the full-document gate at
@@ -255,7 +258,7 @@ def _prepare(run_file, spec):
         raise ValueError("tool_catalog is reserved for live catalog operations")
     if action.get("entity_type") and action["entity_type"] != "tool_catalog":
         request["entity_type"] = action["entity_type"]
-    if action["phase"] == "email_validation":
+    if action["phase"] == "email_validation" and action.get("entity_type") != "tool_catalog":
         action["entity_type"] = request["entity_type"] = "email_validation"
     action["operation"] = operation
     if request.get("tool"):
