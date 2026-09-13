@@ -255,6 +255,8 @@ while repeatedly starting new country searches.
 - One credible source can suffice. Use the same standard for every candidate;
   match current responsibilities and seniority, not literal titles. Resolve
   material contradictions, not merely overlapping headcount ranges.
+  A requested funding stage describes current status: check for a later round,
+  acquisition or IPO before treating a historical financing as a stage match.
 - Corroborate facts across credible sources for the same identified project.
   A recent announcement or substantive progress update can establish activity
   within the requested window; drawings, specifications or another project
@@ -275,7 +277,8 @@ while repeatedly starting new country searches.
 `results.json.request` is the authoritative normalized ICP. Check decisions
 against it, not an earlier candidate's band or a rewritten interpretation.
 Do not turn a service area into an office requirement or a preferred signal
-into a requirement. Use the HarvestAPI LinkedIn `employee_range` for company-size
+into a requirement. Company geography does not restrict contact location unless
+the user requests it. Use the HarvestAPI LinkedIn `employee_range` for company-size
 decisions, retaining field evidence. Full containment in `request.icp.company_size`
 passes; no overlap fails; partial overlap stays unknown. Member counts and other
 providers' estimates do not override LinkedIn's range. Require a HarvestAPI-sourced

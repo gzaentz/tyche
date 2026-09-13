@@ -1446,7 +1446,9 @@ unverified optional values as empty cells rather than placeholder text.
   One signal will often take three sentences and two signals five; these are
   examples, not sentence-count requirements. Combine related evidence naturally,
   and do not repeat one event just because it has multiple sources or labels.
-  Focus on the company's activity, not a pitch for our product. Keep inferred
+  When the ICP product/service describes the target company's offering, connect
+  the signals to that offering and its operations, not an imagined external
+  purchase. Focus on the company's activity, not a pitch for our product. Keep inferred
   needs conditional and material uncertainty clear; do not invent urgency,
   purchasing intent or an event date from an observation date. Use `Signals` for
   source URLs and evidence details, not labels such as "Required:" or "Bonus:"

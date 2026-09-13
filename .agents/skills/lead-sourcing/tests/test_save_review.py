@@ -155,6 +155,30 @@ class SaveReviewTests(unittest.TestCase):
         self.assertEqual(saved["summary"]["unresolved_rows"], 1)
         self.assertEqual(saved["summary"]["rejected_rows"], 2)
 
+    def test_account_demotion_retires_unsent_contact_work_but_keeps_recovery(self):
+        self.attempt()
+        doc = json.loads(self.path.read_text())
+        doc["stop_check"]["next_actions"] = [
+            dict(fixtures.action("stale-email", scope="builder.example"), phase="email_validation"),
+            dict(fixtures.action("pending-contact", scope="builder.example"), phase="contact_verification"),
+            dict(fixtures.action("other-company", scope="untouched.example"), phase="account_verification")]
+        doc["stop_audit"]["route_frontier"].append({"route_id": "pending-contact", "scope": "builder.example",
+            "state": "untried", "phase": "contact_verification", "provider": "public_web", "operation": "search",
+            "request_summary": "Previously planned profile check", "reason": "Pending source", "approach": "profile"})
+        self.path.write_text(json.dumps(doc))
+        ledger = self.path.with_suffix(".json.budget.json").read_bytes()
+        receipt = (self.path.parent / "receipts/review-source.json").read_bytes()
+        result = runner.save_review(self.path, {"companies": [{"state": "unresolved", "row": company("builder.example")}],
+            "next_actions": [dict(fixtures.action("stale-finder", scope="builder.example"), phase="contact_discovery"),
+                             dict(fixtures.action("new-account-evidence", scope="builder.example"), phase="account_verification")]})
+        self.assertEqual({a["id"] for a in result["next_actions"]},
+                         {"pending-contact", "new-account-evidence", "other-company"})
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved["stop_audit"]["route_frontier"], doc["stop_audit"]["route_frontier"])
+        self.assertEqual(saved["routes"], doc["routes"])
+        self.assertEqual(self.path.with_suffix(".json.budget.json").read_bytes(), ledger)
+        self.assertEqual((self.path.parent / "receipts/review-source.json").read_bytes(), receipt)
+
     def test_size_is_checked_against_saved_icp_for_passes_and_rejections(self):
         for count, size_status, error in ((3, "pass", False), (3, "fail", True),
                                          (201, "pass", True), (201, "fail", False),

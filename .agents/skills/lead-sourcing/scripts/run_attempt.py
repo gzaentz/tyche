@@ -160,6 +160,14 @@ def save_review(run_file, review):
         # follow-ups. Explicit new actions below can reopen a concrete source.
         actions[:] = [a for a in actions if a["id"] not in closed | supplied_ids
                       and (a["id"] in active_ids or a.get("scope") not in reviewed_scopes & (parked | terminal))] + copy.deepcopy(supplied)
+        account_pending = {_company_key(row) for state in ("unresolved", "rejected")
+                           for row in document.get(state, []) if row.get("stage") == "account"} & changed
+        planned_ids = {row["route_id"] for row in document["stop_audit"]["route_frontier"]}
+        # A downgraded account needs evidence first. Preserve dispatched work
+        # for recovery; retire only speculative contact steps that cannot run.
+        actions[:] = [a for a in actions if a["id"] in planned_ids
+                      or a.get("scope") not in account_pending
+                      or a.get("phase") not in {"contact_discovery", "contact_verification", "email_validation"}]
         refresh(document)
         problems = budget_guard.audit_ledger(run_file, document)
         if problems:
@@ -425,6 +433,17 @@ def run_batch(run_file, specs, *, execute=None, plan_only=False):
             "stop_decision": evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))}
 
 
+def _harvest_display(value):
+    """Hide media and sidebar suggestions from stdout, never from receipts."""
+    omitted = {"similarOrganizations", "logo", "logos", "backgroundCover",
+               "backgroundCovers", "profilePicture", "coverPicture", "photo"}
+    if isinstance(value, dict):
+        return {key: _harvest_display(item) for key, item in value.items() if key not in omitted}
+    if isinstance(value, list):
+        return [_harvest_display(item) for item in value]
+    return value
+
+
 def cli_output(result):
     """Trim repeated audit metadata only from stdout; saved receipts stay complete."""
     output = {k: v for k, v in result.items() if k != "progress_before"}
@@ -435,6 +454,11 @@ def cli_output(result):
                 if k not in {"progress_before", "accepted_before", "request_fingerprint", "attempt", "provider_response"}}
         if "results" in body and body.get("evidence") == body["results"]:
             body.pop("evidence", None)
+        if output.get("receipt_file") and str(body.get("tool", "")).startswith("harvestapi_"):
+            for field in ("results", "evidence"):
+                if field in body:
+                    body[field] = _harvest_display(body[field])
+            body["display_note"] = "Media and similar-company suggestions omitted; full data is in receipt_file."
         output["result"] = body
     return output
 

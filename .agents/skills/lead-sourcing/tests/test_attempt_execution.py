@@ -448,6 +448,30 @@ class AttemptExecutionTests(unittest.TestCase):
         result["result"]["evidence"] = [{"text": "Additional independent evidence"}]
         self.assertEqual(runner.cli_output(result)["result"]["evidence"], result["result"]["evidence"])
 
+    def test_harvest_display_preserves_qualification_and_contact_evidence(self):
+        row = {"name": "Example", "linkedinUrl": "https://www.linkedin.com/company/example/",
+               "employeeCountRange": {"start": 51, "end": 200},
+               "locations": [{"country": "SG", "headquarter": True}],
+               "location": {"parsed": {"city": "Singapore", "country": "Singapore"}},
+               "experience": [{"companyId": "123", "position": "CPO", "endDate": None,
+                               "description": "Leads the payment platform", "logo": "image" * 1000}],
+               "emails": [{"email": "buyer@example.org", "status": "valid", "catchAllDomain": True}],
+               "description": "Provides payment services", "similarOrganizations": [{"logo": "image" * 10000}]}
+        result = {"receipt_file": "/tmp/receipt.json", "result": {
+            "tool": "harvestapi_get_profile", "results": [row], "evidence": copy.deepcopy([row]),
+            "status": "ok", "billing": {"credits_charged": 0.1}}}
+        original = copy.deepcopy(result)
+        compact = runner.cli_output(result)
+        shown = compact["result"]["results"][0]
+        for field in ("name", "linkedinUrl", "employeeCountRange", "locations", "location", "emails", "description"):
+            self.assertEqual(shown[field], row[field])
+        self.assertEqual(shown["experience"], [{k: v for k, v in row["experience"][0].items() if k != "logo"}])
+        self.assertLess(len(json.dumps(compact)), len(json.dumps(result)) / 10)
+        self.assertEqual(compact["result"]["billing"], result["result"]["billing"])
+        self.assertEqual(result, original)
+        del result["receipt_file"]
+        self.assertEqual(runner.cli_output(result)["result"]["results"], [row])
+
     def test_records_receipt_cost_and_retires_action(self):
         result = runner.run_attempt(self.path, self.spec(paid=True), execute=self.paid_response)
         doc = json.loads(self.path.read_text())
