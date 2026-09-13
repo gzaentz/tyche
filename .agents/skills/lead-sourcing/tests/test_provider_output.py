@@ -53,6 +53,36 @@ class ProviderOutputTests(unittest.TestCase):
                 self.assertEqual(body["error_stage"], "response")
                 self.assertEqual(json.loads(path.read_text())["provider_response"]["body"]["unexpected_provider_field"], raw["unexpected_provider_field"])
 
+    def test_harvest_company_error_row_is_failure_and_preserves_charge(self):
+        for status, expected in ((404, "provider_error"), (429, "rate_limited"), (401, "auth_failed")):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                row = {"error": "Company lookup failed", "status": status}
+                raw = {"status": "completed", "toolResponse": {"rawV2": [row]},
+                       "billing": {"credits_charged": 0.03, "cost_usd": 0.003}}
+                request = {"operation": "execute", "tool": "harvestapi_get_company",
+                           "payload": {"search": "Example plc"}, "limit": 1}
+                path = Path(directory) / "response.json"
+                with mock.patch.object(self, "request", return_value=request):
+                    code, body, count = self.invoke(DEEPLINE, path, raw)
+                saved = json.loads(path.read_text())
+                self.assertEqual((code, count), (0, 1))
+                self.assertEqual(body["status"], expected)
+                self.assertEqual(body["results"], [])
+                self.assertEqual(body["evidence"], [])
+                self.assertEqual(body["error"]["message"], row["error"])
+                self.assertEqual(body["billing"], raw["billing"])
+                self.assertEqual(saved["provider_response"]["body"], raw)
+
+    def test_harvest_failure_detection_does_not_reinterpret_company_fields(self):
+        company = {"name": "Example", "linkedinUrl": "https://www.linkedin.com/company/example/",
+                   "status": 404, "error": "ordinary company metadata"}
+        for tool, row in (("harvestapi_get_company", company),
+                          ("other_provider", {"status": 404, "error": "row metadata"})):
+            with self.subTest(tool=tool):
+                body = DEEPLINE._execute_output({"toolResponse": {"rawV2": [row]}}, tool)
+                self.assertEqual(body["status"], "ok")
+                self.assertEqual(len(body["results"]), 1)
+
     def test_existing_or_unwritable_destination_prevents_dispatch(self):
         for adapter in (DEEPLINE, SCRAPINGDOG):
             with self.subTest(adapter=adapter.__name__), tempfile.TemporaryDirectory() as directory:

@@ -1449,6 +1449,16 @@ def _execute_output(
         records = _records(parsed)[:limit]
     outer_status = _envelope_status(parsed)
     selected_status = _structured_status(envelope) if structured else None
+    # Harvest's single-company endpoint can wrap its failure as a one-item
+    # result list. Recognize that exact shape without treating company fields
+    # (or other providers' row-level statuses) as route failures.
+    company_failure = None
+    if (tool == "harvestapi_get_company" and len(records) == 1
+            and isinstance(records[0], dict)
+            and set(records[0]).issubset({"error", "status"})
+            and _envelope_error(records[0]) is not None):
+        company_failure = records[0]
+        selected_status = _structured_status(company_failure)
     statuses = (outer_status, selected_status)
     status = next(
         (candidate for candidate in statuses if candidate in _FAILURE_STATUSES),
@@ -1498,7 +1508,7 @@ def _execute_output(
     evidence = records if structured else [
         normalize_evidence(record, "deepline", tool, entity_type) for record in records
     ]
-    if structured and final_status in _FAILURE_STATUSES:
+    if (structured or company_failure is not None) and final_status in _FAILURE_STATUSES:
         evidence = []
     body = {
         "status": final_status,
@@ -1511,7 +1521,7 @@ def _execute_output(
     if final_status in _FAILURE_STATUSES:
         error = _envelope_error(parsed) or (
             _envelope_error(envelope) if structured else None
-        )
+        ) or _envelope_error(company_failure)
         if error:
             body["error"] = error
     if entity_type:
