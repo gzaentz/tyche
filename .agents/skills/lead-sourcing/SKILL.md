@@ -15,33 +15,32 @@ Read [workflow rules](references/workflow-rules.md), the [input contract](refere
 and [lifecycle invariants](references/output-contract.md#lifecycle-invariants).
 Interpret the request once, separating buyer roles from hiring signals.
 Call `tyche_start` with that `request` and any authorized `max_usd`.
-Code initializes/resumes the bound run, clock, ledger and priced verification
-reserve. Defaults: one contact per company; USD 0.50 per requested lead.
+Code supplies the clock, ledger and verification reserve. Catalog prices take
+precedence over [stored planning rates](references/provider-pricing.md); receipts
+supply actual charges. Defaults: one contact/company; USD 0.50/requested lead.
 Only the user can change criteria. Never import another run or guess prices.
 Credentials and runtime paths come from the launcher.
 
-Use [native examples](references/adapter-io.md#native-tools) for inputs and evidence
-references. Ordinary research needs no shell bookkeeping or implementation-code
-reads. CLI instructions are diagnostics or compatibility for runtimes without
-native tools. Resume with `tyche_inspect()` for the saved request and pending work.
+Use [native examples](references/adapter-io.md#native-tools). Research needs no shell
+bookkeeping or implementation-code reads. CLI instructions are for diagnostics.
+Resume with `tyche_inspect()` for the saved request and pending work.
 
 ## Research loop
 
-1. **Discover.** Find fresh companies through likely signal sources; follow
-   productive sources. Select tools through [tools.md](references/tools.md).
+1. **Discover.** Find fresh companies through productive signal sources. Select tools through [tools.md](references/tools.md).
    Use `tyche_inspect(query=...)` for capabilities or `tool=...` for native schemas.
-   Lookup caches descriptions; refresh only after a schema, price or access change.
+   Descriptions are cached; refresh after schema, price or access changes.
    Pilot unproven operations/filter shapes before batching. Preserve native limits.
 2. **Check up to three companies concurrently.** Send `tyche_lookup` one to three
    `checks`: target, phase, purpose, tool and native inputs. Batch ready independent
    checks across phases without waiting to fill batches.
-   Review required fit, current stage, acquisition history and dated signals before buyer lookup;
+   Review fit, current stage, acquisitions and dated signals before buyers;
    distinguish announced, conditional, planned and completed activity. Resolve
    company LinkedIn URLs from sources before enrichment; never invent slugs.
    Apply the [qualification policy](references/workflow-rules.md#qualification-policy).
    Required unknowns stay unresolved; evidenced mismatches reject; preferred signals
    only rank. Review each preferred signal once; retain unverified gaps as unknown.
-   Save reviewed facts/dates once for `Signals` and `Intent Details` before contacts.
+   Reuse reviewed facts/dates in `Signals` and `Intent Details`.
    Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
    Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size):
    accepted contacts need country; companies need published employee range and source.
@@ -49,11 +48,11 @@ native tools. Resume with `tyche_inspect()` for the saved request and pending wo
    decisions and selected evidence `ref` values. Explicitly review each used source
    in `sources`, with its reason and continuation/exhaustion decision. For built-in
    web tools, include the actual observed response in `web` in the same call.
-   This records an observation; it cannot execute or independently capture the browser.
+   This records observations, not browser execution.
    Save gaps/rejections immediately and qualified leads promptly. `review_due`
-   identifies outstanding reviews. After two comparable attempts within one company
-   and phase without verified progress, change strategy. Reopen evidence for a
-   specific gap or contradiction; independent profile/email checks remain eligible.
+   identifies outstanding reviews. After two comparable attempts per company/phase without verified progress,
+   change strategy. Reopen evidence for gaps/contradictions; independent
+   profile/email checks remain eligible.
 
 Use `tyche_inspect(ref=..., field=...)` for detail, `target=...` for company state,
 or `recover=...` to record a saved normalized receipt without redispatch.
@@ -61,6 +60,10 @@ Missing responses require reconciliation; never repeat an uncertain paid call.
 Never read the worker's live launcher log; it repeats history.
 
 Continue useful affordable work; report checkpoints. Respect user pauses.
+On `operationally_blocked`, save judgments and report its status file. Stop
+discovery/finalization loops; resume after repair with the same ledger. Do not
+reject companies or claim exhaustion because a service failed. Thirty minutes
+is a benchmark target unless the user sets a deadline.
 
 ## Authorization
 
@@ -75,9 +78,9 @@ only for eligible failures or catch-all/unknown. Never override a hard negative.
 
 ## Delivery
 
-Call `tyche_finish(commentary=...)` with reviewed assumptions, caveats and route-choice
-reasoning. Code validates, exports, checks and delivers `report.md`, `results.json`
-and `leads.xlsx`, plus a preview and validation receipt. Review sources and recover
+Call `tyche_finish(commentary=...)` with assumptions, caveats and route reasoning.
+Code validates, exports and checks `report.md`, `results.json`, `leads.xlsx`,
+a preview and validation receipt. Review sources and recover
 pending verification; unused research may remain at target. Never force completion.
 Inspect the preview. Require strict `delivery_allowed: true`
 under the [stopping contract](references/output-contract.md#stopping-check).
@@ -90,7 +93,7 @@ model, combined and per-lead costs; label estimates and unknowns.
 
 ## References
 
-Load details only when their fields are needed:
+Load details as needed:
 
 - Evidence: [semantics](references/output-contract.md#semantic-checks),
   [source attribution](references/output-contract.md#accepted-lead-sources),

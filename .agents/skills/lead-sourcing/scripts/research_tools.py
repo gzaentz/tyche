@@ -15,6 +15,7 @@ import budget_guard as budget
 import deepline
 import email_receipts
 import research_input
+import provider_pricing
 import run_attempt as runner
 import scrapingdog
 
@@ -47,12 +48,16 @@ WEB = obj({"target": STRING, "purpose": STRING, "query": STRING,
     "response": OBJECT}, ("target", "purpose", "query", "response"))
 SOURCE = obj({"ref": REFERENCE, "state": {"enum": ["exhausted", "continuable", "blocked"]},
     "reason": STRING, "continuations": {"type": "array", "items": REFERENCE}}, ("ref", "state", "reason"))
+class OperationalBlock(ValueError):
+    """A saved provider/setup failure, distinct from correctable research inputs."""
+
+
 TOOLS = {
-    "tyche_start": ("Interpret the ICP once; initialize the bound run before other tools. Supply contact_role_groups or requested_roles; with groups, omit the duplicate requested_roles list and code derives their union. Set max_usd to the approved dollar cap; code supplies default provider credits. Explicit provider caps remain binding. Repeating the same request resumes without resetting spending. Email verification is priced automatically when the catalog supplies a rate.",
+    "tyche_start": ("Interpret the ICP once; initialize the bound run before other tools. Supply contact_role_groups or requested_roles; with groups, omit the duplicate requested_roles list and code derives their union. Set max_usd to the approved dollar cap; code supplies default provider credits. Explicit provider caps remain binding. Repeating the same request resumes without resetting spending. Email verification reserve is calculated automatically; omit verification_reserve_credits for ordinary runs.",
         obj({"request": OBJECT, "max_usd": {"type": "number", "minimum": 0},
              "verification_reserve_credits": {"type": "number", "minimum": 0},
              "scrapingdog_usd_per_credit": {"type": "number", "exclusiveMinimum": 0}}, ("request",))),
-    "tyche_lookup": ("Execute 1–3 independent research choices, at most one check per company in a batch. Run discovery pilots singly. Choose the target, phase, tool and native inputs. Schemas, pricing, receipts and IDs are managed here. Use inspect(query=...) to find a capability. Never retry an uncertain paid call; inspect(recover=reference) records its saved response without dispatch. max_cost_credits is only a verified whole-call bound for pricing the catalog cannot express.",
+    "tyche_lookup": ("Execute 1–3 independent research choices, at most one check per company in a batch. Run discovery pilots singly. Choose the target, phase, tool and native inputs. Schemas, pricing, receipts and IDs are managed here. operationally_blocked means save remaining judgments and report the blocker; more discovery or finalization cannot repair it. Use inspect(query=...) to find a capability. Never retry an uncertain paid call; inspect(recover=reference) records its saved response without dispatch. max_cost_credits is only a verified whole-call bound for pricing the catalog cannot express.",
         obj({"checks": {"type": "array", "items": CHECK, "minItems": 1, "maxItems": 3}}, ("checks",))),
     "tyche_review": ("Save judgments and changed fields only. With a Harvest ref, omit receipt-owned names, URLs, size/location fields and their evidence; code supplies them. Company example: {ref, industry, sub_industry, description}. Contact example: {ref, requested_role, role_match, role_group}. Evidence normally needs only {ref} to reuse saved URL, text and date; override text/date only when source interpretation requires it. Select an email validation result with email_ref to supply its exact address and verdict. Never infer a rejection from missing evidence. Include observed web results and reference them as web:0:0. Review source continuation/exhaustion explicitly with sources; saving a fact does not exhaust a source.",
         obj({"companies": {"type": "array", "items": COMPANY}, "web": {"type": "array", "items": WEB},
@@ -61,7 +66,7 @@ TOOLS = {
         obj({"target": STRING, "ref": REFERENCE, "field": STRING, "tool": STRING, "query": STRING,
              "recover": REFERENCE, "offset": {"type": "integer", "minimum": 0},
              "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 10}, "refresh": {"type": "boolean"}})),
-    "tyche_finish": ("After reviewing evidence and writing, save report commentary and run the existing strict validator and workbook exporter. Returns artifact paths or specific unresolved problems. Final run-only costs are refreshed by the launcher when model usage closes.",
+    "tyche_finish": ("After reviewing evidence and writing, save report commentary and run the existing strict validator and workbook exporter. Returns artifact paths, specific unresolved research problems, or a saved operationally_blocked result without exporting an incomplete workbook. Final run-only costs are refreshed by the launcher when model usage closes.",
         obj({"commentary": STRING})),
 }
 
@@ -132,7 +137,10 @@ class ResearchTools:
         validate(arguments, TOOLS[name][1])
         if self.readonly and (name != "tyche_inspect" or any(k in arguments for k in ("tool", "query", "recover"))):
             raise ValueError("This read-only startup check cannot research or change a run")
-        return getattr(self, name.removeprefix("tyche_"))(**arguments)
+        try:
+            return getattr(self, name.removeprefix("tyche_"))(**arguments)
+        except OperationalBlock as exc:
+            return self._blocked_result(exc)
 
     def _execute(self, request, capture):
         with self._dispatch_slots:
@@ -158,36 +166,64 @@ class ResearchTools:
                 body = result["result"]
             matches = [r for r in body.get("results", []) if tool in {r.get("toolId"), r.get("id"), r.get("tool")}]
             if body.get("status") != "ok" or len(matches) != 1:
-                raise ValueError("Tool description unavailable: " + tool)
-            return matches[0]
+                error = OperationalBlock if tool in {"harvestapi_get_company", "harvestapi_get_profile"} else ValueError
+                raise error("Tool description unavailable: " + tool)
+            contract = matches[0]
+            if tool in {"harvestapi_get_company", "harvestapi_get_profile"} and (
+                    contract.get("disabled") or contract.get("connected") is False or contract.get("callable") is False):
+                raise OperationalBlock(tool + ": required tool is unavailable; restore access and refresh its description.")
+            return contract
 
-    @staticmethod
-    def _price(contract, inputs, override=None):
-        pricing = contract.get("pricing", {})
-        rate, unit = pricing.get("creditsPerUnit"), pricing.get("unit")
-        fields = {f["name"]: f for f in contract.get("inputSchema", {}).get("fields", [])}
-        quantity = None
-        if unit in ("call", "request"):
-            quantity = 1
-        elif unit == "page" and "page" in fields and not any(k in fields for k in ("pages", "maxPages", "max_pages")):
-            quantity = 1  # A page number chooses one page, not that many pages.
-        elif unit == "result":
-            if "limit" in fields:
-                quantity = inputs.get("limit", fields["limit"].get("default"))
-            elif contract.get("toolId", contract.get("id")) in {
-                    "zerobounce_validate", "bounceban_verify_single", "hunter_email_finder", "datagma_find_email"}:
-                quantity = 1
-        bound = None
-        if rate is not None and type(quantity) is int and quantity > 0:
-            bound = budget.amount(rate, "catalog price") * quantity
-        if override is not None:
-            supplied = budget.amount(override, "verified whole-call price bound")
-            if bound is not None and supplied < bound:
-                raise ValueError("Supplied price bound is below the catalog-derived whole-call cost")
-            return float(supplied)
-        if bound is None:
-            raise ValueError("Catalog cannot establish a whole-call price bound; inspect this tool and supply max_cost_credits only from verified pricing. No paid call was made.")
-        return float(bound)
+    _price = staticmethod(provider_pricing.call_credits)
+
+    def _operational_block(self):
+        """Derive service blocks from saved receipts/ledger, never company fit."""
+        if not self.path.exists():
+            return None
+        document = self._document()
+        ledger = budget.load_ledger(self.path)
+        if ledger.get("blocked"):
+            return ledger["blocked"]
+        # Email failures retain the existing eligible fallback path. A failed
+        # mandatory LinkedIn service cannot be replaced by more discovery.
+        for tool in ("harvestapi_get_company", "harvestapi_get_profile"):
+            route = next((r for r in reversed(document["routes"]) if r.get("tool") == tool), None)
+            if not route:
+                continue
+            status = route.get("provider_status")
+            if status in {"auth_failed", "quota_exceeded"}:
+                return f"{tool}: {status}; inspect the saved receipt {route['route_id']} and restore provider access."
+            if route.get("operation") == "describe" and status == "ok":
+                body = runner.read_receipt(self.path, route["route_id"])["result"]
+                contract = next((r for r in body.get("results", []) if r.get("toolId", r.get("id")) == tool), {})
+                if contract.get("disabled") or contract.get("connected") is False or contract.get("callable") is False:
+                    return f"{tool}: required tool is unavailable; restore provider access and refresh its description."
+                try:
+                    self._price(contract, {"main": "true"} if tool == "harvestapi_get_profile" else {})
+                except ValueError as exc:
+                    return f"{tool}: {exc}"
+        return None
+
+    def _clear_operational_status(self):
+        path = self.path.parent / "operational-status.json"
+        if path.exists() and not self._operational_block():
+            with budget.transaction(path) as saved:
+                saved.clear()
+                saved.update(status="ready", run_file=str(self.path), delivery_allowed=False)
+
+    def _blocked_result(self, reason):
+        result = {"status": "operationally_blocked", "delivery_allowed": False, "reason": str(reason),
+                  "run_file": str(self.path), "resume": "Preserve this run and its ledger. Save any remaining judgments, then report the blocker to the monitor. Resume after pricing/access is repaired; refresh the affected free description. Do not repeat uncertain paid calls, reject companies, or claim exhausted research to close an operational failure."}
+        if self.path.exists():
+            document = self._document()
+            result.update(summary=document.get("summary", {}), costs=runner.calculate_cost_summary(document))
+        path = self.path.parent / "operational-status.json"
+        result["status_file"] = str(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with budget.transaction(path) as saved:
+            saved.clear()
+            saved.update(result)
+        return result
 
     def start(self, request, **options):
         with self._catalog_lock:
@@ -195,6 +231,10 @@ class ResearchTools:
             research_input.normalize_request(request, self.path)
             if self.path.exists():
                 runner.start_run(self.path, {"request": request, **options})
+                blocker = self._operational_block()
+                if blocker:
+                    return self._blocked_result(blocker)
+                self._clear_operational_status()
                 return self.inspect()
             ledger_file = self.path.with_name(self.path.name + ".budget.json")
             original = budget.read_object(ledger_file).get("initial_started_at") if ledger_file.exists() else None
@@ -220,6 +260,7 @@ class ResearchTools:
                         capture(response["provider_response"])
                     return copy.deepcopy(response), 0
                 runner.run_lookup(self.path, {"request": {"operation": "describe", "tool": tool}}, execute=replay)
+            self._clear_operational_status()
             return self.inspect()
 
     def _startup_price(self, tool, filename, inputs, started_at):
@@ -252,11 +293,16 @@ class ResearchTools:
         try:
             return response, price(response)
         except ValueError as exc:
-            raise ValueError("Required verification price unavailable for " + tool + ": " + str(exc) +
+            raise OperationalBlock("Required verification price unavailable for " + tool + ": " + str(exc) +
                 " No paid research has started. Report this prerequisite to the monitor; do not guess a price, "
                 "research replacement companies, or try to finalize an uninitialized run.") from exc
 
     def lookup(self, checks):
+        if not self.path.exists():
+            return self.inspect()
+        blocker = self._operational_block()
+        if blocker:
+            return self._blocked_result(blocker)
         specs = []
         for item in checks:
             provider = item.get("provider", "deepline")
@@ -266,7 +312,12 @@ class ResearchTools:
                 contract = self._description(item.get("tool"))
                 request = {"operation": "execute", "tool": item["tool"], "payload": item["inputs"]}
                 research_input.check_tool_contract({"results": [contract]}, request)
-                cost = self._price(contract, item["inputs"], item.get("max_cost_credits"))
+                try:
+                    cost = self._price(contract, item["inputs"], item.get("max_cost_credits"))
+                except ValueError as exc:
+                    if item["tool"] == "harvestapi_get_company" or provider_pricing.profile_price(contract, item["inputs"]):
+                        raise OperationalBlock(item["tool"] + ": " + str(exc)) from exc
+                    raise
             else:
                 request = item["inputs"]
                 if "max_cost_credits" not in item:
@@ -274,13 +325,21 @@ class ResearchTools:
                 cost = item["max_cost_credits"]
             spec = dict(provider=provider, scope=item["target"], phase=item["phase"], purpose=item["purpose"],
                         request=request, max_cost_credits=cost)
+            if provider == "deepline" and contract.get("pricing", {}).get("creditsPerUnit") is None:
+                stored = provider_pricing.profile_price(contract, item["inputs"])
+                if stored:
+                    spec["pricing_basis"] = copy.deepcopy(stored)
             for field in ("approach", "status_read"):
                 if field in item:
                     spec[field] = item[field]
             specs.append(spec)
         result = runner.run_lookup(self.path, specs if len(specs) > 1 else specs[0], execute=self._execute)
         attempts = result.get("attempts", [result])
-        return {"lookups": [self._lookup_view(a) for a in attempts], "progress": self._overview()}
+        output = {"lookups": [self._lookup_view(a) for a in attempts], "progress": self._overview()}
+        blocker = self._operational_block()
+        if blocker:
+            output.update(self._blocked_result(blocker))
+        return output
 
     def _lookup_view(self, attempt, offset=0, limit=10):
         body = attempt.get("result", {})
@@ -325,6 +384,8 @@ class ResearchTools:
         keys = ("toolId", "id", "description", "inputSchema", "pricing", "connected", "callable",
                 "disabled", "disabledReason", "asyncGetAction", "asyncFlow", "defaultExecutionMode")
         view = {k: contract[k] for k in keys if k in contract}
+        if contract.get("toolId", contract.get("id")) == "harvestapi_get_profile":
+            view["stored_planning_prices"] = provider_pricing.PROFILE_PRICES
         output = contract.get("outputSchema")
         view["output_fields"] = output.get("fields", []) if isinstance(output, dict) else []
         return view
@@ -571,7 +632,7 @@ class ResearchTools:
                 "budget": {"cap_usd": ledger["usd_limit"], "costs": totals, "blocked": ledger.get("blocked")},
                 "pending": pending[:12],
                 "review_due": runner.review_reminder(document), "stop": decision["decision"], "errors": decision["errors"],
-                "blocked_actions": decision.get("blocked_actions", {})}
+                "blocked_actions": decision.get("blocked_actions", {}), "operational_block": self._operational_block()}
 
     def inspect(self, target=None, ref=None, field=None, tool=None, query=None, recover=None, offset=0, limit=10, refresh=False):
         if sum(v is not None for v in (target, ref, tool, query, recover)) > 1:
@@ -579,9 +640,13 @@ class ResearchTools:
         if refresh and not tool:
             raise ValueError("refresh applies only to a selected tool description")
         if not self.path.exists():
+            status = self.path.parent / "operational-status.json"
+            if status.exists():
+                return budget.read_object(status)
             return {"status": "not_started", "next": "Use tyche_start with the interpreted request"}
         if tool:
             contract = self._description(tool, refresh=refresh)
+            self._clear_operational_status()
             return {"tool": compact(self._field(contract, field)) if field else self._description_view(contract)}
         if query:
             result = runner.run_lookup(self.path, {"request": {"operation": "search", "query": query}}, execute=self._execute)
@@ -635,6 +700,11 @@ class ResearchTools:
             return self._finish(commentary)
 
     def _finish(self, commentary):
+        if not self.path.exists():
+            return self.inspect()
+        blocker = self._operational_block()
+        if blocker:
+            return self._blocked_result(blocker)
         if commentary is not None or not (self.path.parent / "research-commentary.md").exists():
             commentary = commentary or "No additional research commentary supplied."
             (self.path.parent / "research-commentary.md").write_text(commentary + "\n", encoding="utf-8")

@@ -190,7 +190,7 @@ def normalize_provider_request(provider, request, label):
 def prepare_lookup(value, label="lookup"):
     """The agent selects target, purpose and request; derive bookkeeping only."""
     object_fields(value, {"provider", "request", "scope", "phase", "purpose", "approach",
-                          "max_cost_credits", "status_read"}, label)
+                          "max_cost_credits", "status_read", "pricing_basis"}, label)
     provider = value.get("provider", "deepline")
     _, request = normalize_provider_request(provider, value.get("request"), label)
     catalog = provider == "deepline" and request.get("operation") in {"search", "describe"}
@@ -203,6 +203,8 @@ def prepare_lookup(value, label="lookup"):
         provider=provider, paid_calls=int(paid), cost_upper_bound_credits=value.get("max_cost_credits") if paid else 0)
     if "status_read" in value:
         action["status_read"] = value["status_read"]
+    if "pricing_basis" in value:
+        action["pricing_basis"] = copy.deepcopy(value["pricing_basis"])
     return {"action": action, "request": request}
 
 

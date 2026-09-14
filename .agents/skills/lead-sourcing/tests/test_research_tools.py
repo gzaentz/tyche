@@ -119,14 +119,21 @@ class ResearchToolTests(unittest.TestCase):
                     "displayText": "Calculated after execution from returned usage."}
             return body, code
         self.tools.execute = catalog
-        with self.assertRaisesRegex(ValueError, "harvestapi_get_profile.*No paid research has started"):
-            self.start()
+        with patch("provider_pricing.profile_price", return_value=None):
+            result = self.start()
+        self.assertEqual(result["status"], "operationally_blocked")
+        self.assertIn("harvestapi_get_profile", result["reason"])
+        self.assertFalse(result["delivery_allowed"])
+        self.assertEqual(self.tools.inspect()["status"], "operationally_blocked")
+        self.assertEqual(self.tools.finish()["status"], "operationally_blocked")
+        self.assertEqual(self.lookup()["status"], "operationally_blocked")
         original = json.loads((self.path.parent / "profile-tool.json").read_text())
         self.assertFalse(self.path.exists())
         self.assertFalse(self.path.with_name(self.path.name + ".budget.json").exists())
         self.assertTrue(all(r["operation"] == "describe" for r in self.provider.requests))
         available = True
-        self.start()
+        with patch("provider_pricing.profile_price", return_value=None):
+            self.start()
         self.assertEqual(json.loads(self.path.read_text())["stop_check"]["started_at"], original["started_at"])
         self.assertEqual(len(list(self.path.parent.glob("profile-tool-*.json"))), 1)
         self.assertFalse(budget.load_ledger(self.path)["calls"])
@@ -141,10 +148,83 @@ class ResearchToolTests(unittest.TestCase):
             body["results"][0]["connected"] = False
             return body, code
         self.tools.execute = unavailable
-        with self.assertRaisesRegex(ValueError, "harvestapi_get_company.*required tool is unavailable"):
-            self.start()
+        result = self.start()
+        self.assertEqual(result["status"], "operationally_blocked")
+        self.assertIn("required tool is unavailable", result["reason"])
         self.assertFalse(self.path.exists())
         self.assertTrue(all(r["operation"] == "describe" for r in self.provider.requests))
+
+    def test_stored_profile_price_starts_and_records_actual_billing_and_provenance(self):
+        self.provider.rate = .03
+        def catalog(request, capture):
+            body, code = self.provider(request, capture)
+            if request.get("tool") == "harvestapi_get_profile" and request["operation"] == "describe":
+                contract = body["results"][0]
+                contract["pricing"] = {"unit": "usage", "creditsPerUnit": None}
+                contract["inputSchema"]["jsonSchema"]["properties"]["main"] = {"type": "string"}
+            return body, code
+        self.tools.execute = catalog
+        self.start()
+        profile = check(tool="harvestapi_get_profile", inputs={"url": "https://www.linkedin.com/in/example", "main": "true"})
+        result = self.lookup(profile)
+        rid = result["lookups"][0]["route"]
+        receipt = runner.read_receipt(self.path, rid)["result"]
+        self.assertEqual(receipt["attempt"]["action"]["pricing_basis"]["basis"], "measured_planning_price")
+        charge = budget.load_ledger(self.path)["calls"][rid]
+        self.assertEqual(float(charge["maximum_credits"]), .03)
+        self.assertEqual(float(charge["actual_credits"]), .03)
+        self.assertEqual(budget.audit_ledger(self.path, json.loads(self.path.read_text())), [])
+        # A changed actual price must be preserved, block new spending and
+        # report the failure without trying to export or reset its ledger.
+        self.provider.rate = .04
+        result = self.lookup(check("second.test", tool="harvestapi_get_profile",
+            inputs={"url": "https://www.linkedin.com/in/second", "main": "true"}))
+        self.assertEqual(result["status"], "operationally_blocked")
+        charge = budget.load_ledger(self.path)["calls"][result["lookups"][0]["route"]]
+        self.assertEqual(float(charge["actual_credits"]), .04)
+        before = len(self.provider.requests)
+        self.assertEqual(self.lookup(check("third.test"))["status"], "operationally_blocked")
+        self.assertEqual(len(self.provider.requests), before)
+
+    def test_profile_planning_rates_are_option_specific_and_catalog_wins(self):
+        contract = {"toolId": "harvestapi_get_profile", "pricing": {"unit": "usage", "creditsPerUnit": None}}
+        inputs = {"url": "https://www.linkedin.com/in/example"}
+        self.assertEqual(self.tools._price(contract, inputs), .05)
+        self.assertEqual(self.tools._price(contract, dict(inputs, main="true")), .03)
+        for extra in ({"findEmail": "true"}, {"findEmail": "false"}, {"skipSmtp": "true"},
+                      {"includeAboutProfile": "true"}, {"main": "false"}, {"main": True}, {"newAddon": "true"}):
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, "No whole-call price"):
+                self.tools._price(contract, dict(inputs, **extra))
+        contract["pricing"] = {"unit": "call", "creditsPerUnit": .08}
+        self.assertEqual(self.tools._price(contract, dict(inputs, main="true")), .08)
+        contract["pricing"] = {"unit": "usage", "creditsPerUnit": .08}
+        with self.assertRaisesRegex(ValueError, "No whole-call price"):
+            self.tools._price(contract, inputs)
+
+    def test_required_auth_failure_blocks_discovery_without_rejecting_companies(self):
+        self.start()
+        self.provider.raw = {"error": "unauthorized API key"}
+        result = self.lookup()
+        self.assertEqual(result["status"], "operationally_blocked")
+        self.assertIn("auth_failed", result["reason"])
+        self.assertEqual(json.loads(self.path.read_text())["rejected"], [])
+        calls = len(self.provider.requests)
+        self.assertEqual(self.lookup(check("second.test"))["status"], "operationally_blocked")
+        self.assertEqual(len(self.provider.requests), calls)
+        ledger = budget.ledger_path(self.path).read_bytes()
+        self.tools.inspect(tool="harvestapi_get_company", refresh=True)
+        self.assertIsNone(self.tools.inspect()["operational_block"])
+        self.assertEqual(json.loads((self.path.parent / "operational-status.json").read_text())["status"], "ready")
+        self.assertEqual(budget.ledger_path(self.path).read_bytes(), ledger)
+        with self.assertRaisesRegex(ValueError, "already attempted"):
+            self.lookup()
+
+    def test_no_result_is_a_research_gap_not_an_operational_block(self):
+        self.start()
+        self.provider.raw = {"status": "ok", "element": None}
+        result = self.lookup()
+        self.assertNotIn("status", result)
+        self.assertIsNone(result["progress"]["operational_block"])
 
     def test_launcher_clock_includes_setup_and_is_preserved_on_resume(self):
         from datetime import datetime, timedelta, timezone
@@ -221,8 +301,13 @@ class ResearchToolTests(unittest.TestCase):
             "reason": "Funding remains unverified", "company": {"ref": ref}}])
         self.assertEqual(result["progress"]["budget"]["blocked"], reason)
         self.assertEqual(json.loads(self.path.read_text())["unresolved"][0]["reason_text"], "Funding remains unverified")
-        with self.assertRaisesRegex(ValueError, "reconcile pricing"):
-            self.lookup(check("another.test"))
+        blocked = self.lookup(check("another.test"))
+        self.assertEqual(blocked["status"], "operationally_blocked")
+        with patch.object(research_tools.subprocess, "run") as export:
+            self.assertEqual(self.tools.finish()["status"], "operationally_blocked")
+            export.assert_not_called()
+        self.assertFalse(blocked["delivery_allowed"])
+        self.assertEqual(json.loads(Path(blocked["status_file"]).read_text())["reason"], reason)
         self.assertEqual(len(self.provider.requests), calls)
         self.assertEqual(budget.ledger_path(self.path).read_bytes(), before)
 
@@ -380,8 +465,9 @@ class ResearchToolTests(unittest.TestCase):
     def test_failed_free_pricing_read_can_resume_without_resetting_clock(self):
         self.request["contact_fields"] = ["email"]
         self.tools.execute = lambda request, capture: ({"provider":"deepline", "operation":"describe", "status":"provider_error", "results":[]}, 2)
-        with self.assertRaisesRegex(ValueError, "price unavailable"):
-            self.start()
+        blocked = self.start()
+        self.assertEqual(blocked["status"], "operationally_blocked")
+        self.assertIn("price unavailable", blocked["reason"])
         original = json.loads((self.path.parent / "verification-tool.json").read_text())
         self.tools.execute = self.provider
         self.start()
