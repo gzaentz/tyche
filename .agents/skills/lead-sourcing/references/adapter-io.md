@@ -33,7 +33,10 @@ Lookup returns a route and result references such as `lookup-abc:0`. Inspect a
 route to see its response status/results, or select a result and `field` for
 more detail. Page a saved route with `offset`/`limit` and its returned `next_offset`;
 long text also returns `next_offset`. `tyche_inspect(tool=...)` returns cached
-native inputs/pricing and output field names. Use `field` for a specific nested
+native inputs/pricing and output field names. Catalog searches show usable tool
+summaries first; explicitly non-callable entries stay in the saved receipt. Use
+short provider or capability terms when a search has no callable matches.
+Use `field` for a specific nested
 tool, company or run field; `refresh: true` is only for a confirmed schema,
 pricing or access change. Retained receipts and execution contracts remain complete.
 

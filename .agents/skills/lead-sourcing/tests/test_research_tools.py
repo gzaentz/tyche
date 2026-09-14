@@ -398,6 +398,34 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(len([r for r in self.provider.requests if r["operation"] == "describe"]), 1)
         self.assertEqual(len(self.provider.requests), calls + 1)
 
+    def test_catalog_pages_show_usable_tools_and_keep_original_evidence_indices(self):
+        self.start()
+        rows = [{"toolId": "monitor", "callable": False, "deployCommand": "monitor setup"}] * 10
+        rows += [{"toolId": f"research_{i}", "callable": True, "description": f"Research capability {i}",
+                  "usageGuidance": "SDK material"} for i in range(12)]
+        def search(request, capture):
+            body, code = self.provider(request, capture)
+            body["results"] = copy.deepcopy(rows)
+            return body, code
+        self.tools.execute = search
+        view = self.tools.inspect(query="research")
+        rid = view["route"]
+        self.assertEqual(view["result_count"], 12)
+        self.assertEqual(view["non_callable_count"], 10)
+        self.assertEqual(view["results"][0]["ref"], f"{rid}:10")
+        self.assertNotIn("usageGuidance", view["results"][0]["facts"])
+        calls = len(self.provider.requests)
+        page = self.tools.inspect(ref=rid, offset=view["next_offset"])
+        self.assertEqual([r["ref"] for r in page["results"]], [f"{rid}:20", f"{rid}:21"])
+        self.assertIsNone(page["next_offset"])
+        self.assertEqual(self.tools.inspect(ref=f"{rid}:21")["facts"], rows[21])
+        self.assertEqual(runner.read_receipt(self.path, rid)["result"]["results"], rows)
+        self.assertEqual(len(self.provider.requests), calls)
+        rows[:] = rows[:10]
+        view = self.tools.inspect(query="no match")
+        self.assertEqual(view["results"], [])
+        self.assertIn("No callable tools matched", view["catalog_note"])
+
     def test_inspection_selects_company_and_run_fields_instead_of_ignoring_them(self):
         self.start()
         self.tools.review(companies=[{"target": "example.test", "decision": "hold_account", "reason": "Needs funding evidence",

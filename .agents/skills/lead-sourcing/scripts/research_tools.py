@@ -90,7 +90,7 @@ def validate(value, schema, path="input"):
         if number < schema.get("minimum", 0) or "exclusiveMinimum" in schema and number <= schema["exclusiveMinimum"]:
             raise ValueError(f"{path} is below its minimum")
         if "maximum" in schema and number > schema["maximum"]:
-            raise ValueError(f"{path} exceeds its maximum")
+            raise ValueError(f"{path} exceeds its maximum of {schema['maximum']}")
 
 
 def compact(value, depth=0):
@@ -261,13 +261,22 @@ class ResearchTools:
         if not rid and attempt.get("receipt_file"):
             rid = Path(attempt["receipt_file"]).stem
         rows = body.get("results", [])
+        catalog = body.get("provider") == "deepline" and body.get("operation") == "search"
+        indexed = [(i, row) for i, row in enumerate(rows)
+                   if not catalog or row.get("callable") is not False]
+        catalog_fields = ("toolId", "id", "displayName", "description", "provider", "callable", "connected", "disabled", "disabledReason")
         recorded = any(r.get("route_id") == rid for r in self._document().get("routes", [])) if rid else False
         view = {"route": rid, "status": body.get("status", "error"), "recorded": recorded,
                 "error": compact(attempt.get("error", body.get("error"))),
-                "results": [{"ref": f"{rid}:{i}", "facts": compact(runner._harvest_display(r))}
-                            for i, r in enumerate(rows[offset:offset + limit], offset)],
-                "result_count": len(rows), "next_offset": offset + limit if offset + limit < len(rows) else None,
+                "results": [{"ref": f"{rid}:{i}", "facts": compact(
+                    {k: r[k] for k in catalog_fields if k in r} if catalog else runner._harvest_display(r))}
+                            for i, r in indexed[offset:offset + limit]],
+                "result_count": len(indexed), "next_offset": offset + limit if offset + limit < len(indexed) else None,
                 "pending_verification": body.get("pending_verification")}
+        if catalog:
+            view["non_callable_count"] = len(rows) - len(indexed)
+            view["catalog_note"] = ("Choose a tool ID and inspect(tool=...) for its native inputs and pricing."
+                if indexed else "No callable tools matched. Try a short provider or capability term. Non-callable catalog entries remain saved in the receipt.")
         if recorded and body.get("status") in {"provider_error", "no_results", "partial", "timeout"}:
             view["recovery_note"] = "This outcome is already recorded. Recovering it cannot resolve unknown billing; preserve the bound until provider billing evidence is available."
         return view
