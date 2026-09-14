@@ -52,8 +52,9 @@ Example review inputs, with references selected from actual results:
  "sources":[{"ref":"lookup-source","state":"exhausted","reason":"Reviewed the complete product page"}]}
 ```
 
-Evidence refs expand into saved source/URL/date/text. Supply reviewed `text`,
-`date` and `date_basis` when interpreting an event, distinguishing announcement
+Evidence refs expand into saved source/URL/date/text. Usually use `{"ref":"..."}`
+and put the qualification judgment in its `claim`, without copying source fields
+again. Supply reviewed `text`, `date` and `date_basis` only when interpreting an event, distinguishing announcement
 from completion. `signal_evidence` also needs `signal`; qualification checks
 use the existing `criterion`, `importance`, `status`, `claim`, `evidence` contract.
 Contact-stage and delivery checks compare reviewed signal dates with the saved
@@ -63,9 +64,11 @@ saved return its reusable reference; correct the judgment without rewriting the 
 Company/profile `ref` values must select the matched Harvest getter. Add industry,
 subindustry and the two-sentence description as reviewed facts. For contacts,
 supply requested role, role match, and role group when the request uses groups.
-A later `primary_contact: {"email_ref":"lookup-validation:0"}` updates the saved
-person using the exact email verdict. Changing people requires a new profile ref;
-changing email clears the old email evidence. Backup entries are full selections.
+A later `primary_contact: {"email_ref":"lookup-validation:0"}` supplies the exact
+address and verdict from the selected validation result. An existing different
+email is a conflict; explicitly select the new email to replace it. Changing
+people requires a new profile ref; changing email clears the old email evidence.
+Backup entries are full selections.
 
 For built-in web tools, execute the chosen search/read, then send its observed
 `status` and `results` with `target`, `purpose`, `query` and `operation` under
@@ -379,7 +382,10 @@ research. Keep the same results path throughout the run.
 
 The shared cap defaults to USD 0.50 per requested lead. Supply setup `max_usd` for
 an explicit user cap, including zero. Deepline uses the configured USD 0.10 per
-credit. An enabled ScrapingDog allocation also requires
+credit. Omit `request.budget`, or supply `{"hard_stop":true}` with optional
+spending restrictions, to let code derive the default Deepline allocation from
+that cap. Explicit provider credit caps, including zero, remain binding.
+An enabled ScrapingDog allocation also requires
 `scrapingdog_usd_per_credit` from the current plan; zero allocation disables
 that provider. Existing provider and optional per-next-lead spending caps
 remain independent. Email-required runs need an explicit verification reserve,

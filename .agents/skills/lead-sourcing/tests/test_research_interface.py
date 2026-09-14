@@ -73,12 +73,43 @@ class StartRunTests(unittest.TestCase):
         variants[1]["request"]["requested_roles"] = ["Unrelated role"]
         variants[2]["request"].pop("contact_fields")
         variants[3]["request"]["budget"] = {"deepline_credits": "25", "hard_stop": True}
-        variants[4]["request"]["budget"] = {"hard_stop": True}
+        variants[4]["request"]["budget"] = {"hard_stop": False}
         for setup in variants:
             with self.subTest(setup=setup), self.assertRaises(ValueError):
                 runner.start_run(self.path, setup)
             self.assertFalse(self.path.exists())
             self.assertFalse(self.path.with_name("results.json.budget.json").exists())
+
+    def test_dollar_cap_with_partial_budget_derives_credits_and_preserves_spending(self):
+        self.setup.update(max_usd=5)
+        self.setup["request"]["budget"] = {"hard_stop": True}
+        runner.start_run(self.path, self.setup)
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved["request"]["budget"], {
+            "deepline_credits": 50, "scrapingdog_credits": 0, "hard_stop": True})
+        self.assertEqual(guard.load_ledger(self.path)["usd_limit"], "5")
+        runner.run_lookup(self.path, {"request": {"operation": "describe", "tool": "fixture-search"}}, execute=catalog)
+        runner.run_lookup(self.path, lookup(), execute=fixtures.AttemptExecutionTests().paid_response)
+        before, ledger = self.path.read_bytes(), guard.ledger_path(self.path).read_bytes()
+        runner.start_run(self.path, self.setup)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
+        with self.assertRaises(ValueError):
+            runner.start_run(self.path, {**self.setup, "max_usd": 6})
+        self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
+
+    def test_partial_budget_resumes_saved_restrictions_and_explicit_zero_stays_disabled(self):
+        self.setup["request"]["budget"] = {"hard_stop": True, "deepline_credits": 0,
+            "scrapingdog_credits": 0, "max_deepline_credits_per_next_lead": 1}
+        runner.start_run(self.path, {**self.setup, "max_usd": 5})
+        ledger = guard.ledger_path(self.path).read_bytes()
+        partial = copy.deepcopy(self.setup)
+        partial["request"]["budget"] = {"hard_stop": True}
+        runner.start_run(self.path, partial)
+        self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
+        self.assertEqual(json.loads(self.path.read_text())["request"]["budget"], self.setup["request"]["budget"])
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            guard.check_allowance(guard.load_ledger(self.path), "deepline", .1, 0)
 
     def test_explicit_contacts_cap_and_email_reserve_survive_resume(self):
         self.setup["request"].update(contacts_per_company=3, contact_fields=["email"])

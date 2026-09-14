@@ -48,13 +48,13 @@ WEB = obj({"target": STRING, "purpose": STRING, "query": STRING,
 SOURCE = obj({"ref": REFERENCE, "state": {"enum": ["exhausted", "continuable", "blocked"]},
     "reason": STRING, "continuations": {"type": "array", "items": REFERENCE}}, ("ref", "state", "reason"))
 TOOLS = {
-    "tyche_start": ("Interpret the ICP once; initialize the bound run. Repeating the same request resumes without resetting spending. Email verification is priced automatically when the catalog supplies a rate.",
+    "tyche_start": ("Interpret the ICP once; initialize the bound run before other tools. Set max_usd to the approved dollar cap; code supplies default provider credits. Explicit provider caps remain binding. Repeating the same request resumes without resetting spending. Email verification is priced automatically when the catalog supplies a rate.",
         obj({"request": OBJECT, "max_usd": {"type": "number", "minimum": 0},
              "verification_reserve_credits": {"type": "number", "minimum": 0},
              "scrapingdog_usd_per_credit": {"type": "number", "exclusiveMinimum": 0}}, ("request",))),
     "tyche_lookup": ("Execute 1–3 independent research choices, at most one check per company in a batch. Run discovery pilots singly. Choose the target, phase, tool and native inputs. Schemas, pricing, receipts and IDs are managed here. Use inspect(query=...) to find a capability. Never retry an uncertain paid call; inspect(recover=reference) records its saved response without dispatch. max_cost_credits is only a verified whole-call bound for pricing the catalog cannot express.",
         obj({"checks": {"type": "array", "items": CHECK, "minItems": 1, "maxItems": 3}}, ("checks",))),
-    "tyche_review": ("Save judgments and changed fields only. With a Harvest ref, omit receipt-owned names, URLs, size/location fields and their evidence; code supplies them. Company example: {ref, industry, sub_industry, description}. Contact example: {ref, requested_role, role_match, role_group}. Evidence objects may use {ref, text, date_basis}; select an email receipt with email_ref. Never infer a rejection from missing evidence. Include observed web results and reference them as web:0:0. Review source continuation/exhaustion explicitly with sources; saving a fact does not exhaust a source.",
+    "tyche_review": ("Save judgments and changed fields only. With a Harvest ref, omit receipt-owned names, URLs, size/location fields and their evidence; code supplies them. Company example: {ref, industry, sub_industry, description}. Contact example: {ref, requested_role, role_match, role_group}. Evidence normally needs only {ref} to reuse saved URL, text and date; override text/date only when source interpretation requires it. Select an email validation result with email_ref to supply its exact address and verdict. Never infer a rejection from missing evidence. Include observed web results and reference them as web:0:0. Review source continuation/exhaustion explicitly with sources; saving a fact does not exhaust a source.",
         obj({"companies": {"type": "array", "items": COMPANY}, "web": {"type": "array", "items": WEB},
              "sources": {"type": "array", "items": SOURCE}})),
     "tyche_inspect": ("Read compact run/company state or saved results. query searches the free capability catalog; tool returns cached inputs/pricing. Describe only capabilities needed for the next step. Use ref=route with offset/limit to page saved results, or field to select a nested field from a result, tool, company or run. recover records an unrecorded saved response without dispatch; it does not settle unknown billing. Full receipts remain on disk.",
@@ -402,9 +402,15 @@ class ResearchTools:
             contact = {**previous, **contact}
         ref = contact.pop("email_ref", None)
         if ref:
-            _, source, _ = self._resolve(ref)
+            row, source, _ = self._resolve(ref)
+            selected_email = row.get("address") or row.get("email")
+            if not isinstance(selected_email, str) or not selected_email.strip():
+                raise ValueError("Selected email result must identify an exact address")
+            if contact.get("email") and (not isinstance(contact["email"], str)
+                    or contact["email"].strip().casefold() != selected_email.strip().casefold()):
+                raise ValueError("Selected email result conflicts with the contact email; select the matching receipt or explicitly change the email")
             if not contact.get("email"):
-                raise ValueError("Select the exact work email together with email_ref")
+                contact["email"] = selected_email.strip()
             result = email_receipts.saved_result(self.path, self._document()["routes"], source, contact["email"])
             contact["email_validation"] = {**result, "source": {**source, "validator": email_receipts.validator_for_tool(source["tool"])}}
         return contact

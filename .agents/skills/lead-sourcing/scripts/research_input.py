@@ -132,16 +132,19 @@ def start_document(run_file, setup, *, existing=None, ledger=None):
     options = dict(max_usd=cap,
         scrapingdog_usd_per_credit=setup.get("scrapingdog_usd_per_credit", ledger.get("usd_per_credit", {}).get("scrapingdog")),
         verification_reserve_credits=setup.get("verification_reserve_credits", ledger.get("verification_reserve_credits")))
-    request.setdefault("budget", copy.deepcopy(existing.get("request", {}).get("budget", {
+    budget_defaults = existing.get("request", {}).get("budget", {
         "deepline_credits": float(budget_guard.amount(cap, "max_usd") / budget_guard.amount("0.10", "rate")),
-        "scrapingdog_credits": 0, "hard_stop": True})))
+        "scrapingdog_credits": 0, "hard_stop": True})
+    request.setdefault("budget", copy.deepcopy(budget_defaults))
     budget = request["budget"]
     object_fields(budget, {"deepline_credits", "scrapingdog_credits", "hard_stop", "max_paid_calls",
                            "max_deepline_credits_per_next_lead"}, "request.budget")
     if budget.get("hard_stop") is not True:
         raise ValueError("request.budget.hard_stop must be true")
     if not any(provider + "_credits" in budget for provider in budget_guard.PROVIDERS):
-        raise ValueError("request.budget must specify at least one provider credit cap")
+        # A dollar cap plus hard_stop needs the same mechanical allocation as
+        # an omitted budget. Explicit provider caps, including zero, still win.
+        budget = request["budget"] = {**copy.deepcopy(budget_defaults), **budget}
     for key, value in budget.items():
         if key == "max_paid_calls":
             budget_guard.count(value, key)

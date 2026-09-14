@@ -575,9 +575,14 @@ class ResearchToolTests(unittest.TestCase):
             "location": {"linkedinText": "Columbus, Ohio, United States", "parsed": {"city": "Columbus", "state": "Ohio", "countryFull": "United States"}}}}
         profile = self.lookup(check("example.com", phase="contact_verification", tool="harvestapi_get_profile", inputs={"url": person["linkedin_url"]}))["lookups"][0]["results"][0]["ref"]
         self.tools.review(companies=[{"target": "example.com", "decision": "hold_contact", "reason": "Validate selected work email",
-            "primary_contact": {"ref": profile, "requested_role": person["requested_role"], "role_match": "exact", "email": person["email"]}}])
+            "primary_contact": {"ref": profile, "requested_role": person["requested_role"], "role_match": "exact"}}])
         self.provider.raw = {"status": "ok", "data": {"address": person["email"], "status": "valid", "sub_status": "", "domain_is_catch_all": True}}
         verifier = self.lookup(check("example.com", phase="email_validation", tool="zerobounce_validate", inputs={"email": person["email"]}))["lookups"][0]["results"][0]["ref"]
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, "conflicts with the contact email"):
+            self.tools.review(companies=[{"target": "example.com", "decision": "accept", "reason": "Conflicting address is refused",
+                "primary_contact": {"email_ref": verifier, "email": "other@example.com"}}])
+        self.assertEqual(self.path.read_bytes(), before)
         with self.assertRaises(ValueError):
             self.lookup(check("example.com", phase="email_validation", tool="bounceban_verify_single", inputs={"email": person["email"]}))
         self.tools.review(companies=[{"target": "example.com", "decision": "accept", "reason": "Reviewed account and buyer are complete",
@@ -585,6 +590,7 @@ class ResearchToolTests(unittest.TestCase):
                           sources=[{"ref": ref, "state": "exhausted", "reason": "Selected returned evidence reviewed"}
                                    for ref in (selected, profile, verifier)])
         saved = json.loads(self.path.read_text())
+        self.assertEqual(saved["accepted"][0]["primary_contact"]["email"], person["email"])
         self.assertEqual(saved["accepted"][0]["primary_contact"]["email_validation"]["status"], "valid")
         self.assertEqual(saved["accepted"][0]["primary_contact"]["country"], "United States")
         self.assertIn("leads_ready_at", saved["stop_check"])
