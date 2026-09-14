@@ -199,41 +199,62 @@ class ResearchTools:
             ledger_file = self.path.with_name(self.path.name + ".budget.json")
             original = budget.read_object(ledger_file).get("initial_started_at") if ledger_file.exists() else None
             options["started_at"] = original or os.environ.get("TYCHE_RUN_STARTED_AT") or datetime.now(timezone.utc).isoformat()
-            # Price the single-address verification reserve before initializing.
-            # This free catalog receipt is captured before dispatch and registered
-            # into the run after initialization; retries reuse it.
-            response = None
-            if "email" in request.get("contact_fields", ["email"]) and "verification_reserve_credits" not in options:
-                from provider_output import ResponseFile
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                price_path = self.path.parent / "verification-tool.json"
-                query = {"operation": "describe", "tool": "zerobounce_validate"}
-                if price_path.exists():
-                    response = budget.read_object(price_path)
-                    options["started_at"] = original or response.get("started_at", options["started_at"])
-                    if response.get("status") != "ok":
-                        # This is a free catalog read, never a paid retry. Keep
-                        # the failed receipt and clock while allowing recovery.
-                        price_path.rename(price_path.with_name("verification-tool-" + uuid.uuid4().hex + ".json"))
-                        response = None
-                if response is None:
-                    capture = ResponseFile(price_path, deepline.redact, metadata={"started_at": options["started_at"]})
-                    response, code = self._execute(deepline._validate_request(query), capture.capture)
-                    if not capture.finish(response):
-                        raise ValueError("Verification pricing could not be saved")
-                contracts = [r for r in response.get("results", []) if r.get("toolId", r.get("id")) == query["tool"]]
-                if response.get("status") != "ok" or len(contracts) != 1:
-                    raise ValueError("Verification price unavailable; initialization has not started")
-                unit = self._price(contracts[0], {"email": "pricing@example.invalid"})
-                options["verification_reserve_credits"] = float(Decimal(str(unit)) * request["target_count"])
+            # Check mandatory verification before spending on research. The
+            # catalog receipts join the existing run ledger after initialization.
+            prepared = []
+            if "email" in request.get("contact_fields", ["email"]):
+                prepared.append(("zerobounce_validate", "verification-tool.json", {"email": "pricing@example.invalid"}))
+            prepared += [("harvestapi_get_company", "company-tool.json", {}),
+                         ("harvestapi_get_profile", "profile-tool.json", {"main": "true"})]
+            receipts = []
+            for tool, filename, inputs in prepared:
+                response, unit = self._startup_price(tool, filename, inputs, options["started_at"])
+                options["started_at"] = original or response.get("started_at", options["started_at"])
+                if tool == "zerobounce_validate" and "verification_reserve_credits" not in options:
+                    options["verification_reserve_credits"] = float(Decimal(str(unit)) * request["target_count"])
+                receipts.append((tool, response))
             runner.start_run(self.path, {"request": request, **options})
-            if response is not None:
+            for tool, response in receipts:
                 def replay(_request, capture):
                     if "provider_response" in response:
                         capture(response["provider_response"])
                     return copy.deepcopy(response), 0
-                runner.run_lookup(self.path, {"request": query}, execute=replay)
+                runner.run_lookup(self.path, {"request": {"operation": "describe", "tool": tool}}, execute=replay)
             return self.inspect()
+
+    def _startup_price(self, tool, filename, inputs, started_at):
+        from provider_output import ResponseFile
+        def price(body):
+            contracts = [r for r in body.get("results", []) if r.get("toolId", r.get("id")) == tool]
+            if body.get("status") != "ok" or len(contracts) != 1:
+                raise ValueError("catalog description unavailable")
+            contract = contracts[0]
+            if contract.get("disabled") or contract.get("callable") is False or contract.get("connected") is False:
+                raise ValueError("required tool is unavailable")
+            return self._price(contract, inputs)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        path = self.path.parent / filename
+        if path.exists():
+            response = budget.read_object(path)
+            started_at = response.get("started_at", started_at)
+            try:
+                return response, price(response)
+            except ValueError:
+                # Retry only this free catalog read, preserving the old receipt
+                # and original clock. Never reuse a failed/unpriced prerequisite.
+                path.rename(path.with_name(path.stem + "-" + uuid.uuid4().hex + ".json"))
+        query = {"operation": "describe", "tool": tool}
+        capture = ResponseFile(path, deepline.redact, metadata={"started_at": started_at})
+        response, _ = self._execute(deepline._validate_request(query), capture.capture)
+        if not capture.finish(response):
+            raise ValueError("Required verification pricing could not be saved")
+        response = budget.read_object(path)
+        try:
+            return response, price(response)
+        except ValueError as exc:
+            raise ValueError("Required verification price unavailable for " + tool + ": " + str(exc) +
+                " No paid research has started. Report this prerequisite to the monitor; do not guess a price, "
+                "research replacement companies, or try to finalize an uninitialized run.") from exc
 
     def lookup(self, checks):
         specs = []

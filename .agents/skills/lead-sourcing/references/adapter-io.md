@@ -24,6 +24,13 @@ At start, supply the LLM-selected `contact_role_groups` without repeating
 `requested_roles`; code saves their combined list. A request without groups still
 needs `requested_roles`. Explicit conflicting lists remain errors.
 
+New runs check the mandatory Harvest company/profile tools and price the email
+verification reserve through free catalog reads before initializing research.
+The saved descriptions are reused by lookups. If a required tool is unavailable
+or its price has no verified bound, report the prerequisite to the monitor and
+stop this invocation. More company searches or finalization retries cannot fix
+it. A retry refreshes failed free catalog reads while preserving the clock.
+
 `target` is the canonical company domain or `discovery`. Phases are
 `account_discovery`, `account_verification`, `contact_discovery`,
 `contact_verification`, and `email_validation`. `provider` defaults to Deepline;

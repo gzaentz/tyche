@@ -392,11 +392,9 @@ def _prepare(run_file, validated):
                     break
         audit = document.setdefault("stop_audit", {})
         frontier = audit.setdefault("route_frontier", [])
-        # Catalog refreshes can repeat after new substantive work, not in a loop.
-        recent = frontier
-        if action.get("entity_type") == "tool_catalog":
-            last = max((i for i, r in enumerate(frontier) if r.get("entity_type") != "tool_catalog"), default=-1)
-            recent = frontier[last + 1:]
+        # An explicit free catalog refresh may recover a schema/price change
+        # before substantive research. Paid request deduplication is unchanged.
+        recent = [] if provider == "deepline" and operation in {"search", "describe"} else frontier
         matches = [r for r in recent if r.get("request_fingerprint") == fingerprint]
         if matches:
             previous = next((r for r in document.get("routes", [])

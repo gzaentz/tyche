@@ -87,7 +87,7 @@ class ResearchToolTests(unittest.TestCase):
         ref = result["lookups"][0]["results"][0]["ref"]
         self.assertEqual(self.tools.inspect(ref=ref)["facts"]["employee_range"], "51-200")
         self.lookup(check("another.test"))
-        self.assertEqual(len([r for r in self.provider.requests if r["operation"] == "describe"]), 1)
+        self.assertEqual(len([r for r in self.provider.requests if r["operation"] == "describe"]), 2)
         ledger = budget.ledger_path(self.path).read_bytes()
         self.start()
         self.assertEqual(budget.ledger_path(self.path).read_bytes(), ledger)
@@ -101,7 +101,50 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(float(budget.load_ledger(self.path)["verification_reserve_credits"]), 1)
         self.tools.inspect(tool="zerobounce_validate")
         self.start()
-        self.assertEqual(len(self.provider.requests), 1)
+        self.assertEqual(len(self.provider.requests), 3)
+
+    def test_explicit_verification_reserve_keeps_prerequisite_check(self):
+        self.request["contact_fields"] = ["email"]
+        self.start(verification_reserve_credits=.4)
+        self.assertEqual(float(budget.load_ledger(self.path)["verification_reserve_credits"]), .4)
+        self.assertEqual({r["tool"] for r in self.provider.requests},
+                         {"zerobounce_validate", "harvestapi_get_company", "harvestapi_get_profile"})
+
+    def test_unpriced_mandatory_profile_stops_before_research_and_recovers_free(self):
+        available = False
+        def catalog(request, capture):
+            body, code = self.provider(request, capture)
+            if request.get("tool") == "harvestapi_get_profile" and not available:
+                body["results"][0]["pricing"] = {"unit": "usage", "creditsPerUnit": None,
+                    "displayText": "Calculated after execution from returned usage."}
+            return body, code
+        self.tools.execute = catalog
+        with self.assertRaisesRegex(ValueError, "harvestapi_get_profile.*No paid research has started"):
+            self.start()
+        original = json.loads((self.path.parent / "profile-tool.json").read_text())
+        self.assertFalse(self.path.exists())
+        self.assertFalse(self.path.with_name(self.path.name + ".budget.json").exists())
+        self.assertTrue(all(r["operation"] == "describe" for r in self.provider.requests))
+        available = True
+        self.start()
+        self.assertEqual(json.loads(self.path.read_text())["stop_check"]["started_at"], original["started_at"])
+        self.assertEqual(len(list(self.path.parent.glob("profile-tool-*.json"))), 1)
+        self.assertFalse(budget.load_ledger(self.path)["calls"])
+        before = len(self.provider.requests)
+        self.tools.inspect(tool="harvestapi_get_profile")
+        self.start()
+        self.assertEqual(len(self.provider.requests), before)
+
+    def test_unavailable_required_company_tool_stops_before_research(self):
+        def unavailable(request, capture):
+            body, code = self.provider(request, capture)
+            body["results"][0]["connected"] = False
+            return body, code
+        self.tools.execute = unavailable
+        with self.assertRaisesRegex(ValueError, "harvestapi_get_company.*required tool is unavailable"):
+            self.start()
+        self.assertFalse(self.path.exists())
+        self.assertTrue(all(r["operation"] == "describe" for r in self.provider.requests))
 
     def test_launcher_clock_includes_setup_and_is_preserved_on_resume(self):
         from datetime import datetime, timedelta, timezone
@@ -406,7 +449,7 @@ class ResearchToolTests(unittest.TestCase):
                                   "jsonSchema": {"properties": {"element": {"type": "object"}}}})
             return body, code
         self.tools.execute = annotated
-        view = self.tools.inspect(tool="harvestapi_get_company")["tool"]
+        view = self.tools.inspect(tool="harvestapi_get_company", refresh=True)["tool"]
         self.assertNotIn("usageGuidance", view)
         self.assertEqual(view["inputSchema"]["fields"][0]["name"], "url")
         self.assertEqual(view["pricing"]["creditsPerUnit"], .2)
@@ -416,7 +459,7 @@ class ResearchToolTests(unittest.TestCase):
         schema = self.tools.inspect(tool="harvestapi_get_company", field="outputSchema.jsonSchema")["tool"]
         self.assertEqual(schema["properties"]["element"]["type"], "object")
         self.lookup()
-        self.assertEqual(len([r for r in self.provider.requests if r["operation"] == "describe"]), 1)
+        self.assertEqual(len([r for r in self.provider.requests if r["operation"] == "describe"]), 3)
         self.assertEqual(len(self.provider.requests), calls + 1)
 
     def test_catalog_pages_show_usable_tools_and_keep_original_evidence_indices(self):
@@ -527,7 +570,7 @@ class ResearchToolTests(unittest.TestCase):
         before = (self.path.parent / "receipts" / (rid + ".json")).read_bytes()
         self.tools.review(companies=[company], web=[web], sources=[{"ref": "web:0", "state": "exhausted", "reason": "Page reviewed"}])
         self.assertEqual((self.path.parent / "receipts" / (rid + ".json")).read_bytes(), before)
-        self.assertEqual(len(json.loads(self.path.read_text())["routes"]), 1)
+        self.assertEqual(len([r for r in json.loads(self.path.read_text())["routes"] if r["provider"] == "public_web"]), 1)
         web["response"]["results"][0]["text"] = "Changed claim"
         with self.assertRaisesRegex(ValueError, "cannot be replaced"):
             self.tools.review(web=[web])
