@@ -270,6 +270,37 @@ class ResearchToolTests(unittest.TestCase):
         current = self.tools._evidence({"ref": route + ":1"})
         self.assertEqual(current["date_basis"], "observed_current")
 
+    def test_funding_reference_supplies_saved_date_and_text_without_manual_copy(self):
+        self.start()
+        rows = [
+            {"name": "Series B - ExamplePay", "announcedOn": "2024-11-28T00:00:00.000Z"},
+            {"name": "Undated round - ExamplePay"}]
+        self.provider.raw = {"toolResponse": {"rawV2": {"fundingRounds": rows}},
+                             "output_preview": {"kind": "list", "rowCount": len(rows), "preview": rows}}
+        results = self.lookup(check(tool="aviato_get_company_funding_rounds", inputs={"query": "example.test"}))["lookups"][0]["results"]
+        evidence = self.tools._evidence({"ref": results[0]["ref"]})
+        self.assertEqual((evidence["date"], evidence["date_basis"], evidence["text"]),
+                         ("2024-11-28", "published", "Series B - ExamplePay"))
+        with self.assertRaisesRegex(ValueError, "no publication/event date"):
+            self.tools._evidence({"ref": results[1]["ref"]})
+
+    def test_compatible_result_reviews_merge_into_one_saved_route_decision(self):
+        self.start()
+        observed = self.tools.review(web=[{"target": "discovery", "purpose": "Read funding sources", "query": "funding sources",
+            "response": {"status": "ok", "results": [{"text": "First source"}, {"text": "Second source"}]}}])
+        rid = observed["web_references"]["web:0"]
+        self.tools.review(sources=[{"ref": rid + ":0", "state": "exhausted", "reason": "First source reviewed"},
+                                   {"ref": rid + ":1", "state": "exhausted", "reason": "Second source reviewed"}])
+        saved = json.loads(self.path.read_text())
+        route = next(r for r in saved["stop_audit"]["route_frontier"] if r["route_id"] == rid)
+        self.assertEqual(route["state"], "exhausted")
+        self.assertEqual(route["reason"], "First source reviewed\nSecond source reviewed")
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, "conflicting source decisions"):
+            self.tools.review(sources=[{"ref": rid + ":0", "state": "exhausted", "reason": "Done"},
+                                       {"ref": rid + ":1", "state": "blocked", "reason": "Not reviewed"}])
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_missing_attached_web_date_fails_before_saving_and_corrected_retry_works(self):
         self.start()
         web = [{"target": "example.test", "purpose": "Review event", "query": "example event",

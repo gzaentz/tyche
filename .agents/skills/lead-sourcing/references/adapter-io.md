@@ -65,7 +65,11 @@ Example review inputs, with references selected from actual results:
 
 Evidence refs expand into saved source/URL/date/text. Usually use `{"ref":"..."}`
 and put the qualification judgment in its `claim`, without copying source fields
-again. Supply reviewed `text`, `date` and `date_basis` only when interpreting an event, distinguishing announcement
+again. Aviato funding refs retain the supplied announcement date and round name;
+they do not decide which funding stage is current. Compatible `sources` decisions
+for different results in one lookup are combined into its existing route review;
+conflicting states require one explicit decision for that lookup.
+Supply reviewed `text`, `date` and `date_basis` only when interpreting an event, distinguishing announcement
 from completion. `signal_evidence` also needs `signal`; qualification checks
 use the existing `criterion`, `importance`, `status`, `claim`, `evidence` contract.
 Contact-stage and delivery checks compare reviewed signal dates with the saved

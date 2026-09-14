@@ -9,6 +9,7 @@ stable JSON contract into ``deepline tools`` commands.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import math
 import os
@@ -532,6 +533,20 @@ def normalize_evidence(
     result["evidence_text"] = _text(_first(source, "evidence_text", "text", "snippet", "description", "evidence", "content"))
     result["provider"] = _text(_first(source, "provider")) or provider
     result["tool"] = _text(_first(source, "tool", "tool_name")) or tool
+
+    if tool == "aviato_get_company_funding_rounds":
+        # announcedOn is the financing announcement, not an ingestion timestamp.
+        # Preserve the original fields and order; the researcher judges current
+        # stage and reconciles conflicting records.
+        result["evidence_date"] = None
+        result["evidence_date_basis"] = "published"
+        announced = _text(source.get("announcedOn"))
+        if announced:
+            try:
+                result["evidence_date"] = datetime.fromisoformat(announced.replace("Z", "+00:00")).date().isoformat()
+            except ValueError:
+                pass
+        result["evidence_text"] = result["evidence_text"] or _text(source.get("name"))
 
     # These are LinkedIn profile fields, not company HQ or associated-member
     # counts. Preserve the raw HarvestAPI fields alongside the stable output.

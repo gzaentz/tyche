@@ -368,6 +368,25 @@ class ProviderScriptTests(unittest.TestCase):
         }
         self.assertEqual(DEEPLINE._records(parsed)[0]["company_name"], "Solo")
 
+    def test_aviato_funding_dates_are_preserved_without_reordering_or_inference(self):
+        rows = [{"name": "Series B - ExamplePay", "stage": "Series B", "announcedOn": "2023-10-25T00:00:00.000Z"},
+                {"name": "Series C - ExamplePay", "stage": "Series C", "announcedOn": "2023-09-03T00:00:00.000Z"}]
+        body = DEEPLINE._execute_output({"toolResponse": {"rawV2": {"fundingRounds": rows}},
+                                       "output_preview": {"kind": "list", "rowCount": len(rows), "preview": rows}},
+                                       "aviato_get_company_funding_rounds")
+        self.assertEqual([r["evidence_date"] for r in body["results"]], ["2023-10-25", "2023-09-03"])
+        self.assertEqual([r["evidence_text"] for r in body["results"]], [r["name"] for r in rows])
+        self.assertEqual([r["stage"] for r in body["results"]], ["Series B", "Series C"])
+        self.assertTrue(all(r["evidence_date_basis"] == "published" for r in body["results"]))
+        for value in (None, "unknown", "2026-02-30"):
+            source = {"name": "Series B - ExamplePay", "announcedOn": value, "timestamp": "2026-09-14",
+                      "updated_at": "2026-09-14"}
+            row = DEEPLINE.normalize_evidence(source, tool="aviato_get_company_funding_rounds")
+            self.assertIsNone(row["evidence_date"])
+            self.assertEqual(row["announcedOn"], value)
+        other = DEEPLINE.normalize_evidence(rows[0], tool="unrelated_tool")
+        self.assertIsNone(other["evidence_date"])
+
     def test_deepline_normalizes_current_linkedin_position(self):
         body = DEEPLINE._execute_output(
             {

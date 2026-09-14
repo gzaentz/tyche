@@ -528,9 +528,20 @@ class ResearchTools:
                 if key in item:
                     change[key] = item[key]
             updates.append(change)
-        routes = [{"route_id": s["ref"].split(":")[0], "state": s["state"], "reason": s["reason"],
-                   "continuation_route_ids": [r.split(":")[0] for r in s.get("continuations", [])]} for s in refs(list(sources))]
-        runner.save_review(self.path, {"companies": updates, "routes": routes})
+        routes = {}
+        for source in refs(list(sources)):
+            rid = source["ref"].split(":")[0]
+            route = routes.setdefault(rid, {"route_id": rid, "state": source["state"],
+                                           "reasons": [], "continuation_route_ids": []})
+            if route["state"] != source["state"]:
+                raise ValueError("Results from " + rid + " have conflicting source decisions; choose one decision for that lookup.")
+            if source["reason"] not in route["reasons"]:
+                route["reasons"].append(source["reason"])
+            route["continuation_route_ids"] = list(dict.fromkeys(route["continuation_route_ids"] +
+                [r.split(":")[0] for r in source.get("continuations", [])]))
+        for route in routes.values():
+            route["reason"] = "\n".join(route.pop("reasons"))
+        runner.save_review(self.path, {"companies": updates, "routes": list(routes.values())})
         def timing(document):
             if len(document.get("accepted", [])) >= document["request"]["target_count"]:
                 document["stop_check"].setdefault("leads_ready_at", datetime.now(timezone.utc).isoformat())
