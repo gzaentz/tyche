@@ -40,7 +40,7 @@ CHECK = obj({"target": STRING, "purpose": STRING, "phase": {"enum": [
 COMPANY = obj({"target": STRING, "decision": {"enum": ["hold_account", "qualify_account", "hold_contact", "reject", "accept"]},
     "reason": STRING, "company": OBJECT, "qualification_checks": {"type": "array", "items": QUALIFICATION_CHECK},
     "account_fit": EVIDENCE, "signal_evidence": EVIDENCE,
-    "intent_details": {**STRING, "description": "One natural paragraph: state each verified signal and its date, explain its relevance in a following sentence, then close by connecting the evidence to the company's situation and requested product/service. Distinguish inferred needs from verified facts."},
+    "intent_details": {**STRING, "description": "One natural paragraph: state each verified signal and its date, explain its relevance in a following sentence, then close with why the activity matters now. If the ICP describes the target's product/service, connect the signals to that offering and its operations. Avoid repeating qualification filters or inventing a seller's offering. Keep inferred needs conditional."},
     "primary_contact": OBJECT, "backup_contacts": {"type": "array", "items": OBJECT}}, ("target", "decision", "reason"))
 WEB = obj({"target": STRING, "purpose": STRING, "query": STRING,
     "operation": {"enum": ["search_query", "open", "find", "click"]},
@@ -283,6 +283,10 @@ class ResearchTools:
             view["non_callable_count"] = len(rows) - len(indexed)
             view["catalog_note"] = ("Choose a tool ID and inspect(tool=...) for its native inputs and pricing."
                 if indexed else "No callable tools matched. Try a short provider or capability term. Non-callable catalog entries remain saved in the receipt.")
+        if body.get("tool") == "harvestapi_search_leads" and rows:
+            view["selection_note"] = ("These are discovery matches. After choosing a current company/role match, "
+                "fetch harvestapi_get_profile with its LinkedIn URL or profile ID before selecting its ref in review. "
+                "Use that profile read to resolve missing parsed location and verify the selected person's identity.")
         if recorded and body.get("status") in {"provider_error", "no_results", "partial", "timeout"}:
             view["recovery_note"] = "This outcome is already recorded. Recovering it cannot resolve unknown billing; preserve the bound until provider billing evidence is available."
         return view
@@ -356,7 +360,9 @@ class ResearchTools:
         row, source, _ = self._resolve(value.pop("ref"))
         expected = "harvestapi_get_profile" if person else "harvestapi_get_company"
         if source.get("tool") != expected:
-            raise ValueError("Company/contact selection requires a saved " + expected + " result")
+            raise ValueError("Company/contact selection requires a saved " + expected + " result. "
+                "Fetch that getter using the selected entity's LinkedIn URL or ID, then review its returned ref. "
+                "Search matches alone cannot supply the required verified fields.")
         evidence = {"evidence_url": row.get("contact_url") if person else row.get("company_linkedin_url"),
                     "evidence_date": self._document()["request"]["as_of_date"], "evidence_date_basis": "observed_current",
                     "evidence_text": "Current LinkedIn profile fields returned by HarvestAPI.", "source": source}
@@ -521,7 +527,8 @@ class ResearchTools:
         for state in ("accepted", "unresolved", "rejected"):
             for row in document.get(state, []):
                 rows.append({"target": runner._company_key(row), "state": state, "stage": row.get("stage"),
-                             "missing": [c.get("criterion") for c in row.get("qualification_checks", []) if c.get("status") == "unknown"],
+                             "missing": [c.get("criterion") for c in row.get("qualification_checks", [])
+                                         if c.get("status") == "unknown" and c.get("importance") != "preferred"],
                              "reason": row.get("reason_text")})
         decision = runner.evaluate_stop(document, execution_budget=ledger)
         completed = {r["route_id"] for r in document["routes"]}

@@ -468,6 +468,15 @@ class ResearchToolTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.tools.inspect(field="nonexistent")
 
+    def test_progress_reports_required_gaps_without_promoting_optional_hiring(self):
+        self.start()
+        checks = [{"criterion": name, "importance": importance, "status": "unknown", "claim": "Needs research", "evidence": []}
+                  for name, importance in [("current funding stage", "required"), ("hiring bonus", "preferred")]]
+        self.tools.review(companies=[{"target": "example.test", "decision": "hold_account", "reason": "Funding is unresolved",
+                                     "company": {"canonical_name": "ExamplePay"}, "qualification_checks": checks}])
+        self.assertEqual(self.tools.inspect()["companies"][0]["missing"], ["current funding stage"])
+        self.assertEqual(self.tools.inspect(target="example.test", field="qualification_checks")["value"], checks)
+
     def test_recorded_provider_error_explains_recovery_without_releasing_unknown_cost(self):
         self.start()
         calls = []
