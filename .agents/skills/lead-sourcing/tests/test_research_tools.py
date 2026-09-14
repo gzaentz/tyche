@@ -251,6 +251,27 @@ class ResearchToolTests(unittest.TestCase):
         self.assertIn(rid, str(error.exception))
         self.assertEqual(self.tools.inspect(ref=rid + ":0")["facts"]["text"], "Verified page text")
 
+    def test_native_review_contract_names_judgment_fields_before_saving_observations(self):
+        self.start()
+        payload = {"companies": [{"target": "example.test", "decision": "hold_account", "reason": "Review fit",
+            "qualification_checks": [{"criterion": "product", "status": "unknown", "evidence": []}]}],
+            "web": [{"target": "example.test", "purpose": "Review source", "query": "company information",
+                "response": {"status": "ok", "results": [{"url": "https://example.test", "text": "Observed facts"}]}}]}
+        before = self.path.read_bytes()
+        receipt_count = len(list((self.path.parent / "receipts").glob("*.json"))) if (self.path.parent / "receipts").exists() else 0
+        with self.assertRaisesRegex(ValueError, "missing fields: claim, importance"):
+            self.tools.call("tyche_review", payload)
+        check = payload["companies"][0]["qualification_checks"][0]
+        check.update(importance="required", claim="Product fit still needs review",
+            evidence=[{"ref": "web:0:0", "date_basis": "2026-09-14"}])
+        with self.assertRaisesRegex(ValueError, "date_basis must be one of"):
+            self.tools.call("tyche_review", payload)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(len(list((self.path.parent / "receipts").glob("*.json"))), receipt_count)
+        check["evidence"][0]["date_basis"] = "observed_current"
+        result = self.tools.call("tyche_review", payload)
+        self.assertEqual(result["saved_companies"], ["example.test"])
+
     def test_signal_age_is_checked_at_account_gate_and_delivery(self):
         request = {"as_of_date": "2026-09-14", "time_window": {"max_age_days": 365},
                    "buying_signals": [{"kind": "FACILITY_OPENING", "max_age_days": 365}, {"kind": "HIRING", "max_age_days": 90}]}

@@ -26,14 +26,20 @@ def obj(properties, required=()):
 STRING = {"type": "string", "minLength": 1}
 OBJECT = {"type": "object"}
 REFERENCE = {**STRING, "description": "Saved result reference returned by lookup or inspect: route-id:index."}
+EVIDENCE = {"type": "object", "additionalProperties": True, "properties": {
+    "ref": REFERENCE, "text": STRING, "date": {**STRING, "description": "Verified date in YYYY-MM-DD form."},
+    "date_basis": {"enum": ["published", "posted", "updated", "observed_current"]}, "signal": STRING}}
+QUALIFICATION_CHECK = obj({"criterion": STRING, "importance": {"enum": ["required", "preferred"]},
+    "status": {"enum": ["pass", "fail", "unknown"]}, "claim": STRING, "signal": STRING,
+    "evidence": {"type": "array", "items": EVIDENCE}}, ("criterion", "importance", "status", "claim", "evidence"))
 CHECK = obj({"target": STRING, "purpose": STRING, "phase": {"enum": [
     "account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"]},
     "provider": {"enum": ["deepline", "scrapingdog"]}, "tool": STRING, "inputs": OBJECT,
     "approach": STRING, "max_cost_credits": {"type": "number", "minimum": 0},
     "status_read": {"type": "boolean"}}, ("target", "purpose", "phase", "inputs"))
 COMPANY = obj({"target": STRING, "decision": {"enum": ["hold_account", "qualify_account", "hold_contact", "reject", "accept"]},
-    "reason": STRING, "company": OBJECT, "qualification_checks": {"type": "array", "items": OBJECT},
-    "account_fit": OBJECT, "signal_evidence": OBJECT,
+    "reason": STRING, "company": OBJECT, "qualification_checks": {"type": "array", "items": QUALIFICATION_CHECK},
+    "account_fit": EVIDENCE, "signal_evidence": EVIDENCE,
     "intent_details": {**STRING, "description": "One natural paragraph: state each verified signal and its date, explain its relevance in a following sentence, then close by connecting the evidence to the company's situation and requested product/service. Distinguish inferred needs from verified facts."},
     "primary_contact": OBJECT, "backup_contacts": {"type": "array", "items": OBJECT}}, ("target", "decision", "reason"))
 WEB = obj({"target": STRING, "purpose": STRING, "query": STRING,
@@ -443,7 +449,7 @@ class ResearchTools:
                     try:
                         row = web[int(match[1])]["response"]["results"][int(match[2])]
                     except (IndexError, KeyError, TypeError) as exc:
-                        raise ValueError("Web evidence reference does not select an attached result") from exc
+                        raise ValueError("Web evidence reference does not select an attached result. web: aliases only refer to observations attached to this call; use the returned lookup reference for an already saved source.") from exc
                     self._evidence_date(row, value)
                 for child in value.values():
                     check_web_dates(child)
