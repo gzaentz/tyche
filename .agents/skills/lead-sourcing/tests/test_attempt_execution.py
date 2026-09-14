@@ -167,6 +167,8 @@ class AttemptExecutionTests(unittest.TestCase):
             with self.subTest(phase=phase):
                 spec = self.spec(f"lookup-{phase}", paid=True)
                 spec["action"]["phase"] = phase
+                if phase == "email_validation":
+                    spec["request"]["tool"] = "zerobounce_validate"
                 with self.assertRaisesRegex(ValueError, "account-qualified company"):
                     runner.run_attempt(self.path, spec, execute=lambda *_: self.fail("Provider dispatched"))
         self.assertEqual(budget_guard.ledger_path(self.path).read_bytes(), before)

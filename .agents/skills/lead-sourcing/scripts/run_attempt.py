@@ -286,12 +286,14 @@ def save_review(run_file, review):
                       or a.get("scope") not in account_pending
                       or a.get("phase") not in {"contact_discovery", "contact_verification", "email_validation"}]
         refresh(document)
-        problems = budget_guard.audit_ledger(run_file, document)
+        ledger = budget_guard.load_ledger(run_file)
+        decision = evaluate_stop(document, execution_budget=ledger)
+        # A spending pause must not discard research judgments. Keep every
+        # accounting consistency check and expose the unchanged pause in status.
+        problems = budget_guard.audit_ledger(run_file, document, state=ledger) + decision["errors"]
+        problems = [error for error in problems if error != ledger.get("blocked")]
         if problems:
             raise ValueError("; ".join(problems))
-        decision = evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))
-        if decision["errors"]:
-            raise ValueError("; ".join(decision["errors"]))
         result.update(run_status(document, decision))
         return document
 
@@ -349,6 +351,8 @@ def _validate_spec(spec, label="input", *, plan_only=False):
     if action.get("status_read") and (provider != "deepline" or operation != "execute"
                                      or action.get("cost_upper_bound_credits") != 0):
         raise ValueError("status_read requires a described free Deepline job-status getter")
+    if action.get("status_read") and validator_for_tool(request.get("tool")) and not request.get("payload", {}).get("id"):
+        raise ValueError("A verification status read requires the saved pending job id and its status getter; do not resubmit the email-verification request")
     is_verification = ("email_validation" in {request.get("entity_type"), action.get("entity_type")}
                        or provider == "deepline" and operation == "execute"
                        and validator_for_tool(request.get("tool")))
@@ -356,6 +360,8 @@ def _validate_spec(spec, label="input", *, plan_only=False):
         action["entity_type"] = "tool_catalog"
     elif "tool_catalog" in {request.get("entity_type"), action.get("entity_type")}:
         raise ValueError("tool_catalog is reserved for live catalog operations")
+    elif provider == "deepline" and action["phase"] == "email_validation" and not validator_for_tool(request.get("tool")):
+        raise ValueError(f"{label}: email_validation requires a supported validation operation; email finders use contact_discovery and cannot spend its protected reserve")
     elif is_verification and action["phase"] != "email_validation":
         raise ValueError(f"{label}.action.phase must be email_validation for an email-validation request")
     if action.get("entity_type") and action["entity_type"] != "tool_catalog":

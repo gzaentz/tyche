@@ -169,7 +169,7 @@ class ResearchTools:
             if "limit" in fields:
                 quantity = inputs.get("limit", fields["limit"].get("default"))
             elif contract.get("toolId", contract.get("id")) in {
-                    "zerobounce_validate", "hunter_email_finder", "datagma_find_email"}:
+                    "zerobounce_validate", "bounceban_verify_single", "hunter_email_finder", "datagma_find_email"}:
                 quantity = 1
         bound = None
         if rate is not None and type(quantity) is int and quantity > 0:

@@ -15,6 +15,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import budget_guard as budget
 import deepline
+import email_receipts
+import research_input
 import research_tools
 from research_tools import ResearchTools
 import run_attempt as runner
@@ -127,6 +129,59 @@ class ResearchToolTests(unittest.TestCase):
         self.assertNotIn(action["id"], {r["route_id"] for r in document["routes"]})
         self.assertFalse((self.path.parent / "receipts" / (action["id"] + ".json")).exists())
         budget.check_allowance(budget.load_ledger(self.path), "deepline", .2, 0, verification=True)
+
+    def test_email_finder_is_discovery_and_cannot_claim_verification_reserve(self):
+        spec = research_input.prepare_lookup({"provider": "deepline", "scope": "example.test", "phase": "contact_discovery",
+            "purpose": "Find the selected person's work email", "max_cost_credits": 1,
+            "request": {"operation": "execute", "tool": "zerobounce_email_finder", "payload": {"first_name": "Alex", "last_name": "Buyer", "domain": "example.test"}}})
+        _, action, request = runner._validate_spec(copy.deepcopy(spec))
+        self.assertEqual(action["phase"], "contact_discovery")
+        self.assertNotEqual(request.get("entity_type"), "email_validation")
+        spec["action"]["phase"] = "email_validation"
+        with self.assertRaisesRegex(ValueError, "cannot spend its protected reserve"):
+            runner._validate_spec(spec)
+        for tool in ("zerobounce_email_finder", "zerobounce_get_credits", "zerobounce_score"):
+            self.assertIsNone(email_receipts.validator_for_tool(tool))
+        for tool, family in (("zerobounce_validate", "zerobounce"), ("bounceban_verify_single", "bounceban"),
+                             ("bounceban_get_verification", "bounceban"), ("bounceban_verify_single_result", "bounceban")):
+            self.assertEqual(email_receipts.validator_for_tool(tool), family)
+
+    def test_single_verification_cannot_be_resubmitted_as_a_free_status_read(self):
+        contract = {"toolId": "bounceban_verify_single", "inputSchema": {"jsonSchema": {"properties": {"email": {"type": "string"}}}},
+                    "pricing": {"unit": "result", "creditsPerUnit": .06}}
+        self.assertEqual(self.tools._price(contract, {"email": "buyer@example.test"}), .06)
+        with self.assertRaisesRegex(ValueError, "below the catalog-derived"):
+            self.tools._price(contract, {"email": "buyer@example.test"}, 0)
+        spec = research_input.prepare_lookup({"provider": "deepline", "scope": "example.test", "phase": "email_validation",
+            "purpose": "Read pending verification", "max_cost_credits": 0, "status_read": True,
+            "request": {"operation": "execute", "tool": "bounceban_verify_single", "payload": {"email": "buyer@example.test"}}})
+        with self.assertRaisesRegex(ValueError, "do not resubmit"):
+            runner._validate_spec(spec)
+
+    def test_missing_current_title_or_employer_cannot_pass_delivery(self):
+        from test_client_output import client_document
+        document = client_document()
+        document["accepted"][0]["primary_contact"].update(current_title=None, company=None)
+        errors = runner.accepted_errors(document)
+        for field in ("current_title", "company"):
+            self.assertTrue(any("primary_contact." + field in error and "verified current value" in error for error in errors))
+
+    def test_spending_pause_preserves_review_without_clearing_ledger_or_allowing_calls(self):
+        self.start()
+        ref = self.lookup()["lookups"][0]["results"][0]["ref"]
+        reason = "provider billed above its reserved bound; reconcile pricing before further paid calls"
+        with budget.transaction(budget.ledger_path(self.path)) as ledger:
+            ledger["blocked"] = reason
+        before = budget.ledger_path(self.path).read_bytes()
+        calls = len(self.provider.requests)
+        result = self.tools.review(companies=[{"target": "example.test", "decision": "hold_account",
+            "reason": "Funding remains unverified", "company": {"ref": ref}}])
+        self.assertEqual(result["progress"]["budget"]["blocked"], reason)
+        self.assertEqual(json.loads(self.path.read_text())["unresolved"][0]["reason_text"], "Funding remains unverified")
+        with self.assertRaisesRegex(ValueError, "reconcile pricing"):
+            self.lookup(check("another.test"))
+        self.assertEqual(len(self.provider.requests), calls)
+        self.assertEqual(budget.ledger_path(self.path).read_bytes(), before)
 
     def test_all_selected_field_conflicts_are_reported_before_web_is_saved(self):
         self.start()

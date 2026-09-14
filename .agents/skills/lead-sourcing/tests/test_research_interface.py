@@ -538,7 +538,7 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
             return {"provider": "deepline", "operation": "describe", "tool": request["tool"], "status": "ok",
                     "results": [{"toolId": request["tool"], "connected": True, "callable": True,
                                  "inputSchema": {"fields": []}}]}, 0
-        tools = ["harvestapi_get_company", "harvestapi_get_profile", "zerobounce_fixture"]
+        tools = ["harvestapi_get_company", "harvestapi_get_profile", "zerobounce_validate"]
         runner.run_lookup(path, [{"request": {"operation": "describe", "tool": tool}} for tool in tools], execute=describe)
 
         def perform(tool, phase, raw, payload):

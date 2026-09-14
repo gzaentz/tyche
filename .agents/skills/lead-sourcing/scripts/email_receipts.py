@@ -14,8 +14,13 @@ def _text(value):
 
 
 def validator_for_tool(tool):
-    """Recognize supported validator families without pinning a live tool ID."""
-    return next((name for name in ("zerobounce", "bounceban") if name in _text(tool)), None)
+    """Recognize validation operations, not every tool sold by the provider."""
+    name = _text(tool)
+    words = set(re.findall(r"[a-z]+", name))
+    family = next((provider for provider in ("zerobounce", "bounceban") if provider in words), None)
+    if words & {"find", "finder", "discovery", "credits", "balance", "score"}:
+        return None
+    return family if name == family or words & {"validate", "validation", "verify", "verification", "status", "result", "results"} else None
 
 
 class OtherEmail(ValueError):

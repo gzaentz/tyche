@@ -1138,6 +1138,11 @@ def _validate_client_output(accepted: list, errors: list[str]) -> None:
         narrative = row.get("intent_details")
         if not isinstance(narrative, str) or not narrative.strip():
             errors.append(f"{path}.intent_details must be a non-empty string")
+        contact = row.get("primary_contact")
+        if isinstance(contact, dict):
+            for field in ("current_title", "company"):
+                if not _nonempty_text(contact.get(field)):
+                    errors.append(f"{path}.primary_contact.{field} requires a verified current value; a requested role cannot substitute for missing employment evidence")
         company = row.get("company")
         if not isinstance(company, dict):
             continue
