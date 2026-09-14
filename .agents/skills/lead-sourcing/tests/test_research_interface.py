@@ -69,16 +69,35 @@ class StartRunTests(unittest.TestCase):
         self.assertEqual(json.loads(self.path.read_text())["stop_check"]["started_at"], initial["stop_check"]["started_at"])
 
     def test_bad_request_or_unpriced_email_writes_neither_file(self):
-        variants = [dict(self.setup, request={}), *[copy.deepcopy(self.setup) for _ in range(4)]]
+        variants = [dict(self.setup, request={}), *[copy.deepcopy(self.setup) for _ in range(5)]]
         variants[1]["request"]["requested_roles"] = ["Unrelated role"]
         variants[2]["request"].pop("contact_fields")
         variants[3]["request"]["budget"] = {"deepline_credits": "25", "hard_stop": True}
         variants[4]["request"]["budget"] = {"hard_stop": False}
+        variants[5]["request"].pop("requested_roles")
+        variants[5]["request"].pop("contact_role_groups")
         for setup in variants:
             with self.subTest(setup=setup), self.assertRaises(ValueError):
                 runner.start_run(self.path, setup)
             self.assertFalse(self.path.exists())
             self.assertFalse(self.path.with_name("results.json.budget.json").exists())
+
+    def test_role_groups_supply_combined_list_and_preserve_it_on_resume(self):
+        expected = self.setup["request"].pop("requested_roles")
+        before_input = copy.deepcopy(self.setup)
+        status = runner.start_run(self.path, self.setup)
+        self.assertEqual(status["request"]["requested_roles"], expected)
+        self.assertEqual(self.setup, before_input)
+        before, ledger = self.path.read_bytes(), guard.ledger_path(self.path).read_bytes()
+        runner.start_run(self.path, self.setup)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
+        changed = copy.deepcopy(self.setup)
+        changed["request"]["contact_role_groups"]["secondary"] = ["Head of Sales"]
+        with self.assertRaises(ValueError):
+            runner.start_run(self.path, changed)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
 
     def test_dollar_cap_with_partial_budget_derives_credits_and_preserves_spending(self):
         self.setup.update(max_usd=5)

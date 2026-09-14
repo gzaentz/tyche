@@ -48,7 +48,7 @@ WEB = obj({"target": STRING, "purpose": STRING, "query": STRING,
 SOURCE = obj({"ref": REFERENCE, "state": {"enum": ["exhausted", "continuable", "blocked"]},
     "reason": STRING, "continuations": {"type": "array", "items": REFERENCE}}, ("ref", "state", "reason"))
 TOOLS = {
-    "tyche_start": ("Interpret the ICP once; initialize the bound run before other tools. Set max_usd to the approved dollar cap; code supplies default provider credits. Explicit provider caps remain binding. Repeating the same request resumes without resetting spending. Email verification is priced automatically when the catalog supplies a rate.",
+    "tyche_start": ("Interpret the ICP once; initialize the bound run before other tools. Supply contact_role_groups or requested_roles; with groups, omit the duplicate requested_roles list and code derives their union. Set max_usd to the approved dollar cap; code supplies default provider credits. Explicit provider caps remain binding. Repeating the same request resumes without resetting spending. Email verification is priced automatically when the catalog supplies a rate.",
         obj({"request": OBJECT, "max_usd": {"type": "number", "minimum": 0},
              "verification_reserve_credits": {"type": "number", "minimum": 0},
              "scrapingdog_usd_per_credit": {"type": "number", "exclusiveMinimum": 0}}, ("request",))),

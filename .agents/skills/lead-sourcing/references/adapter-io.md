@@ -20,6 +20,10 @@ research choices, not paths, route IDs or accounting envelopes.
 | `tyche_inspect` | No arguments, or `target`, `ref`, `tool`, `query`, `recover` | Compact state, saved request or detail, catalog search, local receipt recovery |
 | `tyche_finish` | Research `commentary` (assumptions, caveats, route-choice reasoning) | Strict validation, workbook/readback/preview, audit report and run-cost links |
 
+At start, supply the LLM-selected `contact_role_groups` without repeating
+`requested_roles`; code saves their combined list. A request without groups still
+needs `requested_roles`. Explicit conflicting lists remain errors.
+
 `target` is the canonical company domain or `discovery`. Phases are
 `account_discovery`, `account_verification`, `contact_discovery`,
 `contact_verification`, and `email_validation`. `provider` defaults to Deepline;

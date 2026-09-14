@@ -64,12 +64,13 @@ def normalize_request(value, run_file, *, saved=None, started_at=None):
                 raise ValueError("company_size bounds are reversed")
         else:
             strings(values, "icp." + key)
-    strings(request.get("requested_roles"), "requested_roles")
     if "contact_role_groups" in request:
         groups = request["contact_role_groups"]
         object_fields(groups, {"primary", "secondary"}, "contact_role_groups")
         strings(groups.get("primary"), "primary roles")
         strings(groups.get("secondary"), "secondary roles", empty=True)
+        request.setdefault("requested_roles", list(dict.fromkeys(groups["primary"] + groups["secondary"])))
+    strings(request.get("requested_roles"), "requested_roles")
     if not isinstance(request.get("buying_signals"), list) or not request["buying_signals"]:
         raise ValueError("buying_signals must contain the agent's interpreted signals")
     window = request.get("time_window")
