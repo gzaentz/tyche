@@ -8,20 +8,24 @@ import budget_guard as budget
 
 
 # Deepline receipt hashes from the authorized 2026-09-14 endpoint diagnostic.
-# No profile email/About add-ons were tested. Keep their prices unresolved.
+# Only the exact recorded options below have measured planning prices.
 PROFILE_PRICES = {
     "main": {"credits": .03, "verified_at": "2026-09-14", "basis": "measured_planning_price",
              "receipt_sha256": "836663ebb049ac493f820c646f2411e096c023a9df04e014ca04228025797b59"},
     "full": {"credits": .05, "verified_at": "2026-09-14", "basis": "measured_planning_price",
              "receipt_sha256": "0e07fa89580385d42b3432c2760c3a1a2e59bf51837e33b3cdeaa2c8f6fb1925"},
+    "full_email": {"credits": .14, "verified_at": "2026-09-14", "basis": "measured_planning_price",
+                   "receipt_sha256": "1ee66a5262cb81d1399bac49a42caf58cfe3c26de3dc2a88db67149a33801d74"},
 }
 
 
 def profile_price(contract, inputs):
     if contract.get("toolId", contract.get("id")) != "harvestapi_get_profile":
         return None
-    if set(inputs) - {"url", "publicIdentifier", "profileId", "main"}:
+    if set(inputs) - {"url", "publicIdentifier", "profileId", "main", "findEmail"}:
         return None
+    if "findEmail" in inputs:
+        return PROFILE_PRICES["full_email"] if inputs["findEmail"] == "true" and "main" not in inputs else None
     if "main" in inputs and inputs["main"] != "true":
         return None  # Only the exact measured modes qualify for fallback.
     return PROFILE_PRICES["main" if "main" in inputs else "full"]
@@ -49,6 +53,8 @@ def call_credits(contract, inputs, override=None):
     stored = profile_price(contract, inputs) if rate is None else None
     if bound is None and stored:
         bound = budget.amount(stored["credits"], "measured planning price")
+    if bound is None and contract.get("toolId", contract.get("id")) == "harvestapi_get_profile":
+        raise ValueError("No whole-call price is available for these profile options; an override cannot substitute for a verified price")
     if override is not None:
         supplied = budget.amount(override, "whole-call price reservation")
         if bound is not None and supplied < bound:

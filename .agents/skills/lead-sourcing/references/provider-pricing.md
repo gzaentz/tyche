@@ -13,16 +13,25 @@ Deepline measurements from the authorized September 14, 2026 diagnostic:
 | Harvest company search | One page, including no results | 0.03 | 0.003 |
 | Harvest profile | `main="true"`, no add-ons | 0.03 | 0.003 |
 | Harvest profile | `main` omitted, no add-ons | 0.05 | 0.005 |
+| Harvest profile | `main` omitted, `findEmail="true"`, other add-ons omitted | 0.14 | 0.014 |
 | Harvest lead search | One page | 0.70 | 0.070 |
 
-Only the two profile rates need a fallback; other operations use their catalog
-prices. Optional email, SMTP or About-profile parameters are unpriced until
-separately verified. New options never inherit a basic-profile price.
+Only the profile rates need a fallback; other operations use their catalog
+prices. The email option was measured during the authorized Pine Health run on
+the same date. Other email combinations, SMTP or About-profile parameters remain
+unpriced. New options never inherit a basic-profile price, even through an override.
 
 These are planning prices, not provider-enforced maximums or actual bills.
 Returned billing settles the ledger; unknown charges retain their reservations.
 A charge above its reservation pauses paid work for reconciliation. Never turn
 an unknown/error response into a zero charge or repeat it to discover its cost.
+
+After correcting pricing, an operator can run `budget_guard.py results.json
+--reconcile-receipt receipts/<route>.json --pricing-note "verified pricing repair"`.
+Supply every overrun receipt. This verifies saved billing and run identity,
+records receipt hashes, and rechecks all existing caps and uncertain reservations.
+It preserves original estimates and actual charges. This command cannot resolve
+unknown billing, reset the ledger, increase caps or clear unrelated blocks.
 
 The initial email reserve is the catalog's ZeroBounce rate times the requested
 lead count. It protects future verification money without counting it as spent.

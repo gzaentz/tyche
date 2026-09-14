@@ -2,7 +2,9 @@
 """Reserve provider spend before dispatch, using one durable ledger per run."""
 
 import argparse
+import copy
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
@@ -14,6 +16,7 @@ import threading
 
 
 PROVIDERS = ("deepline", "scrapingdog")
+PRICE_OVERRUN = "provider billed above its reserved bound; reconcile pricing before further paid calls"
 _TRANSACTION_LOCK = threading.RLock()
 
 
@@ -221,6 +224,8 @@ def check_allowance(state, provider, bound, accepted_count, *, verification=Fals
     """Use the same affordability calculation for planning and locked dispatch."""
     if state.get("blocked"):
         raise BudgetError(state["blocked"])
+    if any(price_overrun(call, state) and not call.get("reconciliation") for call in state["calls"].values()):
+        raise BudgetError(PRICE_OVERRUN)
     if Decimal(state["credit_limits"][provider]) == 0:
         raise BudgetError(f"{provider} is disabled by its zero credit cap")
     entry = dict(provider=provider, maximum_credits=str(amount(bound, "maximum call cost")),
@@ -280,6 +285,13 @@ def reserve(spend, provider, *, verification=False):
     return path, route_id
 
 
+def price_overrun(call, state):
+    bound = amount(call["maximum_credits"], "reserved bound")
+    return ((call["actual_credits"] is not None and amount(call["actual_credits"], "charge") > bound)
+            or (call["actual_usd"] is not None and amount(call["actual_usd"], "USD charge") >
+                bound * amount(state["usd_per_credit"][call["provider"]], "USD rate")))
+
+
 def settle(path, route_id, billing):
     with transaction(path) as state:
         check_run_identity(path.with_name(path.name.removesuffix(".budget.json")), state)
@@ -289,10 +301,63 @@ def settle(path, route_id, billing):
         charge = amount(billing["credits_charged"], "billing.credits_charged") if "credits_charged" in billing else None
         usd = amount(billing["cost_usd"], "billing.cost_usd") if "cost_usd" in billing else None
         call.update(actual_credits=None if charge is None else str(charge), actual_usd=None if usd is None else str(usd))
-        bound = Decimal(call["maximum_credits"])
-        if (charge is not None and charge > bound) or (usd is not None and usd > bound * Decimal(state["usd_per_credit"][call["provider"]])):
-            state["blocked"] = "provider billed above its reserved bound; reconcile pricing before further paid calls"
+        if price_overrun(call, state):
+            state["blocked"] = PRICE_OVERRUN
         return state["blocked"]
+
+
+def _reconciled_receipt(run_file, receipt_file, route_id, call):
+    path = Path(receipt_file).absolute()
+    if path.parent.resolve() != Path(run_file).resolve().parent / "receipts":
+        raise BudgetError("reconciliation requires this run's saved receipt")
+    receipt = read_object(path)
+    spend = receipt.get("spend_receipt", {})
+    billing = receipt.get("billing", {})
+    action = receipt.get("attempt", {}).get("action", {})
+    if (receipt.get("run_fingerprint") != run_fingerprint(run_file)
+            or receipt.get("provider") != call["provider"]
+            or receipt.get("status") in {"partial", "timeout"}
+            or spend != {"route_id": route_id, "ledger": str(ledger_path(run_file)), "state": "settled"}
+            or action.get("id") != route_id
+            or amount(action.get("cost_upper_bound_credits"), "original reservation") != amount(call["maximum_credits"], "ledger reservation")
+            or call["actual_credits"] is None
+            or amount(billing.get("credits_charged"), "receipt credits") != amount(call["actual_credits"], "ledger credits")
+            or (billing.get("cost_usd") is None) != (call["actual_usd"] is None)
+            or (call["actual_usd"] is not None and amount(billing["cost_usd"], "receipt USD") != amount(call["actual_usd"], "ledger USD"))):
+        raise BudgetError("receipt identity, reservation and settled billing must match this ledger")
+    return {"receipt_file": str(path), "receipt_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def reconcile_overruns(run_file, receipt_files, *, pricing_note):
+    """Operator recovery after pricing repair; preserve bills, bounds and caps."""
+    if not isinstance(pricing_note, str) or not pricing_note.strip() or not receipt_files:
+        raise BudgetError("provide saved receipts and a note describing the pricing repair")
+    document = read_object(Path(run_file).resolve(strict=True))
+    with transaction(ledger_path(run_file)) as state:
+        check_run_identity(run_file, state)
+        check_limits(document, state)
+        if state.get("blocked") != PRICE_OVERRUN:
+            raise BudgetError("only a provider price overrun can be reconciled here")
+        updated = copy.deepcopy(state)
+        updated["blocked"] = None
+        for receipt_file in receipt_files:
+            receipt = read_object(Path(receipt_file))
+            rid = receipt.get("spend_receipt", {}).get("route_id")
+            call = updated["calls"].get(rid)
+            if call is None or not price_overrun(call, updated) or call.get("reconciliation"):
+                raise BudgetError("receipt must identify an unreconciled, settled overrun")
+            call["reconciliation"] = {**_reconciled_receipt(run_file, receipt_file, rid, call),
+                "pricing_note": pricing_note.strip(), "reconciled_at": datetime.now(timezone.utc).isoformat()}
+        errors = audit_ledger(run_file, document, state=updated)
+        if errors:
+            raise BudgetError("; ".join(errors))
+        # Zero additional spend still includes every uncertain call, protected
+        # verification allowance, and the existing per-next-lead limit.
+        for provider in PROVIDERS:
+            if amount(updated["credit_limits"][provider], "credit cap") > 0:
+                check_allowance(updated, provider, 0, len(document["accepted"]))
+        state.update(updated)
+    return {"ledger": str(ledger_path(run_file)), "reconciled": len(receipt_files), "blocked": None}
 
 
 def guarded_call(request, provider, execute):
@@ -333,6 +398,14 @@ def audit_ledger(run_file, document, *, state=None, allow_unbound=False):
             errors.append("paid route IDs must match the execution ledger; record every reserved call")
         for route_id in set(paid) & set(state["calls"]):
             route, call = paid[route_id], state["calls"][route_id]
+            if price_overrun(call, state):
+                reconciliation = call.get("reconciliation")
+                if not isinstance(reconciliation, dict) or not reconciliation.get("pricing_note"):
+                    errors.append(f"{route_id}: unreconciled provider price overrun")
+                else:
+                    saved = _reconciled_receipt(run_file, reconciliation.get("receipt_file"), route_id, call)
+                    if saved["receipt_sha256"] != reconciliation.get("receipt_sha256"):
+                        errors.append(f"{route_id}: reconciled receipt changed")
             if route.get("provider") != call["provider"] or route.get("paid_calls") != 1:
                 errors.append(f"{route_id}: provider and paid_calls must match the ledger")
             if call["provider"] == "deepline" and route.get("accepted_leads_before_call") != call["accepted_leads_before_call"]:
@@ -355,8 +428,15 @@ def main():
     parser.add_argument("--max-usd", help="explicit shared cap; default is USD 0.50 per requested lead")
     parser.add_argument("--scrapingdog-usd-per-credit", help="conservative current-plan rate; required when enabled")
     parser.add_argument("--verification-reserve-credits", help="Deepline allowance protected for email verification")
+    parser.add_argument("--reconcile-receipt", action="append", help="saved settled overrun receipt; repeat for each overrun after pricing repair")
+    parser.add_argument("--pricing-note", help="describe the verified pricing correction; required for reconciliation")
     args = parser.parse_args()
     try:
+        if args.reconcile_receipt:
+            if any(v is not None for v in (args.max_usd, args.scrapingdog_usd_per_credit, args.verification_reserve_credits)):
+                raise BudgetError("reconciliation cannot change budget settings")
+            print(json.dumps(reconcile_overruns(args.results, args.reconcile_receipt, pricing_note=args.pricing_note)))
+            return
         path = initialize(args.results, max_usd=args.max_usd,
                           scrapingdog_usd_per_credit=args.scrapingdog_usd_per_credit,
                           verification_reserve_credits=args.verification_reserve_credits)

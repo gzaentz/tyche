@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 from test_provider_scripts import ROOT, load_script
-from budget_guard import BudgetError, audit_ledger, initialize, ledger_path, read_object, reserve, settle
+from budget_guard import BudgetError, audit_ledger, initialize, ledger_path, read_object, reserve, settle, reconcile_overruns
 from test_stop_policy import NOW, action, stop_document, add_catalog_review
 from test_output_contract import VALIDATOR, cost_result
 
@@ -207,6 +207,115 @@ except (ValueError, OSError):
         self.assertEqual(read_object(ledger_path(self.path))["calls"]["one"]["actual_credits"], "31")
         with self.assertRaises(BudgetError):
             reserve(self.spend("two", 1), "deepline")
+
+    def overrun_receipt(self, *, charge=.14):
+        path, rid = reserve(self.spend(cost=.05), "deepline")
+        billing = {"credits_charged": charge, "cost_usd": charge / 10}
+        settle(path, rid, billing)
+        self.document["routes"].append({"route_id": rid, "provider": "deepline", "paid_calls": 1,
+            "accepted_leads_before_call": 0, "cost_basis": "actual", "cost_credits": charge,
+            "cost_upper_bound_credits": charge})
+        self.write()
+        receipt = self.path.parent / "receipts" / (rid + ".json")
+        receipt.parent.mkdir(exist_ok=True)
+        receipt.write_text(json.dumps({"provider": "deepline", "status": "ok", "billing": billing,
+            "run_fingerprint": read_object(path)["run_fingerprint"],
+            "attempt": {"action": {"id": rid, "cost_upper_bound_credits": .05}},
+            "spend_receipt": {"route_id": rid, "ledger": str(path), "state": "settled"}}))
+        return receipt
+
+    def test_reconcile_preserves_original_bounds_bills_caps_and_uncertain_reserves(self):
+        self.init(max_usd=.1)
+        reserve(self.spend("uncertain", .5), "deepline")
+        self.document["routes"].append({"route_id": "uncertain", "provider": "deepline", "paid_calls": 1,
+            "accepted_leads_before_call": 0, "cost_basis": "estimated", "cost_credits": None,
+            "cost_upper_bound_credits": .5})
+        receipt = self.overrun_receipt()
+        before = read_object(ledger_path(self.path))
+        raw_receipt = receipt.read_bytes()
+        reconcile_overruns(self.path, [receipt], pricing_note="Tested the email add-on price separately")
+        after = read_object(ledger_path(self.path))
+        self.assertIsNone(after["blocked"])
+        self.assertEqual({k:v for k,v in before.items() if k not in {"blocked", "calls"}},
+                         {k:v for k,v in after.items() if k not in {"blocked", "calls"}})
+        self.assertEqual(after["calls"]["uncertain"], before["calls"]["uncertain"])
+        self.assertEqual({k:v for k,v in after["calls"]["one"].items() if k != "reconciliation"}, before["calls"]["one"])
+        self.assertEqual(receipt.read_bytes(), raw_receipt)
+        self.assertEqual(audit_ledger(self.path, self.document), [])
+        with self.assertRaisesRegex(BudgetError, "shared USD cap"):
+            reserve(self.spend("too-much", .4), "deepline")
+        reserve(self.spend("validation", .28), "deepline", verification=True)
+        with self.assertRaisesRegex(BudgetError, "already reserved"):
+            reserve(self.spend("one", .14), "deepline")
+
+    def test_reconcile_refuses_over_cap_without_writing(self):
+        self.init(max_usd=.01)
+        receipt = self.overrun_receipt()
+        before = ledger_path(self.path).read_bytes()
+        with self.assertRaisesRegex(BudgetError, "shared USD cap"):
+            reconcile_overruns(self.path, [receipt], pricing_note="price corrected")
+        self.assertEqual(ledger_path(self.path).read_bytes(), before)
+
+    def test_reconcile_respects_protected_verification_and_next_lead_caps(self):
+        for key in ("reserve", "next_lead", "credits"):
+            with self.subTest(key=key):
+                ledger_path(self.path).unlink(missing_ok=True)
+                self.document["routes"] = []
+                self.document["budget"]["limits"].pop("max_deepline_credits_per_next_lead", None)
+                self.document["budget"]["limits"]["deepline_credits"] = .1 if key == "credits" else 50
+                if key == "next_lead":
+                    self.document["budget"]["limits"]["max_deepline_credits_per_next_lead"] = .1
+                self.write()
+                self.init(max_usd=.02 if key == "reserve" else 5,
+                          verification_reserve_credits=.1 if key == "reserve" else 0)
+                receipt = self.overrun_receipt()
+                before = ledger_path(self.path).read_bytes()
+                with self.assertRaises(BudgetError):
+                    reconcile_overruns(self.path, [receipt], pricing_note="price corrected")
+                self.assertEqual(ledger_path(self.path).read_bytes(), before)
+
+    def test_reconcile_rejects_mismatched_or_incomplete_receipts(self):
+        self.init()
+        receipt = self.overrun_receipt()
+        original = read_object(receipt)
+        before = ledger_path(self.path).read_bytes()
+        for patch in ({"billing": {"credits_charged": .1}}, {"status": "timeout"},
+                      {"run_fingerprint": "another-run"}, {"spend_receipt": {"route_id": "missing"}}):
+            with self.subTest(patch=patch):
+                receipt.write_text(json.dumps({**original, **patch}))
+                with self.assertRaises(BudgetError):
+                    reconcile_overruns(self.path, [receipt], pricing_note="price corrected")
+                self.assertEqual(ledger_path(self.path).read_bytes(), before)
+
+    def test_clearing_block_alone_does_not_allow_spending_and_receipt_tampering_fails_audit(self):
+        self.init()
+        receipt = self.overrun_receipt()
+        path = ledger_path(self.path)
+        state = read_object(path)
+        blocked = state["blocked"]
+        state["blocked"] = None
+        path.write_text(json.dumps(state))
+        with self.assertRaisesRegex(BudgetError, "above its reserved"):
+            reserve(self.spend("next", .1), "deepline")
+        state["blocked"] = blocked
+        path.write_text(json.dumps(state))
+        reconcile_overruns(self.path, [receipt], pricing_note="price corrected")
+        receipt.write_text(receipt.read_text() + "\n")
+        self.assertTrue(any("receipt changed" in e for e in audit_ledger(self.path, self.document)))
+
+    def test_reconcile_rejects_unrelated_block_and_missing_repair_note(self):
+        self.init()
+        receipt = self.overrun_receipt()
+        with self.assertRaisesRegex(BudgetError, "note"):
+            reconcile_overruns(self.path, [receipt], pricing_note="")
+        path = ledger_path(self.path)
+        state = read_object(path)
+        state["blocked"] = "unknown billing state"
+        path.write_text(json.dumps(state))
+        before = path.read_bytes()
+        with self.assertRaisesRegex(BudgetError, "only a provider price overrun"):
+            reconcile_overruns(self.path, [receipt], pricing_note="price corrected")
+        self.assertEqual(path.read_bytes(), before)
 
     def test_cannot_reset_ledger_or_ignore_unrecorded_spend(self):
         self.init()

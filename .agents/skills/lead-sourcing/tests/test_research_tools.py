@@ -357,10 +357,14 @@ class ResearchToolTests(unittest.TestCase):
         inputs = {"url": "https://www.linkedin.com/in/example"}
         self.assertEqual(self.tools._price(contract, inputs), .05)
         self.assertEqual(self.tools._price(contract, dict(inputs, main="true")), .03)
-        for extra in ({"findEmail": "true"}, {"findEmail": "false"}, {"skipSmtp": "true"},
+        self.assertEqual(self.tools._price(contract, dict(inputs, findEmail="true")), .14)
+        with self.assertRaisesRegex(ValueError, "below"):
+            self.tools._price(contract, dict(inputs, findEmail="true"), .05)
+        for extra in ({"findEmail": "false"}, {"main": "true", "findEmail": "true"}, {"skipSmtp": "true"},
                       {"includeAboutProfile": "true"}, {"main": "false"}, {"main": True}, {"newAddon": "true"}):
-            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, "No whole-call price"):
-                self.tools._price(contract, dict(inputs, **extra))
+            for override in (None, .05, 1):
+                with self.subTest(extra=extra, override=override), self.assertRaisesRegex(ValueError, "No whole-call price"):
+                    self.tools._price(contract, dict(inputs, **extra), override)
         contract["pricing"] = {"unit": "call", "creditsPerUnit": .08}
         self.assertEqual(self.tools._price(contract, dict(inputs, main="true")), .08)
         contract["pricing"] = {"unit": "usage", "creditsPerUnit": .08}
