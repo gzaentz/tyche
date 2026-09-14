@@ -39,6 +39,7 @@ class WorkspaceRuntimeTests(unittest.TestCase):
             self.assertIn('--read-only', config)
             self.assertIn('DEEPLINE_API_KEY', config)
             self.assertIn('CODEX_HOME', config)
+            self.assertIn('TYCHE_RUN_STARTED_AT', config)
             self.assertNotIn('not-a-real-secret', config)
             self.assertNotIn('sandbox_mode', config)
             self.assertNotIn('permission-profile', config)

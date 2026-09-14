@@ -1531,6 +1531,7 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
             continue
         if bound is None:
             needs_pricing = True
+            result.setdefault("blocked_actions", {})[aid] = "A verified whole-call price bound is required."
             continue
         maximum = costs.get(provider, {}).get("maximum_credits")
         cap = limits.get(f"{provider}_credits")
@@ -1539,8 +1540,10 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
             continue
         if maximum is None:
             needs_pricing = True
+            result.setdefault("blocked_actions", {})[aid] = "Existing provider cost has no safe upper bound; reconcile its saved receipts."
             continue
         if cap is not None and Decimal(str(maximum)) + Decimal(str(bound)) > Decimal(str(cap)):
+            result.setdefault("blocked_actions", {})[aid] = f"{provider} credit cap {cap} would be exceeded by existing maximum {maximum} plus this call {bound}."
             continue
         if provider == "deepline" and next_lead_limit is not None:
             since_last = calculate_progress(document)["deepline_since_last_lead"]["maximum_credits"]
@@ -1548,13 +1551,15 @@ def evaluate_stop(document: Any, *, now: Optional[datetime] = None, execution_bu
                 needs_pricing = True
                 continue
             if Decimal(str(since_last)) + Decimal(str(bound)) > Decimal(str(next_lead_limit)):
+                result.setdefault("blocked_actions", {})[aid] = "The per-next-lead credit cap would be exceeded."
                 continue
         if execution_budget is not None:
             from budget_guard import BudgetError, check_allowance
             try:
                 check_allowance(execution_budget, provider, bound, len(accepted),
                                 verification=provider == "deepline" and action.get("entity_type") == "email_validation")
-            except BudgetError:
+            except BudgetError as exc:
+                result.setdefault("blocked_actions", {})[aid] = str(exc)
                 continue
             except (KeyError, TypeError, ArithmeticError) as exc:
                 errors.append(f"execution budget: {exc}")

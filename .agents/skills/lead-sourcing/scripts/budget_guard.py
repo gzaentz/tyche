@@ -244,7 +244,9 @@ def check_allowance(state, provider, bound, accepted_count, *, verification=Fals
     credits["deepline"] += hold
     usd += hold * Decimal(state["usd_per_credit"]["deepline"])
     if usd > Decimal(state["usd_limit"]):
-        raise BudgetError("shared USD cap would be exceeded, including pending calls and verification reserve")
+        raise BudgetError(f"shared USD cap would be exceeded: ${usd} including this call, pending calls "
+                          f"and ${hold * Decimal(state['usd_per_credit']['deepline'])} reserved for email verification; "
+                          f"cap ${state['usd_limit']}. Verification can use its reserve; research cannot.")
     for name in PROVIDERS:
         if credits[name] > Decimal(state["credit_limits"][name]):
             raise BudgetError(f"{name} credit cap would be exceeded, including reservations")

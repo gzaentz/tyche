@@ -2,6 +2,7 @@
 """Launch a fresh, project-only Codex test without changing global settings."""
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -85,7 +86,8 @@ def tool_configuration(run_file, *, readonly=False):
         args.append('--read-only')
     forwarded = ['CODEX_HOME', 'DEEPLINE_API_KEY', 'DEEPLINE_BIN', 'SCRAPINGDOG_API_KEY',
                  'DEEPLINE_NO_AUTO_UPDATE', 'DEEPLINE_SKIP_SKILLS_SYNC', 'TYCHE_WORKSPACE_NODE',
-                 'TYCHE_WORKSPACE_NODE_MODULES', 'TYCHE_WORKSPACE_PYTHON', 'PYTHONDONTWRITEBYTECODE']
+                 'TYCHE_WORKSPACE_NODE_MODULES', 'TYCHE_WORKSPACE_PYTHON', 'PYTHONDONTWRITEBYTECODE',
+                 'TYCHE_RUN_STARTED_AT']
     return ('\n[mcp_servers.tyche]\ncommand = ' + json.dumps(sys.executable) + '\nargs = ' + json.dumps(args) + '\n'
             'env_vars = ' + json.dumps(forwarded) + '\n'
             'cwd = ' + json.dumps(str(ROOT)) + '\nrequired = true\n'
@@ -198,6 +200,7 @@ def smoke(command, env):
 
 
 def main():
+    launched_at = datetime.now(timezone.utc).isoformat()
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--check', action='store_true', help='Verify isolation and sourcing-session startup, including network setup; no model turn or provider calls.')
@@ -238,7 +241,8 @@ def main():
         # Research uses the installed CLI and project skill. CLI self-updates
         # and global skill sync can contact npm or alter context mid-run.
         env = dict(os.environ, CODEX_HOME=profile, TYCHE_ISOLATED_RUN='1',
-                   DEEPLINE_NO_AUTO_UPDATE='1', DEEPLINE_SKIP_SKILLS_SYNC='1')
+                   DEEPLINE_NO_AUTO_UPDATE='1', DEEPLINE_SKIP_SKILLS_SYNC='1',
+                   TYCHE_RUN_STARTED_AT=launched_at)
         env = workspace_environment(env)
         if args.exec_file is not None:
             for key in ('TYCHE_WORKSPACE_NODE', 'TYCHE_WORKSPACE_PYTHON'):

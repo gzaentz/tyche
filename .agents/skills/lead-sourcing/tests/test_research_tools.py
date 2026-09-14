@@ -101,6 +101,76 @@ class ResearchToolTests(unittest.TestCase):
         self.start()
         self.assertEqual(len(self.provider.requests), 1)
 
+    def test_launcher_clock_includes_setup_and_is_preserved_on_resume(self):
+        from datetime import datetime, timedelta, timezone
+        started = (datetime.now(timezone.utc) - timedelta(seconds=90)).isoformat()
+        with patch.dict(os.environ, {"TYCHE_RUN_STARTED_AT": started}):
+            self.start()
+        self.assertEqual(json.loads(self.path.read_text())["stop_check"]["started_at"], started)
+        with patch.dict(os.environ, {"TYCHE_RUN_STARTED_AT": datetime.now(timezone.utc).isoformat()}):
+            self.start()
+        self.assertEqual(json.loads(self.path.read_text())["stop_check"]["started_at"], started)
+
+    def test_research_budget_refusal_explains_protected_verification_reserve(self):
+        self.request["contact_fields"] = ["email"]
+        self.start(max_usd=.05, verification_reserve_credits=.4)
+        with self.assertRaisesRegex(ValueError, "reserved for email verification") as error:
+            self.lookup()
+        self.assertIn("cap $0.05", str(error.exception))
+        self.assertIn("Verification can use its reserve", str(error.exception))
+        self.assertFalse(budget.load_ledger(self.path)["calls"])
+        document = json.loads(self.path.read_text())
+        action = document["stop_check"]["next_actions"][0]
+        self.assertEqual(action["scope"], "example.test")
+        self.assertIn(action["id"], self.tools.inspect()["blocked_actions"])
+        self.assertNotIn(action["id"], {r["route_id"] for r in document["routes"]})
+        self.assertFalse((self.path.parent / "receipts" / (action["id"] + ".json")).exists())
+        budget.check_allowance(budget.load_ledger(self.path), "deepline", .2, 0, verification=True)
+
+    def test_all_selected_field_conflicts_are_reported_before_web_is_saved(self):
+        self.start()
+        self.provider.raw["element"]["locations"] = [{"headquarter": True, "country": "Canada"}]
+        ref = self.lookup()["lookups"][0]["results"][0]["ref"]
+        before = self.path.read_bytes()
+        receipts = sorted((self.path.parent / "receipts").glob("*.json"))
+        web = [{"target": "example.test", "purpose": "Review the announcement", "query": "example.test news",
+                "response": {"status": "ok", "results": [{"url": "https://example.test/news", "text": "An observed company announcement"}]}}]
+        company = {"target": "example.test", "decision": "hold_account", "reason": "Funding still needs research",
+                   "company": {"ref": ref, "website": "https://www.example.test/", "hq_country": "United States",
+                               "employee_range_evidence": {}}}
+        with self.assertRaises(ValueError) as error:
+            self.tools.review(companies=[company], web=web)
+        for field in ("website", "hq_country", "employee_range_evidence"):
+            self.assertIn(field, str(error.exception))
+        self.assertIn("Keep the selected ref", str(error.exception))
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(sorted((self.path.parent / "receipts").glob("*.json")), receipts)
+        company["company"] = {"ref": ref}
+        self.tools.review(companies=[company], web=web)
+        self.assertEqual(len(json.loads(self.path.read_text())["unresolved"]), 1)
+
+    def test_missing_company_hq_does_not_discard_reviewed_fields(self):
+        self.start()
+        ref = self.lookup()["lookups"][0]["results"][0]["ref"]
+        facts = self.tools._harvest({"ref": ref, "hq_country": "United States", "hq_state": "Minnesota"}, "example.test")
+        self.assertEqual(facts["hq_country"], "United States")
+        self.assertEqual(facts["hq_state"], "Minnesota")
+        self.assertEqual(facts["employee_range"], "51-200")
+
+    def test_publication_date_alias_is_retained_and_missing_date_is_not_invented(self):
+        self.start()
+        result = self.tools.review(web=[{"target": "example.test", "purpose": "Review publication", "query": "example.test news",
+            "response": {"status": "ok", "results": [
+                {"url": "https://example.test/news", "text": "A dated announcement", "published_date": "2026-02-09"},
+                {"url": "https://example.test/about", "text": "Current company information"}]}}])
+        route = result["web_references"]["web:0"]
+        evidence = self.tools._evidence({"ref": route + ":0", "date_basis": "published"})
+        self.assertEqual(evidence["date"], "2026-02-09")
+        with self.assertRaisesRegex(ValueError, "no publication/event date"):
+            self.tools._evidence({"ref": route + ":1", "date_basis": "published"})
+        current = self.tools._evidence({"ref": route + ":1"})
+        self.assertEqual(current["date_basis"], "observed_current")
+
     def test_schema_and_unknown_price_fail_before_paid_dispatch(self):
         self.start()
         with self.assertRaises(ValueError):

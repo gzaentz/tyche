@@ -33,7 +33,8 @@ CHECK = obj({"target": STRING, "purpose": STRING, "phase": {"enum": [
     "status_read": {"type": "boolean"}}, ("target", "purpose", "phase", "inputs"))
 COMPANY = obj({"target": STRING, "decision": {"enum": ["hold_account", "qualify_account", "hold_contact", "reject", "accept"]},
     "reason": STRING, "company": OBJECT, "qualification_checks": {"type": "array", "items": OBJECT},
-    "account_fit": OBJECT, "signal_evidence": OBJECT, "intent_details": STRING,
+    "account_fit": OBJECT, "signal_evidence": OBJECT,
+    "intent_details": {**STRING, "description": "One natural paragraph: state each verified signal and its date, explain its relevance in a following sentence, then close by connecting the evidence to the company's situation and requested product/service. Distinguish inferred needs from verified facts."},
     "primary_contact": OBJECT, "backup_contacts": {"type": "array", "items": OBJECT}}, ("target", "decision", "reason"))
 WEB = obj({"target": STRING, "purpose": STRING, "query": STRING,
     "operation": {"enum": ["search_query", "open", "find", "click"]},
@@ -45,9 +46,9 @@ TOOLS = {
         obj({"request": OBJECT, "max_usd": {"type": "number", "minimum": 0},
              "verification_reserve_credits": {"type": "number", "minimum": 0},
              "scrapingdog_usd_per_credit": {"type": "number", "exclusiveMinimum": 0}}, ("request",))),
-    "tyche_lookup": ("Execute 1–3 independent research choices. Choose the target, phase, tool and native inputs. Schemas, pricing, receipts and IDs are managed here. Use inspect(query=...) to find a capability. Never retry an uncertain paid call; inspect(recover=reference) records its saved response without dispatch. max_cost_credits is only a verified whole-call bound for pricing the catalog cannot express.",
+    "tyche_lookup": ("Execute 1–3 independent research choices, at most one check per company in a batch. Run discovery pilots singly. Choose the target, phase, tool and native inputs. Schemas, pricing, receipts and IDs are managed here. Use inspect(query=...) to find a capability. Never retry an uncertain paid call; inspect(recover=reference) records its saved response without dispatch. max_cost_credits is only a verified whole-call bound for pricing the catalog cannot express.",
         obj({"checks": {"type": "array", "items": CHECK, "minItems": 1, "maxItems": 3}}, ("checks",))),
-    "tyche_review": ("Save judgments and changed fields only. Evidence objects may use {ref, text, date_basis}; company and contact objects may select a Harvest ref. Contacts also need requested_role, role_match and role_group. Select an email receipt with email_ref. Never infer a rejection from missing evidence. web observations are saved first and can be referenced as web:0:0 in this call. Review source continuation/exhaustion explicitly with sources; saving a fact does not exhaust a source.",
+    "tyche_review": ("Save judgments and changed fields only. With a Harvest ref, omit receipt-owned names, URLs, size/location fields and their evidence; code supplies them. Company example: {ref, industry, sub_industry, description}. Contact example: {ref, requested_role, role_match, role_group}. Evidence objects may use {ref, text, date_basis}; select an email receipt with email_ref. Never infer a rejection from missing evidence. Include observed web results and reference them as web:0:0. Review source continuation/exhaustion explicitly with sources; saving a fact does not exhaust a source.",
         obj({"companies": {"type": "array", "items": COMPANY}, "web": {"type": "array", "items": WEB},
              "sources": {"type": "array", "items": SOURCE}})),
     "tyche_inspect": ("Read compact run/company state, a saved result, or a selected result field. query searches the free capability catalog; tool returns its cached schema/pricing. recover reconciles an existing receipt without repeating its provider request. Full evidence remains on disk; use ref and field rather than shell searches.",
@@ -191,7 +192,7 @@ class ResearchTools:
                 return self.inspect()
             ledger_file = self.path.with_name(self.path.name + ".budget.json")
             original = budget.read_object(ledger_file).get("initial_started_at") if ledger_file.exists() else None
-            options["started_at"] = original or datetime.now(timezone.utc).isoformat()
+            options["started_at"] = original or os.environ.get("TYCHE_RUN_STARTED_AT") or datetime.now(timezone.utc).isoformat()
             # Price the single-address verification reserve before initializing.
             # This free catalog receipt is captured before dispatch and registered
             # into the run after initialization; retries reuse it.
@@ -287,10 +288,14 @@ class ResearchTools:
             return copy.deepcopy(value)
         value = copy.deepcopy(value)
         row, source, _ = self._resolve(value.pop("ref"))
-        date = row.get("evidence_date", row.get("date"))
+        date = next((row.get(k) for k in ("evidence_date", "date", "published_date", "publishedDate", "publication_date") if row.get(k)), None)
+        basis = value.get("date_basis", value.get("evidence_date_basis",
+                    row.get("evidence_date_basis", row.get("date_basis", "published" if date else "observed_current"))))
+        if basis != "observed_current" and not (date or value.get("date") or value.get("evidence_date")):
+            raise ValueError("Selected source has no publication/event date. Supply a verified date, or use observed_current only for current-state evidence.")
         evidence = {"url": row.get("evidence_url") or row.get("url") or row.get("contact_url") or row.get("company_linkedin_url"),
                     "date": date or self._document()["request"]["as_of_date"],
-                    "date_basis": row.get("evidence_date_basis", row.get("date_basis", "published" if date else "observed_current")),
+                    "date_basis": basis,
                     "text": row.get("evidence_text", row.get("text")), "source": source}
         if signal:
             evidence = {"evidence_" + k if k != "source" else k: v for k, v in evidence.items()}
@@ -323,13 +328,19 @@ class ResearchTools:
                      "website": row.get("website"), "employee_range": row.get("employee_range"), "employee_range_evidence": evidence}
             hq = next((r for r in row.get("locations", []) if r.get("headquarter") is True), {})
             parsed = hq.get("parsed", {})
-            facts.update(hq_country=parsed.get("countryFull", parsed.get("country", hq.get("country"))),
-                         hq_state=parsed.get("state", hq.get("geographicArea")))
+            hq_fields = dict(hq_country=parsed.get("countryFull", parsed.get("country", hq.get("country"))),
+                             hq_state=parsed.get("state", hq.get("geographicArea")))
+            # Missing optional company HQ fields are not contrary evidence.
+            # The reviewer may supply them from other verified company sources.
+            facts.update({k: v for k, v in hq_fields.items() if v})
         # Reviewers choose roles and prose; receipt-owned identity fields cannot
         # silently override a different person or company.
-        for key in facts.keys() & value.keys():
-            if facts[key] != value[key]:
-                raise ValueError("Selected LinkedIn value conflicts with " + key)
+        conflicts = sorted(key for key in facts.keys() & value.keys() if facts[key] != value[key])
+        if conflicts:
+            supplied = sorted(facts.keys() & value.keys())
+            raise ValueError("Selected LinkedIn value conflicts with " + ", ".join(conflicts)
+                             + ". Keep the selected ref and omit these automatically supplied fields: "
+                             + ", ".join(supplied) + ". Reconcile a different identity by selecting its correct ref.")
         return {**facts, **value}
 
     def _contact(self, value, target, *, patch_primary=True):
@@ -376,6 +387,17 @@ class ResearchTools:
             return self._review(companies, web, sources)
 
     def _review(self, companies, web, sources):
+        # Validate selected provider facts before persisting attached web
+        # observations. Input corrections should not create partial web saves.
+        selected = copy.deepcopy(list(companies))
+        for item in selected:
+            target = item["target"]
+            if "company" in item:
+                item["company"] = self._harvest(item["company"], target)
+            if "primary_contact" in item:
+                item["primary_contact"] = self._contact(item["primary_contact"], target)
+            if "backup_contacts" in item:
+                item["backup_contacts"] = [self._contact(c, target, patch_primary=False) for c in item["backup_contacts"]]
         aliases = {f"web:{i}": self._observe_web(item) for i, item in enumerate(web)}
         def refs(value):
             if isinstance(value, dict):
@@ -388,7 +410,7 @@ class ResearchTools:
                         return rid + value[len(alias):]
             return value
         updates = []
-        for item in refs(list(companies)):
+        for item in refs(selected):
             target, decision = item["target"], item["decision"]
             change = {"scope": target, "state": {"accept": "accepted", "reject": "rejected"}.get(decision, "unresolved"),
                       "stage": "contact" if decision in {"qualify_account", "hold_contact"} else "account", "reason_text": item["reason"]}
@@ -400,12 +422,9 @@ class ResearchTools:
             for key in ("account_fit", "signal_evidence"):
                 if key in change:
                     change[key] = self._evidence(change[key], signal=True)
-            if "company" in item:
-                change["company"] = self._harvest(item["company"], target)
-            if "primary_contact" in item:
-                change["primary_contact"] = self._contact(item["primary_contact"], target)
-            if "backup_contacts" in item:
-                change["backup_contacts"] = [self._contact(c, target, patch_primary=False) for c in item["backup_contacts"]]
+            for key in ("company", "primary_contact", "backup_contacts"):
+                if key in item:
+                    change[key] = item[key]
             updates.append(change)
         routes = [{"route_id": s["ref"].split(":")[0], "state": s["state"], "reason": s["reason"],
                    "continuation_route_ids": [r.split(":")[0] for r in s.get("continuations", [])]} for s in refs(list(sources))]
@@ -436,7 +455,8 @@ class ResearchTools:
         return {"summary": document.get("summary", {}), "companies": rows[:12], "company_count": len(rows),
                 "budget": {"cap_usd": ledger["usd_limit"], "costs": totals, "blocked": ledger.get("blocked")},
                 "pending": pending[:12],
-                "review_due": runner.review_reminder(document), "stop": decision["decision"], "errors": decision["errors"]}
+                "review_due": runner.review_reminder(document), "stop": decision["decision"], "errors": decision["errors"],
+                "blocked_actions": decision.get("blocked_actions", {})}
 
     def inspect(self, target=None, ref=None, field=None, tool=None, query=None, recover=None, offset=0, limit=5, refresh=False):
         if sum(v is not None for v in (target, ref, tool, query, recover)) > 1:

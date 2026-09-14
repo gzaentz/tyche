@@ -410,7 +410,15 @@ def _prepare(run_file, validated):
         actions[:] = [a for a in actions if a["id"] != action["id"]] + [action]
         decision = evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))
         if action["id"] not in decision["eligible_actions"]:
-            raise ValueError("action not eligible: " + json.dumps(decision))
+            reason = decision.get("blocked_actions", {}).get(action["id"])
+            if reason:
+                # Keep the agent's concrete, unaffordable choice for the stop
+                # audit. No route, receipt or reservation is created. Otherwise
+                # the agent has to rebuild next_actions by hand to explain why
+                # this work cannot proceed at the remaining budget.
+                prepared["refusal"] = reason
+                return document
+            raise ValueError("action not eligible: " + (reason or json.dumps(decision)))
         metadata = {k: action[k] for k in AUDIT_IDENTITY if k in action}
         entry = dict(route_id=action["id"], phase=action["phase"], provider=provider,
                      operation=operation, request_summary=action["description"], state="untried",
@@ -423,6 +431,8 @@ def _prepare(run_file, validated):
         return document
 
     mutate(run_file, plan)
+    if "refusal" in prepared:
+        raise ValueError("action not eligible: " + prepared["refusal"])
     if action["paid_calls"]:
         request["spend"] = {"run_file": str(run_file), "route_id": action["id"],
                             "max_cost_credits": action["cost_upper_bound_credits"]}

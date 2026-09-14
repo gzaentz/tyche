@@ -76,6 +76,8 @@ File-backed runs register five local tools only in the temporary profile:
 The run file comes from the launcher's request-file directory, not model input.
 Provider credentials and bundled runtime paths are forwarded as environment
 variables; values are never copied into the temporary config or prompt.
+The launcher also supplies its start timestamp, so native run timing includes
+initialization and setup. Resuming an existing run keeps its original clock.
 
 The stdio relay advertises Codex's `codex/sandbox-state-meta` capability. On the
 first tool call it starts one child through `codex sandbox --sandbox-state-json`
