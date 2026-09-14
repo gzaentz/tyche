@@ -450,9 +450,19 @@ class ResearchToolTests(unittest.TestCase):
     def test_inspection_selects_company_and_run_fields_instead_of_ignoring_them(self):
         self.start()
         self.tools.review(companies=[{"target": "example.test", "decision": "hold_account", "reason": "Needs funding evidence",
-                                     "company": {"canonical_name": "ExamplePay"}}])
+                                     "company": {"canonical_name": "ExamplePay"}, "intent_details": "Saved research paragraph."}])
+        before = self.path.read_bytes(), budget.ledger_path(self.path).read_bytes(), len(self.provider.requests)
         selected = self.tools.inspect(target="example.test", field="company.candidate.canonical_name")
         self.assertEqual(selected, {"value": "ExamplePay"})
+        self.assertEqual(self.tools.inspect(target="example.test", field="candidate.canonical_name"), selected)
+        self.assertEqual(self.tools.call("tyche_inspect", {"target": "example.test", "field": "intent_details"}),
+                         {"value": "Saved research paragraph."})
+        self.assertEqual(self.tools.inspect(target="example.test", field="route_count"), {"value": 0})
+        with self.assertRaisesRegex(ValueError, "Unknown company field.*saved fields"):
+            self.tools.inspect(target="example.test", field="missing")
+        with self.assertRaisesRegex(ValueError, "Unknown company field"):
+            self.tools.inspect(target="missing.test", field="intent_details")
+        self.assertEqual((self.path.read_bytes(), budget.ledger_path(self.path).read_bytes(), len(self.provider.requests)), before)
         self.assertEqual(self.tools.inspect(field="stop_check.started_at")["value"],
                          json.loads(self.path.read_text())["stop_check"]["started_at"])
         with self.assertRaises(KeyError):

@@ -57,7 +57,7 @@ TOOLS = {
     "tyche_review": ("Save judgments and changed fields only. With a Harvest ref, omit receipt-owned names, URLs, size/location fields and their evidence; code supplies them. Company example: {ref, industry, sub_industry, description}. Contact example: {ref, requested_role, role_match, role_group}. Evidence normally needs only {ref} to reuse saved URL, text and date; override text/date only when source interpretation requires it. Select an email validation result with email_ref to supply its exact address and verdict. Never infer a rejection from missing evidence. Include observed web results and reference them as web:0:0. Review source continuation/exhaustion explicitly with sources; saving a fact does not exhaust a source.",
         obj({"companies": {"type": "array", "items": COMPANY}, "web": {"type": "array", "items": WEB},
              "sources": {"type": "array", "items": SOURCE}})),
-    "tyche_inspect": ("Read compact run/company state or saved results. query searches the free capability catalog; tool returns cached inputs/pricing. Describe only capabilities needed for the next step. Use ref=route with offset/limit to page saved results, or field to select a nested field from a result, tool, company or run. recover records an unrecorded saved response without dispatch; it does not settle unknown billing. Full receipts remain on disk.",
+    "tyche_inspect": ("Read compact run/company state or saved results. query searches the free capability catalog; tool returns cached inputs/pricing. Describe only capabilities needed for the next step. Use ref=route with offset/limit (1–10) to page saved results, or field to select a nested field from a result, tool, company or run. With target, fields such as intent_details and qualification_checks select the saved company record directly. recover records an unrecorded saved response without dispatch; it does not settle unknown billing. Full receipts remain on disk.",
         obj({"target": STRING, "ref": REFERENCE, "field": STRING, "tool": STRING, "query": STRING,
              "recover": REFERENCE, "offset": {"type": "integer", "minimum": 0},
              "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 10}, "refresh": {"type": "boolean"}})),
@@ -573,7 +573,18 @@ class ResearchTools:
                     "recent_sources": [{"ref": r["route_id"], "purpose": r.get("request_summary"),
                                         "phase": r.get("phase"), "status": r.get("provider_status"), "rows": r.get("rows_returned")} for r in routes[-limit:]]}
             if field:
-                return {"value": compact(self._field(value, field))}
+                # Preserve response-wrapper paths while accepting record fields
+                # directly, as researchers use them in review inputs.
+                try:
+                    selected = self._field(value, field)
+                except (KeyError, IndexError, TypeError, ValueError):
+                    try:
+                        selected = self._field(value["company"], field)
+                    except (KeyError, IndexError, TypeError, ValueError) as exc:
+                        fields = sorted((value["company"] or {}).keys())
+                        raise ValueError(f"Unknown company field {field!r}; saved fields: {fields}. "
+                                         "Inspection metadata: route_count, recent_sources.") from exc
+                return {"value": compact(selected)}
             value["company"] = compact(value["company"])
             return value
         if field:
