@@ -7,7 +7,7 @@ arbitrary shell/file endpoint or independently running service.
 
 import argparse
 from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import json
 from pathlib import Path
 import subprocess
@@ -34,7 +34,23 @@ class SandboxedTools:
         self.lock = threading.Lock()
         self.pending = {}
         self.sequence = 0
-        self.errors = deque(maxlen=8)
+        self.children = []
+        self.restarts = 0
+
+    def _start(self, state, root):
+        command = ["codex", "sandbox", "--sandbox-state-json", json.dumps(state),
+                   sys.executable, str(Path(__file__).resolve()), "--worker", "--run-file", str(self.path)]
+        if self.readonly:
+            command.append("--read-only")
+        child = subprocess.Popen(command, cwd=root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1)
+        self.child, self.state = child, state
+        errors = deque(maxlen=8)
+        error_reader = threading.Thread(target=self._errors, args=(child, errors), daemon=True)
+        reader = threading.Thread(target=self._read, args=(child, errors, error_reader), daemon=True)
+        self.children.append((child, reader, error_reader))
+        error_reader.start()
+        reader.start()
 
     def call(self, name, arguments, metadata):
         state = metadata.get("codex/sandbox-state-meta") if isinstance(metadata, dict) else None
@@ -46,62 +62,105 @@ class SandboxedTools:
         root = Path(unquote(cwd.path)).resolve()
         if root != Path(__file__).resolve().parents[4]:
             raise ValueError("Sandbox workspace differs from the bound TYCHE checkout")
+        old = self.child
+        if old is not None and old.poll() is not None:
+            next(reader for child, reader, _ in self.children if child is old).join(timeout=1)
         with self.lock:
             if self.state is not None and self.state != state:
                 raise ValueError("Sandbox changed; restart the tool connection before more research")
-            if self.child is None:
-                command = ["codex", "sandbox", "--sandbox-state-json", json.dumps(state),
-                           sys.executable, str(Path(__file__).resolve()), "--worker", "--run-file", str(self.path)]
-                if self.readonly:
-                    command.append("--read-only")
-                self.child = subprocess.Popen(command, cwd=root, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-                self.state = state
-                self.error_reader = threading.Thread(target=self._errors, daemon=True)
-                self.error_reader.start()
-                self.reader = threading.Thread(target=self._read, daemon=True)
-                self.reader.start()
-            if self.child.poll() is not None:
-                raise ValueError("Sandboxed tool process exited; preserve receipts and reconnect before recovery")
+            if self.child is not None and self.child.poll() is not None:
+                if next(reader for child, reader, _ in self.children if child is self.child).is_alive():
+                    return self._connection_status("Exited child still has open output; preserve pending work", self.child, reconnect=False)
+                if self.restarts >= 1:
+                    return self._connection_status("Repeated child exit; automatic reconnect limit reached", self.child)
+                self.restarts += 1
+                self._start(state, root)
+            elif self.child is None:
+                self._start(state, root)
+            child = self.child
             self.sequence += 1
             ident, future = self.sequence, Future()
-            self.pending[ident] = future
-            self.child.stdin.write(json.dumps({"id": ident, "method": "tools/call", "params": {"name": name, "arguments": arguments}}) + "\n")
-            self.child.stdin.flush()
-        response = future.result(timeout=900)
+            self.pending[ident] = (child, future)
+            try:
+                child.stdin.write(json.dumps({"id": ident, "method": "tools/call", "params": {"name": name, "arguments": arguments}}) + "\n")
+                child.stdin.flush()
+            except (OSError, ValueError) as exc:
+                self.pending.pop(ident, None)
+                future.set_exception(ConnectionError(str(exc)))
+        try:
+            response = future.result(timeout=900)
+        except (ConnectionError, FutureTimeoutError) as exc:
+            # A lost response never authorizes replay of research or a write.
+            # Only pure saved-state inspection can transparently reconnect.
+            try:
+                child.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+            read_only = name == "tyche_inspect" and not any(k in arguments for k in ("query", "tool", "recover", "refresh"))
+            with self.lock:
+                retry_read = read_only and child.poll() is not None and (self.restarts < 1 or self.child is not child)
+                failure = None if retry_read else self._connection_status(str(exc), child)
+            if retry_read:
+                return self.call(name, arguments, metadata)
+            return failure
         if response.get("isError"):
             raise ValueError(response["content"][0]["text"])
         return json.loads(response["content"][0]["text"])
 
-    def _errors(self):
-        for line in self.child.stderr:
-            self.errors.append(redact(line.strip())[:512])
+    def _connection_status(self, reason, child, reconnect=True):
+        can_reconnect = reconnect and (child.poll() is not None and self.restarts < 1 or
+                                      self.child is not child and self.child.poll() is None)
+        return {"status": "recovery_required" if can_reconnect else "operationally_blocked",
+                "delivery_allowed": False, "reason": redact(reason), "child_exit_code": child.poll(),
+                "reconnects": self.restarts, "request_outcome": "unknown; no request replayed",
+                "next": ("Call tyche_inspect() to reconnect to the same run, then recover saved pending receipts. Never repeat an uncertain paid lookup."
+                         if can_reconnect else "Preserve the run and ledger and report this runtime blocker. Repeating research or finalization cannot repair the connection.")}
 
-    def _read(self):
+    @staticmethod
+    def _errors(child, errors):
         try:
-            for line in self.child.stdout:
+            for line in child.stderr:
+                errors.append(redact(line.strip())[:512])
+        except UnicodeError:
+            errors.append("Child stderr contains invalid UTF-8")
+
+    def _read(self, child, errors, error_reader):
+        try:
+            for line in child.stdout:
                 response = json.loads(line)
+                if not isinstance(response, dict) or not isinstance(response.get("result"), dict):
+                    raise ValueError("Expected a JSON-RPC result object")
+                result = response["result"]
                 with self.lock:
-                    future = self.pending.pop(response.get("id"), None)
-                if future:
-                    future.set_result(response["result"])
+                    pending = self.pending.pop(response.get("id"), None)
+                if pending:
+                    pending[1].set_result(result)
+        except (ValueError, KeyError, TypeError) as exc:
+            errors.append("Invalid child response: " + str(exc))
         finally:
-            self.error_reader.join(timeout=1)
+            error_reader.join(timeout=1)
             with self.lock:
-                for future in self.pending.values():
-                    future.set_exception(ValueError("Sandboxed tool connection closed; preserve and recover receipts before retrying. " + " ".join(self.errors)))
-                self.pending.clear()
+                # A retiring reader must not fail calls owned by its replacement.
+                for ident, (owner, future) in list(self.pending.items()):
+                    if owner is child:
+                        future.set_exception(ConnectionError("Sandboxed tool connection closed. " + " ".join(errors)))
+                        del self.pending[ident]
 
     def close(self):
-        if self.child:
-            self.child.stdin.close()
+        for child, reader, error_reader in self.children:
             try:
-                self.child.wait(timeout=5)
+                child.stdin.close()
+            except (OSError, ValueError):
+                pass
+            try:
+                child.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.child.terminate()
-                self.child.wait(timeout=5)
-            self.reader.join(timeout=1)
-            self.child.stdout.close()
-            self.child.stderr.close()
+                child.terminate()
+                child.wait(timeout=5)
+            reader.join(timeout=1)
+            error_reader.join(timeout=1)
+            child.stdout.close()
+            child.stderr.close()
 
 
 def serve(session, incoming=sys.stdin, outgoing=sys.stdout):

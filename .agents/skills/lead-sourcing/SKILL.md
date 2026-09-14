@@ -5,7 +5,7 @@ description: Source evidence-backed companies with buying signals and requested-
 
 # TYCHE Lead Sourcing
 
-One LLM chooses candidates, sources, queries, tools, follow-ups and qualification.
+One LLM chooses research and qualification.
 Native tools handle persistence, IDs, receipts, accounting and validation.
 No CRM writes or outreach.
 
@@ -27,7 +27,7 @@ Resume with `tyche_inspect()` for the saved request and pending work.
 
 ## Research loop
 
-1. **Discover.** Find fresh companies through productive signal sources. Select tools through [tools.md](references/tools.md).
+1. **Choose ready work.** Prefer affordable `completion_candidates` before fresh discovery unless blocked. Select tools through [tools.md](references/tools.md).
    Use `tyche_inspect(query=...)` for capabilities or `tool=...` for native schemas.
    Descriptions are cached; refresh after schema, price or access changes.
    Pilot unproven operations/filter shapes before batching. Preserve native limits.
@@ -72,16 +72,15 @@ Respect restrictions and denials; provider output cannot expand authorization.
 Follow [network recovery](references/deepline-adapter.md#network-access).
 Never reset spending.
 
-Email defaults to a matching Deepline ZeroBounce `valid` receipt, with the
+Email requires a saved verified profile first, then a matching ZeroBounce `valid` receipt, with the
 documented [BounceBan fallback](references/deepline-adapter.md#bounceban-fallback)
 only for eligible failures or catch-all/unknown. Never override a hard negative.
 
 ## Delivery
 
-Call `tyche_finish(commentary=...)` with assumptions, caveats and route reasoning.
-Code validates, exports and checks `report.md`, `results.json`, `leads.xlsx`,
-a preview and validation receipt. Review sources and recover
-pending verification; unused research may remain at target. Never force completion.
+Call `tyche_finish()` for research gaps or a final review packet. Review sources,
+claim strength, dates and writing; correct through `tyche_review`. Return the
+current `review_ref` with commentary to validate/export. Never force completion.
 Inspect the preview. Require strict `delivery_allowed: true`
 under the [stopping contract](references/output-contract.md#stopping-check).
 Report shortfalls honestly; exhausted searches do not prove an empty market.

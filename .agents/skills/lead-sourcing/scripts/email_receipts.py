@@ -197,6 +197,71 @@ def fallback_allowed(verdict):
         verdict.get("status") is None and verdict.get("provider_status") in FAILURES)
 
 
+def original_validation(run_file, routes, email):
+    for source in _sources(routes, "zerobounce"):
+        try:
+            return saved_result(run_file, routes, source, email), source
+        except OtherEmail:
+            continue
+    return None, None
+
+
+def email_work(action, request):
+    """Identify email operations, including email add-ons to profile enrichment."""
+    if not action.get("paid_calls") or action.get("status_read"):
+        return False
+    tool = request.get("tool", request.get("operation", ""))
+    words = set(re.findall(r"[a-z]+", tool.casefold()))
+    payload = request.get("payload", request)
+    addon = any(str(value).casefold() in {"true", "1"} for key, value in payload.items()
+                if re.sub(r"[^a-z]", "", key.casefold()) in {"findemail", "enrichemail", "includeemail"})
+    return bool(validator_for_tool(tool) or addon or action.get("phase") == "email_validation"
+                or "email" in tool.casefold() and not words & {"balance", "credits"})
+
+
+def decision(run_file, routes, source, email):
+    """One receipt-derived presentation of usability; never promote a domain flag."""
+    verdict = saved_result(run_file, routes, source, email)
+    validator = validator_for_tool(source.get("tool"))
+    usable = (validator == "zerobounce" and verdict.get("status") == "valid" or
+              validator == "bounceban" and verdict.get("status") == "success" and verdict.get("result") == "deliverable")
+    fallback = validator == "zerobounce" and fallback_allowed(verdict)
+    note = None
+    if fallback:
+        try:
+            check_fallback(run_file, budget_guard.read_object(Path(run_file)),
+                           {"operation": "execute", "tool": "bounceban_verify", "payload": {"email": email}})
+        except (ValueError, OSError) as exc:
+            fallback, note = False, str(exc)
+    if usable and validator == "bounceban":
+        original, original_source = original_validation(run_file, routes, email)
+        ids = [r.get("route_id") for r in routes]
+        usable = bool(original) and fallback_allowed(original) and ids.index(original_source["route_id"]) < ids.index(source["route_id"])
+    return {**verdict, "usable": bool(usable), "fallback_allowed": fallback,
+            "next": ("Use this saved valid email; a domain catch-all flag does not invalidate the address."
+                     if usable else "Eligible for one budgeted BounceBan check; reuse any existing attempt."
+                     if fallback else note or "Do not deliver this address or override a hard negative; inspect saved evidence or choose another contact.")}
+
+
+def route_decisions(run_file, document, route):
+    """Expose saved validation results without confusing them with contact identity."""
+    if not validator_for_tool(route.get("tool")) or route.get("phase") != "email_validation":
+        return []
+    saved = _saved_receipt(run_file, route)
+    records = deepline._records(saved.get("provider_response", {}).get("body"))
+    addresses = {r.get("address", r.get("email")) for r in records if isinstance(r, dict)}
+    addresses.add(saved.get("attempt", {}).get("request", {}).get("payload", {}).get("email"))
+    source = {k: route[k] for k in ("provider", "operation", "tool", "route_id")}
+    results = []
+    for email in sorted(a for a in addresses if isinstance(a, str) and a):
+        try:
+            value = decision(run_file, document["routes"], source, email)
+        except (ValueError, OSError, KeyError) as exc:
+            value = {"email": email, "usable": False, "fallback_allowed": False, "next": str(exc)}
+        results.append({"ref": route["route_id"], **value})
+    return results
+
+
 def check_fallback(run_file, document, request):
     """Refuse unnecessary or repeated BounceBan dispatch before reserving spend."""
     if request.get("operation") != "execute" or validator_for_tool(request.get("tool")) != "bounceban":
@@ -205,13 +270,7 @@ def check_fallback(run_file, document, request):
     if not _text(email):
         raise ValueError("BounceBan verification requires an exact email")
     routes = document.get("routes", [])
-    found = None
-    for source in _sources(routes, "zerobounce"):
-        try:
-            found = saved_result(run_file, routes, source, email)
-        except OtherEmail:
-            continue
-        break
+    found, _ = original_validation(run_file, routes, email)
     if found is None or not fallback_allowed(found):
         raise ValueError("BounceBan requires a saved same-email ZeroBounce catch-all/unknown or service failure; valid and hard-negative verdicts cannot use fallback")
     # A changed mode or route ID is not permission to repeat a billed verification.

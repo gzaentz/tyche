@@ -618,10 +618,15 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
 
         contact = row["primary_contact"]
         location = contact["location_evidence"]
-        location["source"] = perform(tools[1], "contact_verification", {"name": contact["full_name"], "firstName": "Ada",
+        location["source"] = perform(tools[1], "contact_verification", {"fullName": contact["full_name"],
+            "currentPosition": [{"companyName": company["canonical_name"], "title": contact["current_title"],
+                                 "companyLinkedinUrl": company["linkedin_url"]}],
             "linkedinUrl": location["evidence_url"], "location": {"linkedinText": location["evidence_text"],
                 "parsed": {"countryFull": contact["country"], "state": contact.get("state"), "city": contact.get("city")}}},
             {"url": location["evidence_url"]})
+        runner.save_review(path, {"companies": [{"scope": "example.com", "stage": "contact",
+            "primary_contact": {k: v for k, v in contact.items() if k not in {"email", "email_validation"}},
+            "reason_text": "Current LinkedIn identity, employer and requested role reviewed before email work"}]})
         email_source = perform(tools[2], "email_validation", {"email": contact["email"], "status": "valid", "sub_status": "catch_all"},
                                {"email": contact["email"]})
         contact.pop("email_validation")  # Existing review fills this from the original response.

@@ -13,6 +13,29 @@ import email_receipts as receipts
 import run_attempt
 
 
+def selected_profile(path, document, domain):
+    """Current LinkedIn evidence prerequisite for these email-only fixtures."""
+    document['request'].setdefault('requested_roles', ['Chief Operating Officer'])
+    role = document['request']['requested_roles'][0]
+    source = {'provider': 'deepline', 'operation': 'execute', 'tool': 'harvestapi_get_profile', 'route_id': 'profile-fixture'}
+    url = 'https://www.linkedin.com/in/fixture-buyer/'
+    company_url = 'https://www.linkedin.com/company/fixture-company/'
+    contact = {'full_name': 'Fixture Buyer', 'current_title': role, 'requested_role': role, 'role_match': 'exact',
+        'linkedin_url': url, 'location_evidence': {'source': source}, 'company': 'Fixture Company'}
+    row = next(r for r in document['unresolved'] if r['candidate']['domain'] == domain)
+    row['candidate'].update(canonical_name='Fixture Company', linkedin_url=company_url)
+    row['primary_contact'] = contact
+    document['routes'].append({**source, 'request_fingerprint': 'profile-fixture', 'provider_status': 'ok',
+        'paid_calls': 0, 'cost_credits': 0, 'cost_upper_bound_credits': 0, 'cost_basis': 'actual'})
+    path.write_text(json.dumps(document))
+    receipt = {**source, 'receipt_status': 'complete', 'status': 'ok', 'request_fingerprint': 'profile-fixture',
+        'run_fingerprint': run_attempt.budget_guard.run_fingerprint(path), 'provider_response': {'body': {
+            'status': 'ok', 'element': {'linkedinUrl': url, 'firstName': 'Fixture', 'lastName': 'Buyer',
+                'currentPosition': [{'companyName': 'Fixture Company', 'title': role, 'companyLinkedinUrl': company_url}]}}}}
+    (path.parent / 'receipts').mkdir(exist_ok=True)
+    (path.parent / 'receipts/profile-fixture.json').write_text(json.dumps(receipt))
+
+
 class EmailReceiptTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
@@ -88,6 +111,7 @@ class EmailReceiptTests(unittest.TestCase):
             'account_fit': {'evidence_url': 'https://target.example/product',
                             'evidence_text': 'Verified platform fit.'}}]
         fixture.path.write_text(json.dumps(document))
+        selected_profile(fixture.path, document, 'target.example')
         spec = fixture.spec('zerobounce-original', paid=True)
         spec['action'].update(phase='email_validation', scope='target.example', approach='zerobounce-validation')
         spec['request'].update(tool='zerobounce_validate', payload={'email': 'buyer@target.example'})
@@ -125,7 +149,7 @@ class EmailReceiptTests(unittest.TestCase):
                'error': {'message': 'Invalid schema: email is required'}}
         fixture, spec = self.prepared_run(raw, exit_code=1)
         document = json.loads(fixture.path.read_text())
-        document['routes'][0]['provider_status'] = 'provider_error'
+        next(r for r in document['routes'] if r.get('tool') == 'zerobounce_validate')['provider_status'] = 'provider_error'
         fixture.path.write_text(json.dumps(document))
         path = fixture.path.parent / 'receipts/zerobounce-original.json'
         saved = json.loads(path.read_text())
@@ -265,6 +289,7 @@ class EmailReceiptTests(unittest.TestCase):
         fixture.doc['unresolved'] = [{'stage': 'contact', 'candidate': {'domain': 'example.com'},
             'account_fit': {'evidence_url': 'https://example.com/product', 'evidence_text': 'Verified platform fit.'}}]
         fixture.path.write_text(json.dumps(fixture.doc))
+        selected_profile(fixture.path, fixture.doc, 'example.com')
         spec=fixture.spec('bad-fallback',paid=True)
         spec['action'].update(phase='email_validation', scope='example.com')
         spec['request'].update(tool='bounceban_verify_single',payload={'email':'nobody@example.com'})

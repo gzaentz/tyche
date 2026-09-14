@@ -81,6 +81,172 @@ class ResearchToolTests(unittest.TestCase):
     def lookup(self, *checks):
         return self.tools.call("tyche_lookup", {"checks": list(checks or [check()])})
 
+    def selected_contact(self, target="example.test"):
+        """A reviewed account and current person, all from local provider fixtures."""
+        ref = self.lookup(check(target))["lookups"][0]["results"][0]["ref"]
+        self.tools.review(companies=[{"target": target, "decision": "qualify_account", "reason": "Verified fit",
+            "company": {"ref": ref}, "account_fit": {"ref": ref, "text": "Provides payments infrastructure"}}])
+        self.provider.raw = {"status": "ok", "element": {"linkedinUrl": "https://www.linkedin.com/in/ada-example/",
+            "firstName": "Ada", "lastName": "Example", "currentPosition": [{"companyName": "ExamplePay",
+                "companyLinkedinUrl": "https://www.linkedin.com/company/examplepay/", "title": "Head of Payments"}],
+            "location": {"parsed": {"countryFull": "Singapore"}}}}
+        profile = self.lookup(check(target, phase="contact_verification", tool="harvestapi_get_profile",
+            inputs={"url": "https://www.linkedin.com/in/ada-example/"}))["lookups"][0]["results"][0]["ref"]
+        self.tools.review(companies=[{"target": target, "decision": "hold_contact", "reason": "Selected current buyer",
+            "primary_contact": {"ref": profile, "requested_role": "Head of Payments", "role_match": "exact"}}])
+        return profile
+
+    def test_profile_gate_precedes_email_spend_and_reuses_current_profile(self):
+        self.start()
+        ref = self.lookup()["lookups"][0]["results"][0]["ref"]
+        self.tools.review(companies=[{"target": "example.test", "decision": "qualify_account", "reason": "Account passed",
+            "company": {"ref": ref}, "account_fit": {"ref": ref, "text": "Provides payments"}}])
+        email = check(phase="email_validation", tool="zerobounce_validate", inputs={"email": "ada@example.test"})
+        before = budget.ledger_path(self.path).read_bytes()
+        with self.assertRaisesRegex(ValueError, "Email work requires verified identity"):
+            self.lookup(email)
+        for tool, phase, payload in (
+                ("fixture_email_finder", "contact_discovery", {"first_name": "Ada", "last_name": "Example", "domain": "example.test"}),
+                ("harvestapi_get_profile", "contact_verification", {"url": "https://www.linkedin.com/in/ada-example/", "findEmail": True})):
+            spec = research_input.prepare_lookup({"scope": "example.test", "phase": phase,
+                "purpose": "Email enrichment", "max_cost_credits": .2,
+                "request": {"operation": "execute", "tool": tool, "payload": payload}})
+            with self.subTest(tool=tool), self.assertRaisesRegex(ValueError, "Email work requires verified identity"):
+                runner.run_attempt(self.path, spec, execute=lambda *_: self.fail("Provider must not run"))
+        self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
+        self.assertFalse(any(r.get("tool") == "zerobounce_validate" and r["operation"] == "execute" for r in self.provider.requests))
+        # Resolve the profile once and reuse it for both email finding and validation.
+        self.provider.raw = {"status": "ok", "element": {"linkedinUrl": "https://www.linkedin.com/in/ada-example/",
+            "firstName": "Ada", "lastName": "Example", "currentPosition": [{"companyName": "ExamplePay", "title": "Head of Payments",
+                "companyLinkedinUrl": "https://www.linkedin.com/company/examplepay/"}]}}
+        profile = self.lookup(check(phase="contact_verification", tool="harvestapi_get_profile",
+            inputs={"url": "https://www.linkedin.com/in/ada-example/"}))["lookups"][0]["results"][0]["ref"]
+        self.tools.review(companies=[{"target": "example.test", "decision": "hold_contact", "reason": "Current identity and role verified",
+            "primary_contact": {"ref": profile, "requested_role": "Head of Payments", "role_match": "exact"}}])
+        self.provider.raw = {"status": "ok", "data": {"address": "ada@example.test", "status": "valid", "domain_is_catch_all": True}}
+        result = self.lookup(email)["lookups"][0]
+        self.assertTrue(result["email_decisions"][0]["usable"])
+        self.assertFalse(result["email_decisions"][0]["fallback_allowed"])
+        saved = self.tools.inspect()["completion_candidates"][0]
+        self.assertTrue(saved["profile_verified"])
+        self.assertEqual(saved["saved_valid_emails"][0]["email"], "ada@example.test")
+        self.assertEqual(sum(r["operation"] == "execute" and r.get("tool") == "harvestapi_get_profile" for r in self.provider.requests), 1)
+
+    def test_completion_advice_surfaces_legacy_valid_email_with_unfinished_profile(self):
+        self.start()
+        self.selected_contact()
+        self.provider.raw = {"status": "ok", "data": {"address": "ada@example.test", "status": "valid"}}
+        self.lookup(check(phase="email_validation", tool="zerobounce_validate", inputs={"email": "ada@example.test"}))
+        # Replay the older Arizona shape: paid email saved, profile still missing.
+        document = json.loads(self.path.read_text())
+        candidate = document["unresolved"][0]
+        candidate.pop("primary_contact")
+        other = copy.deepcopy(candidate)
+        other["candidate"]["domain"] = "other.example"
+        document["unresolved"].insert(0, other)
+        self.path.write_text(json.dumps(document))
+        before = budget.ledger_path(self.path).read_bytes()
+        calls = len(self.provider.requests)
+        due = self.tools.inspect()["completion_candidates"]
+        self.assertEqual(due[0]["target"], "example.test")
+        self.assertFalse(due[0]["profile_verified"])
+        self.assertEqual(due[0]["saved_valid_emails"][0]["email"], "ada@example.test")
+        self.assertIn("Select and review", due[0]["missing"][0])
+        self.assertEqual(len(self.provider.requests), calls)
+        self.assertEqual(budget.ledger_path(self.path).read_bytes(), before)
+
+    def test_banner_single_vacancy_review_keeps_rapid_hiring_unresolved(self):
+        self.request["buying_signals"] = [{"kind": "RAPID_HIRING", "query": "Rapid clinical hiring"}]
+        self.start()
+        finding = {"target": "banner.example", "decision": "hold_account", "reason": "A single vacancy does not establish rapid hiring",
+            "qualification_checks": [{"criterion": "rapid hiring", "importance": "required", "status": "unknown",
+                "claim": "One current nursing vacancy is insufficient to infer rapid hiring", "signal": "RAPID_HIRING",
+                "evidence": [{"ref": "web:0:0"}]}]}
+        result = self.tools.review(companies=[finding], web=[{"target": "banner.example", "purpose": "Review hiring strength",
+            "query": "https://banner.example/careers", "operation": "open", "response": {"status": "ok", "results": [
+                {"url": "https://banner.example/careers", "text": "Banner Health lists one current nursing vacancy."}]}}])
+        self.assertEqual(result["progress"]["summary"]["accepted_companies"], 0)
+        with self.assertRaisesRegex(ValueError, "required evidence"):
+            self.tools.review(companies=[{"target": "banner.example", "decision": "qualify_account", "reason": "Try to continue with the unresolved required claim"}])
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved["unresolved"][0]["qualification_checks"][0]["status"], "unknown")
+        self.assertFalse(saved["rejected"])
+
+    def test_wrong_identity_employer_role_or_foreign_profile_cannot_buy_email(self):
+        self.start()
+        ref = self.selected_contact()
+        original = self.path.read_bytes()
+        receipt = self.path.parent / "receipts" / (ref.split(":")[0] + ".json")
+        raw = receipt.read_bytes()
+        variants = [("full_name", "Someone Else"), ("current_title", "Sales Manager"),
+                    ("requested_role", "Unrequested role"), ("role_match", "guessed")]
+        for field, value in variants:
+            doc = json.loads(original)
+            doc["unresolved"][0]["primary_contact"][field] = value
+            self.path.write_text(json.dumps(doc))
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "Email work requires verified identity"):
+                self.lookup(check(phase="email_validation", tool="zerobounce_validate", inputs={"email": "ada@example.test"}))
+        self.path.write_bytes(original)
+        for foreign in (False, True):
+            saved = json.loads(raw)
+            if foreign:
+                saved["run_fingerprint"] = "another-run"
+            else:
+                position = saved["provider_response"]["body"]["element"]["currentPosition"][0]
+                position.update(companyName="Other employer", companyLinkedinUrl="https://www.linkedin.com/company/other/")
+            receipt.write_text(json.dumps(saved))
+            before = budget.ledger_path(self.path).read_bytes()
+            with self.assertRaisesRegex(ValueError, "Email work requires verified identity"):
+                self.lookup(check(phase="email_validation", tool="zerobounce_validate", inputs={"email": "ada@example.test"}))
+            self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
+
+    def test_verified_backup_cannot_unlock_email_work_for_unverified_primary(self):
+        self.start()
+        self.selected_contact()
+        document = json.loads(self.path.read_text())
+        row = document["unresolved"][0]
+        row["backup_contacts"] = [row.pop("primary_contact")]
+        row["primary_contact"] = {"full_name": "Unverified Person"}
+        self.path.write_text(json.dumps(document))
+        before = budget.ledger_path(self.path).read_bytes()
+        with self.assertRaisesRegex(ValueError, "Email work requires verified identity"):
+            self.lookup(check(phase="email_validation", tool="zerobounce_validate", inputs={"email": "unverified@example.test"}))
+        self.assertEqual(budget.ledger_path(self.path).read_bytes(), before)
+
+    def test_finish_without_completion_returns_actionable_work_without_export(self):
+        self.start()
+        self.selected_contact()
+        before = budget.ledger_path(self.path).read_bytes()
+        with patch("research_tools.subprocess.run") as exported:
+            result = self.tools.finish()
+        self.assertEqual(result["status"], "needs_research")
+        self.assertEqual(result["progress"]["completion_candidates"][0]["target"], "example.test")
+        self.assertFalse(result["delivery_allowed"])
+        exported.assert_not_called()
+        self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
+
+    def test_native_fallback_reuses_both_receipts_and_exposes_no_repeat_decision(self):
+        self.start()
+        self.selected_contact()
+        self.provider.raw = {"status": "ok", "data": {"address": "ada@example.test", "status": "unknown"}}
+        original = self.lookup(check(phase="email_validation", tool="zerobounce_validate", inputs={"email": "ada@example.test"}))["lookups"][0]
+        self.assertTrue(original["email_decisions"][0]["fallback_allowed"])
+        self.provider.raw = {"status": "ok", "data": {"email": "ada@example.test", "status": "success", "result": "deliverable"}}
+        fallback = self.lookup(check(phase="email_validation", tool="bounceban_verify_single", inputs={"email": "ada@example.test"}))["lookups"][0]
+        self.assertTrue(fallback["email_decisions"][0]["usable"])
+        before = budget.ledger_path(self.path).read_bytes()
+        self.tools.review(companies=[{"target": "example.test", "decision": "hold_contact", "reason": "Validated fallback selected",
+            "primary_contact": {"email_ref": fallback["results"][0]["ref"]}}])
+        saved = json.loads(self.path.read_text())["unresolved"][0]["primary_contact"]["email_validation"]
+        self.assertEqual(saved["source"]["route_id"], original["route"])
+        self.assertEqual(saved["fallback"]["source"]["route_id"], fallback["route"])
+        self.assertEqual(saved["fallback"]["result"], "deliverable")
+        reread = self.tools.inspect(ref=original["route"])
+        self.assertFalse(reread["email_decisions"][0]["fallback_allowed"])
+        self.assertIn("already attempted", reread["email_decisions"][0]["next"])
+        self.assertTrue(self.tools.inspect()["completion_candidates"][0]["email_usable"])
+        self.assertEqual(budget.ledger_path(self.path).read_bytes(), before)
+
     def test_start_resume_and_cached_describe_need_no_manual_bookkeeping(self):
         self.start()
         result = self.lookup()
@@ -773,7 +939,16 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(saved["accepted"][0]["primary_contact"]["email_validation"]["status"], "valid")
         self.assertEqual(saved["accepted"][0]["primary_contact"]["country"], "United States")
         self.assertIn("leads_ready_at", saved["stop_check"])
-        result = self.tools.call("tyche_finish", {"commentary": "Offline fixture. Required evidence and the selected buyer were reviewed; no live research was performed."})
+        packet = self.tools.finish()
+        self.assertEqual(packet["status"], "review_required")
+        self.assertIn("One vacancy does not establish rapid hiring", packet["instructions"])
+        self.assertFalse((self.path.parent / "leads.xlsx").exists())
+        self.tools.review(companies=[{"target": "example.com", "decision": "accept", "reason": "Final writing reviewed",
+            "intent_details": row["intent_details"] + " Its manufacturing business depends on coordinated fulfillment."}])
+        stale = self.tools.finish(review_ref=packet["review_ref"])
+        self.assertEqual(stale["status"], "review_required")
+        self.assertNotEqual(stale["review_ref"], packet["review_ref"])
+        result = self.tools.call("tyche_finish", {"review_ref": stale["review_ref"], "commentary": "Offline fixture. Required evidence and the selected buyer were reviewed; no live research was performed."})
         validation = json.loads((self.path.parent / "validation.json").read_text())
         self.assertTrue(validation["delivery_allowed"])
         self.assertIn("completed_at", validation)

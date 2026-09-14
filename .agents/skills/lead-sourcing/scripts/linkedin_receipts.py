@@ -41,7 +41,7 @@ def _text(value):
     return " ".join(value.split()).casefold() if isinstance(value, str) else None
 
 
-def _saved_profile(run_file, source, url, kind, routes):
+def _saved_profile(run_file, source, url, kind, routes, target_company=None):
     rid = source.get("route_id")
     if not isinstance(rid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", rid):
         raise ValueError("requires a saved HarvestAPI route ID")
@@ -78,7 +78,35 @@ def _saved_profile(run_file, source, url, kind, routes):
     if len(profiles) != 1:
         raise ValueError("captured HarvestAPI response must contain exactly one matching LinkedIn entity")
     raw = {k: v for k, v in profiles[0].items() if k not in {"employee_range", "country", "state", "city"}}
-    return deepline.normalize_evidence(raw, tool=tool, entity_type="company" if kind == "company" else "contact")
+    return deepline.normalize_evidence(raw, tool=tool, entity_type="company" if kind == "company" else "contact",
+                                      target_company_linkedin_url=target_company)
+
+
+def contact_verification_errors(document, run_file, company, contact):
+    """Reuse a selected profile receipt; role equivalence remains the researcher's judgment."""
+    if not isinstance(contact, dict) or not contact:
+        return ["Select and review a saved HarvestAPI profile before email work"]
+    evidence = contact.get("location_evidence") or contact
+    try:
+        profile = _saved_profile(run_file, evidence.get("source", {}),
+            contact.get("linkedin_url", contact.get("contact_url")), "in", document.get("routes", []),
+            company.get("linkedin_url"))
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        return ["Verify the selected person's LinkedIn profile: " + str(exc)]
+    errors = []
+    for saved, actual in (("full_name", "contact_name"), ("current_title", "contact_title")):
+        if not _text(profile.get(actual)) or _text(contact.get(saved)) != _text(profile.get(actual)):
+            errors.append(saved + " must match the saved current LinkedIn profile")
+    expected, actual = _entity(company.get("linkedin_url"), "company"), _entity(profile.get("company_linkedin_url"), "company")
+    matches = (expected == actual if expected and actual else
+               bool(_text(profile.get("company"))) and _text(profile.get("company")) == _text(company.get("canonical_name")))
+    if not matches:
+        errors.append("LinkedIn must confirm the selected person's current company")
+    role = _text(contact.get("requested_role"))
+    roles = {_text(r) for r in document.get("request", {}).get("requested_roles", [])}
+    if not role or role not in roles or contact.get("role_match") not in {"exact", "normalized", "approved_family"}:
+        errors.append("Review the current title against a saved requested role (exact, normalized or approved_family)")
+    return errors
 
 
 def linkedin_receipt_errors(document, run_file, *, fill_missing=False):

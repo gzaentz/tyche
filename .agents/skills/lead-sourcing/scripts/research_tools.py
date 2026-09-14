@@ -1,6 +1,7 @@
 """Run-bound research tools. Existing helpers own dispatch, persistence and gates."""
 
 import copy
+import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
@@ -14,6 +15,7 @@ import uuid
 import budget_guard as budget
 import deepline
 import email_receipts
+import linkedin_receipts
 import research_input
 import provider_pricing
 import run_attempt as runner
@@ -31,7 +33,7 @@ EVIDENCE = {"type": "object", "additionalProperties": True, "properties": {
     "ref": REFERENCE, "text": STRING, "date": {**STRING, "description": "Verified date in YYYY-MM-DD form."},
     "date_basis": {"enum": ["published", "posted", "updated", "observed_current"]}, "signal": STRING}}
 QUALIFICATION_CHECK = obj({"criterion": STRING, "importance": {"enum": ["required", "preferred"]},
-    "status": {"enum": ["pass", "fail", "unknown"]}, "claim": STRING, "signal": STRING,
+    "status": {"enum": ["pass", "fail", "unknown"]}, "claim": {**STRING, "description": "Match claim strength to source evidence. One vacancy is not rapid hiring; repeated hiring needs distinct dated observations. Ambiguous job locations do not establish company geography. Unsupported required claims remain unknown."}, "signal": STRING,
     "evidence": {"type": "array", "items": EVIDENCE}}, ("criterion", "importance", "status", "claim", "evidence"))
 CHECK = obj({"target": STRING, "purpose": STRING, "phase": {"enum": [
     "account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"]},
@@ -66,8 +68,8 @@ TOOLS = {
         obj({"target": STRING, "ref": REFERENCE, "field": STRING, "tool": STRING, "query": STRING,
              "recover": REFERENCE, "offset": {"type": "integer", "minimum": 0},
              "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 10}, "refresh": {"type": "boolean"}})),
-    "tyche_finish": ("After reviewing evidence and writing, save report commentary and run the existing strict validator and workbook exporter. Returns artifact paths, specific unresolved research problems, or a saved operationally_blocked result without exporting an incomplete workbook. Final run-only costs are refreshed by the launcher when model usage closes.",
-        obj({"commentary": STRING})),
+    "tyche_finish": ("Get the final review packet, check its sources, claim strength, dates and writing, then pass its review_ref to export that reviewed version. Use tyche_review to correct findings first; changed evidence requires a fresh review packet. Returns actionable research gaps or strict validated artifacts. Final run-only costs are refreshed when model usage closes.",
+        obj({"commentary": STRING, "review_ref": STRING})),
 }
 
 
@@ -367,6 +369,10 @@ class ResearchTools:
             view["selection_note"] = ("These are discovery matches. After choosing a current company/role match, "
                 "fetch harvestapi_get_profile with its LinkedIn URL or profile ID before selecting its ref in review. "
                 "Use that profile read to resolve missing parsed location and verify the selected person's identity.")
+        if email_receipts.validator_for_tool(body.get("tool")) and recorded:
+            document = self._document()
+            route = next(r for r in document["routes"] if r["route_id"] == rid)
+            view["email_decisions"] = email_receipts.route_decisions(self.path, document, route)
         if recorded and body.get("status") in {"provider_error", "no_results", "partial", "timeout"}:
             view["recovery_note"] = "This outcome is already recorded. Recovering it cannot resolve unknown billing; preserve the bound until provider billing evidence is available."
         return view
@@ -500,7 +506,16 @@ class ResearchTools:
             if not contact.get("email"):
                 contact["email"] = selected_email.strip()
             result = email_receipts.saved_result(self.path, self._document()["routes"], source, contact["email"])
-            contact["email_validation"] = {**result, "source": {**source, "validator": email_receipts.validator_for_tool(source["tool"])}}
+            validator = email_receipts.validator_for_tool(source["tool"])
+            validation = {**result, "source": {**source, "validator": validator}}
+            if validator == "bounceban":
+                routes = self._document()["routes"]
+                original, original_source = email_receipts.original_validation(self.path, routes, contact["email"])
+                ids = [r.get("route_id") for r in routes]
+                if not original or not email_receipts.fallback_allowed(original) or ids.index(original_source["route_id"]) >= ids.index(source["route_id"]):
+                    raise ValueError("Select an eligible same-email ZeroBounce receipt before its BounceBan result")
+                validation = {**original, "source": original_source, "fallback": validation}
+            contact["email_validation"] = validation
         return contact
 
     def _observe_web(self, item):
@@ -632,7 +647,50 @@ class ResearchTools:
                 "budget": {"cap_usd": ledger["usd_limit"], "costs": totals, "blocked": ledger.get("blocked")},
                 "pending": pending[:12],
                 "review_due": runner.review_reminder(document), "stop": decision["decision"], "errors": decision["errors"],
+                "completion_candidates": self._completion_candidates(document, decision),
                 "blocked_actions": decision.get("blocked_actions", {}), "operational_block": self._operational_block()}
+
+    def _completion_candidates(self, document, stop):
+        """Derived advice only: the LLM still chooses the next useful research action."""
+        if len(document.get("accepted", [])) >= document["request"]["target_count"]:
+            return []
+        candidates = []
+        for row in document.get("unresolved", []):
+            if row.get("stage") != "contact":
+                continue
+            target = runner._company_key(row)
+            contact = row.get("primary_contact", {})
+            company = row.get("company", row.get("candidate", {}))
+            missing = linkedin_receipts.contact_verification_errors(document, self.path, company, contact)
+            verified = not missing
+            if not contact.get("country"):
+                missing.append("Contact country is still missing from the selected LinkedIn profile")
+            missing.extend("Company " + field + " still needs review" for field in ("industry", "sub_industry", "description") if not company.get(field))
+            email = contact.get("email")
+            validation = contact.get("email_validation", {})
+            usable = False
+            if email and validation.get("source"):
+                try:
+                    chosen = validation.get("fallback", validation)
+                    usable = email_receipts.decision(self.path, document["routes"], chosen["source"], email)["usable"]
+                except (ValueError, OSError, KeyError):
+                    pass
+            if not usable and "email" in document["request"].get("contact_fields", ["email"]):
+                missing.append("Select an existing valid email receipt, or complete email discovery/validation after the profile")
+            actions = {a["id"] for a in document.get("stop_check", {}).get("next_actions", []) if a.get("scope") == target}
+            blocked = {k: v for k, v in stop.get("blocked_actions", {}).items() if k in actions}
+            saved_emails = []
+            for route in document["routes"]:
+                if route.get("scope") == target and route.get("phase") == "email_validation":
+                    try:
+                        saved_emails.extend(d for d in email_receipts.route_decisions(self.path, document, route) if d["usable"])
+                    except (ValueError, OSError, KeyError):
+                        pass
+            candidates.append({"target": target, "profile_verified": verified, "email_usable": usable, "missing": missing,
+                "saved_valid_emails": saved_emails,
+                "blocked_actions": blocked, "next": "Complete and review this qualified candidate before more discovery when affordable; choose another route if concretely blocked."})
+        candidates.sort(key=lambda c: (-int(bool(c["saved_valid_emails"])), -int(c["profile_verified"])))
+        return candidates[:3]
 
     def inspect(self, target=None, ref=None, field=None, tool=None, query=None, recover=None, offset=0, limit=10, refresh=False):
         if sum(v is not None for v in (target, ref, tool, query, recover)) > 1:
@@ -695,16 +753,28 @@ class ResearchTools:
             return {"value": compact(self._field(self._document(), field))}
         return {"request": self._document()["request"], **self._overview()}
 
-    def finish(self, commentary=None):
+    def finish(self, commentary=None, review_ref=None):
         with self._review_lock:
-            return self._finish(commentary)
+            return self._finish(commentary, review_ref)
 
-    def _finish(self, commentary):
+    def _finish(self, commentary, review_ref):
         if not self.path.exists():
             return self.inspect()
         blocker = self._operational_block()
         if blocker:
             return self._blocked_result(blocker)
+        progress = self._overview()
+        if progress["stop"] in {"continue", "repair_state"}:
+            return {"status": "needs_research", "delivery_allowed": False, "progress": progress,
+                    "next": "Resolve the listed gaps using lookup/review. Prefer affordable completion_candidates; no export has run. Do not invent rejected companies or repeat unchanged finalization."}
+        document = self._document()
+        reviewed = {k: document.get(k) for k in ("request", "accepted", "unresolved", "rejected")}
+        expected = hashlib.sha256(json.dumps(reviewed, sort_keys=True).encode()).hexdigest()
+        if review_ref != expected:
+            return {"status": "review_required", "delivery_allowed": False, "review_ref": expected,
+                    "request": document["request"],
+                    "companies": [{k: compact(v) for k, v in row.items()} for row in document.get("accepted", [])],
+                    "instructions": "Review each signal against its source: identity, date, geography, event status and claim strength. One vacancy does not establish rapid hiring; repeated hiring needs dated repeated observations. An aggregator's ambiguous Arizona location does not establish Arizona operations. Signals need concise facts/date/source, not copied pages. Intent Details must mention each verified signal, explain each signal's relevance, and close by connecting the activity to the company's product/service. Description is exactly two factual sentences. Correct with tyche_review and request a fresh packet; otherwise return this review_ref to finish. This is research judgment, not an automatic semantic pass."}
         if commentary is not None or not (self.path.parent / "research-commentary.md").exists():
             commentary = commentary or "No additional research commentary supplied."
             (self.path.parent / "research-commentary.md").write_text(commentary + "\n", encoding="utf-8")
@@ -712,7 +782,9 @@ class ResearchTools:
         node = os.environ.get("TYCHE_WORKSPACE_NODE", "node")
         result = subprocess.run([node, str(exporter), str(self.path)], capture_output=True, text=True, timeout=180)
         if result.returncode:
-            raise ValueError((result.stderr or result.stdout)[-9000:])
+            return {"status": "needs_repair", "delivery_allowed": False,
+                    "errors": [(result.stderr or result.stdout)[-9000:]], "progress": self._overview(),
+                    "next": "Correct the named saved fields or source reviews with tyche_review, then finish again. Do not read implementation code or repeat unchanged finalization."}
         # The final launcher pass adds closed model usage without rewriting
         # research prose or changing the validated results/workbook.
         report = subprocess.run([os.environ.get("TYCHE_WORKSPACE_PYTHON", "python3"),

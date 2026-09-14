@@ -13,6 +13,8 @@ import sys
 import budget_guard
 import research_input
 from email_receipts import check_fallback, validator_for_tool, verification_finished
+from email_receipts import email_work
+from linkedin_receipts import contact_verification_errors
 from provider_output import ResponseFile, load_json
 from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
 from validate_run import (BLOCKING_PROVIDER_STATUSES, DETERMINATE_PROVIDER_STATUSES, _company_key,
@@ -131,6 +133,38 @@ def review_reminder(document):
                      and r.get("provider_status") in DETERMINATE_PROVIDER_STATUSES
                      and (r["scope"] not in saved or r.get("route_id") in open_ids)})
     return {"count": len(scopes), "scopes": scopes[:3]}
+
+
+def _email_gate(run_file, document, action, request):
+    if not email_work(action, request):
+        return
+    _contact_gate(document, dict(action, phase="contact_discovery"))
+    rows = [r for state in ("accepted", "unresolved") for r in document.get(state, [])
+            if _company_key(r) == action["scope"]]
+    contacts = [(r.get("company", r.get("candidate", {})), c) for r in rows
+                for c in [r.get("primary_contact", {}), *r.get("backup_contacts", [])] if isinstance(c, dict)]
+    payload = request.get("payload", request)
+    name = payload.get("full_name", payload.get("fullName", payload.get("name"))) or " ".join(
+        str(payload.get(a, payload.get(b, ""))) for a, b in (("first_name", "firstName"), ("last_name", "lastName"))).strip()
+    url = payload.get("linkedin_url", payload.get("linkedinUrl", payload.get("url", "")))
+    email = payload.get("email")
+    if name:
+        contacts = [(company, c) for company, c in contacts if str(c.get("full_name") or "").casefold() == name.casefold()]
+    if "linkedin.com/in/" in str(url):
+        contacts = [(company, c) for company, c in contacts
+                    if str(c.get("linkedin_url") or "").rstrip("/").casefold() == url.rstrip("/").casefold()]
+    if not name and "linkedin.com/in/" not in str(url):
+        matches = [(company, c) for company, c in contacts if isinstance(email, str)
+                   and str(c.get("email") or "").casefold() == email.casefold()]
+        # Without another selected identity, email work belongs to the saved
+        # primary contact. A verified backup cannot unlock an unverified primary.
+        contacts = matches or [(r.get("company", r.get("candidate", {})), r.get("primary_contact", {})) for r in rows]
+    errors = ["Select and review the intended contact's saved HarvestAPI profile first"]
+    if len(contacts) == 1:
+        company, contact = contacts[0]
+        errors = contact_verification_errors(document, run_file, company, contact)
+    if errors:
+        raise ValueError("Email work requires verified identity, current company and requested-role match before spending: " + "; ".join(errors))
 
 
 def run_status(document, decision):
@@ -383,6 +417,7 @@ def _prepare(run_file, validated):
     def plan(document):
         refresh(document)
         _contact_gate(document, action)
+        _email_gate(run_file, document, action, request)
         if provider == "deepline" and operation == "execute" and request.get("tool") == "harvestapi_get_profile":
             for row in document.get("accepted", []) + document.get("unresolved", []):
                 company = row.get("company", row.get("candidate", {}))

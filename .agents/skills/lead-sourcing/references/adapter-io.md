@@ -18,7 +18,7 @@ research choices, not paths, route IDs or accounting envelopes.
 | `tyche_lookup` | `checks` (1–3): `target`, `phase`, `purpose`, `tool`, `inputs` | Cached live description, schema checks, whole-call bound where known, reservations, dispatch, receipts |
 | `tyche_review` | Changed company fields, evidence refs, explicit decisions/source reviews; optional observed `web` | Existing company updates, authoritative LinkedIn/email fields, bookkeeping |
 | `tyche_inspect` | No arguments, or `target`, `ref`, `tool`, `query`, `recover` | Compact state, saved request or detail, catalog search, local receipt recovery |
-| `tyche_finish` | Research `commentary` (assumptions, caveats, route-choice reasoning) | Strict validation, workbook/readback/preview, audit report and run-cost links |
+| `tyche_finish` | No arguments for review; then `review_ref` and research `commentary` | Current evidence/writing packet, strict validation, workbook/readback/preview and run-cost links |
 
 At start, supply the LLM-selected `contact_role_groups` without repeating
 `requested_roles`; code saves their combined list. A request without groups still
@@ -83,7 +83,8 @@ A later `primary_contact: {"email_ref":"lookup-validation:0"}` supplies the exac
 address and verdict from the selected validation result. An existing different
 email is a conflict; explicitly select the new email to replace it. Changing
 people requires a new profile ref; changing email clears the old email evidence.
-Backup entries are full selections.
+Selecting an eligible BounceBan result automatically retains its original
+ZeroBounce receipt and links the fallback. Backup entries are full selections.
 
 For built-in web tools, execute the chosen search/read, then send its observed
 `status` and `results` with `target`, `purpose`, `query` and `operation` under
@@ -100,6 +101,29 @@ it locally through diagnostics. Never retry an uncertain paid call. Explicit
 `sources` reviews retain the existing continuation/exhaustion rules; saving a
 company does not automatically exhaust its sources. A `valid` email on a catch-all
 domain stays valid; fallback eligibility is checked before spending.
+
+Native email-validation results include `email_decisions`: receipt-derived
+`usable`, `fallback_allowed` and the next step. `valid` with a domain catch-all
+flag remains usable. Do not revalidate it with BounceBan or reject its company.
+Email lookup/validation requires a previously saved matching Harvest profile and
+requested-role review. Free pending-job recovery remains available.
+
+`completion_candidates` is derived from saved qualified candidates and receipts.
+Prefer completing these when affordable. A blocker allows the researcher to
+choose different work; this advice neither reserves funds nor dispatches calls.
+
+The native relay reconnects a confirmed-dead sandboxed child at most once per
+invocation, with identical sandbox policy, checkout and run. Only pure saved-state
+inspection is replayed automatically. After a lost lookup/review response, inspect
+the saved run and recover receipts; do not resubmit uncertain paid work. A second
+connection failure returns a clear operational block with its captured exit code.
+
+`tyche_finish` returns `needs_research`, `review_required`, `needs_repair` or
+validated artifact paths. On `review_required`, review the company's source
+meaning and writing in the returned packet, then pass its `review_ref`. Changes
+to research invalidate that reference. Correct named errors through `tyche_review`
+and finish again; do not repeat an unchanged failing call or read implementation
+code to construct bookkeeping.
 
 ## Diagnostic CLI
 

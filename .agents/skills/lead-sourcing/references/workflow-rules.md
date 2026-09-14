@@ -45,7 +45,10 @@ Command paths below are relative to the skill directory, not this reference.
 - Apply separate gates: an account needs current signal evidence that identifies
   the same company; a contact needs a current role and company identity that
   match the accepted company/domain and the requested role family. Apply the
-  identity/current-role gate before any email or phone lookup.
+  identity/current-role gate before any email or phone lookup. Paid email work
+  checks the saved Harvest profile identity, current employer and reviewed
+  requested-role match before reserving money. Save the selected profile with
+  `tyche_review` first; reuse its successful receipt rather than fetching it again.
 - Apply `contact_fields: ["email"]` when the input omits contact fields. An
   explicit empty array opts out, and an explicit phone-only array overrides
   the email default. Retrieve contact data only after the identity/current-role
@@ -76,6 +79,13 @@ Command paths below are relative to the skill directory, not this reference.
   `no_results` is valid only when the provider actually returned no results;
   an input error, response error, timeout, or uncertain response is not
   `no_results` and remains unresolved or blocked as appropriate.
+- Prefer affordable completion of already qualified candidates before new
+  discovery. `completion_candidates` shows missing profile/email work and saved
+  valid email receipts. Verify that each address belongs to the selected person;
+  a valid email alone does not prove identity. If completion is blocked by an
+  uncertain call, unavailable evidence or insufficient remaining budget, record
+  that concrete reason and choose another productive route. This is research
+  guidance, not a queue, a fixed company order or a new qualification gate.
 - Treat `target_count` as the completion condition. While accepted companies
   remain below it, refill from a changed route, query, page, tool, or provider.
   Check at most three companies at once, reducing the batch to the remaining
@@ -373,3 +383,28 @@ This is a small direct-wrapper workflow. It has no `Sourcing_model` or `pp`
 runtime dependency, browser harness, server, database, queue, CRM write,
 outreach action, required subagent, or hidden API. Do not add one to complete a
 run.
+
+### Evidence-meaning review cases
+
+Match the strength of the claim to the evidence. These cases belong to the same
+LLM source review, not a separate rule engine:
+
+- **Banner Health:** one current nursing vacancy supports a single observed
+  opening. It does not establish rapid hiring or a surge. If rapid hiring is
+  required, keep that criterion unknown until stronger evidence is found.
+- **Repeated hiring:** one posting copied by several aggregators is one
+  observation. Repeated-vacancy claims need distinct, dated observations.
+- **Arizona operations:** an ambiguous aggregator location does not establish a
+  company operation in Arizona. Find employer/location evidence before passing
+  the geography criterion.
+- **Expansion:** an announced partnership, conditional approval, planned rollout
+  and completed launch are different claims. Preserve the source's status.
+
+Before delivery, inspect the final packet from `tyche_finish`. Review each
+verified signal and its date, the following sentence explaining its relevance,
+and the final sentence connecting the activity to the company's product/service.
+Keep Signals concise with facts/date/source; keep Description to two factual
+sentences. Use `tyche_review` for corrections, then request a fresh review packet.
+Return its `review_ref` only after the evidence and writing agree. Code checks
+that the reviewed version is current and runs existing strict validation/export.
+A review reference records the agent's review; it does not prove prose quality.
