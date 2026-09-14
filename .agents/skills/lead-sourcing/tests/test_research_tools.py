@@ -40,10 +40,11 @@ class FixtureProvider:
         tool = request.get("tool", "fixture-search")
         if request["operation"] != "execute":
             key = "email" if tool in {"zerobounce_validate", "bounceban_verify_single"} else "url" if tool.startswith("harvestapi") else "query"
+            fields = ["first_name", "last_name", "domain"] if tool == "fixture_email_finder" else [key]
             return {"provider": "deepline", "operation": request["operation"], "status": "ok", "results": [{
                 "toolId": tool, "callable": True, "connected": True,
-                "inputSchema": {"fields": [{"name": key, "required": True, "type": "string"}],
-                    "jsonSchema": {"properties": {key: {"type": "string"}}, "additionalProperties": False}},
+                "inputSchema": {"fields": [{"name": field, "required": True, "type": "string"} for field in fields],
+                    "jsonSchema": {"properties": {field: {"type": "string"} for field in fields}, "additionalProperties": False}},
                 "pricing": {"creditsPerUnit": self.rate, "unit": "call"}}]}, 0
         def dispatch():
             with self.lock:
@@ -81,13 +82,13 @@ class ResearchToolTests(unittest.TestCase):
     def lookup(self, *checks):
         return self.tools.call("tyche_lookup", {"checks": list(checks or [check()])})
 
-    def selected_contact(self, target="example.test"):
+    def selected_contact(self, target="example.test", first="Ada", last="Example"):
         """A reviewed account and current person, all from local provider fixtures."""
         ref = self.lookup(check(target))["lookups"][0]["results"][0]["ref"]
         self.tools.review(companies=[{"target": target, "decision": "qualify_account", "reason": "Verified fit",
             "company": {"ref": ref}, "account_fit": {"ref": ref, "text": "Provides payments infrastructure"}}])
         self.provider.raw = {"status": "ok", "element": {"linkedinUrl": "https://www.linkedin.com/in/ada-example/",
-            "firstName": "Ada", "lastName": "Example", "currentPosition": [{"companyName": "ExamplePay",
+            "firstName": first, "lastName": last, "currentPosition": [{"companyName": "ExamplePay",
                 "companyLinkedinUrl": "https://www.linkedin.com/company/examplepay/", "title": "Head of Payments"}],
             "location": {"parsed": {"countryFull": "Singapore"}}}}
         profile = self.lookup(check(target, phase="contact_verification", tool="harvestapi_get_profile",
@@ -95,6 +96,77 @@ class ResearchToolTests(unittest.TestCase):
         self.tools.review(companies=[{"target": target, "decision": "hold_contact", "reason": "Selected current buyer",
             "primary_contact": {"ref": profile, "requested_role": "Head of Payments", "role_match": "exact"}}])
         return profile
+
+    def test_email_reference_supplies_receipt_names_and_rejects_conflicting_identity(self):
+        self.start()
+        ref = self.selected_contact(first="Aaron", last="Blocher-Rubin, PhD, BCBA")
+        before = budget.ledger_path(self.path).read_bytes()
+        for fields in ({"first_name": "Other"}, {"domain": "another.test"}):
+            with self.subTest(fields=fields), self.assertRaisesRegex(ValueError, "conflicts with the selected profile"):
+                self.lookup(check(tool="fixture_email_finder", phase="contact_discovery", contact_ref=ref, inputs=fields))
+        self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
+        self.provider.raw = {"status": "ok", "data": {"email": "aaron@example.test"}}
+        self.lookup(check(tool="fixture_email_finder", phase="contact_discovery", contact_ref=ref,
+                          inputs={"full_name": "Aaron Blocher-Rubin", "linkedin_url": "https://www.linkedin.com/in/ada-example/"}))
+        sent = [r for r in self.provider.requests if r.get("operation") == "execute" and r.get("tool") == "fixture_email_finder"]
+        self.assertEqual(sent[0]["payload"], {"first_name": "Aaron", "last_name": "Blocher-Rubin", "domain": "example.test"})
+        self.assertNotIn("contact_ref", sent[0]["payload"])
+        self.assertEqual(len([r for r in self.provider.requests if r.get("operation") == "execute" and r.get("tool") == "harvestapi_get_profile"]), 1)
+
+    def test_role_group_is_derived_without_changing_requested_roles(self):
+        self.request["contact_role_groups"] = {"primary": ["Chief Executive Officer"], "secondary": ["Head of Payments"]}
+        self.request["requested_roles"] = ["Chief Executive Officer", "Head of Payments"]
+        self.start()
+        self.selected_contact()
+        self.tools.review(companies=[{"target": "example.test", "decision": "hold_contact", "reason": "Reviewed equivalent senior role",
+            "primary_contact": {"requested_role": "CEO", "role_match": "approved_family"}}])
+        contact = json.loads(self.path.read_text())["unresolved"][0]["primary_contact"]
+        self.assertEqual(contact["requested_role"], "Chief Executive Officer")
+        self.assertEqual(contact["role_group"], "primary")
+        self.assertEqual(json.loads(self.path.read_text())["request"]["requested_roles"], self.request["requested_roles"])
+
+    def test_signal_corrections_replace_derived_view_and_preserve_contact(self):
+        source = {"url": "https://example.test/jobs", "date": "2026-06-01", "date_basis": "published", "text": "One nursing vacancy"}
+        check = dict(criterion="hiring", importance="required", status="pass", claim="Rapid hiring", signal="HIRING", evidence=[source])
+        row = {"candidate": {"domain": "example.test"}, "stage": "account", "reason_code": "missing_account_evidence", "reason_text": "Review",
+               "qualification_checks": [check], "primary_contact": {"full_name": "Saved Buyer", "email": "saved@example.test"},
+               "signal_evidence": {"signal": "HIRING", "evidence_text": "Different stale wording"}}
+        doc = {"request": {}, "unresolved": [row]}
+        update = {"scope": "example.test", "qualification_checks": [dict(check, claim="Source supports one vacancy")], "reason_text": "Correction"}
+        saved = research_input.company_update(doc, update)["row"]
+        self.assertEqual(saved["signal_evidence"]["evidence_text"], "One nursing vacancy")
+        self.assertEqual(saved["primary_contact"], row["primary_contact"])
+
+        legacy = copy.deepcopy(row)
+        legacy["signal_evidence"].update(evidence_url="https://example.test/earlier", evidence_date="2026-05-01")
+        result = research_input.company_update({"request": {}, "unresolved": [legacy]}, update)["row"]
+        self.assertEqual(result["signal_evidence"], legacy["signal_evidence"])
+        self.assertEqual(result["qualification_checks"][0]["evidence"], [source])
+        corrected = dict(check, status="unknown", claim="A single vacancy does not demonstrate rapid hiring")
+        corrected.pop("signal")
+        update["qualification_checks"] = [corrected]
+        doc["unresolved"] = [saved]
+        saved = research_input.company_update(doc, update)["row"]
+        self.assertNotIn("signal", saved["qualification_checks"][0])
+        self.assertNotIn("signal_evidence", saved)
+        self.assertEqual(saved["primary_contact"], row["primary_contact"])
+
+    def test_source_review_changes_invalidate_approval_but_cost_updates_do_not(self):
+        doc = {"request": {}, "accepted": [], "unresolved": [], "rejected": [],
+               "routes": [{"cost_credits": None}], "stop_audit": {"route_frontier": [
+                   {"route_id": "source-1", "state": "exhausted", "reason": "Reviewed"}]}}
+        before = runner.review_fingerprint(doc)
+        doc["routes"][0]["cost_credits"] = 1
+        self.assertEqual(runner.review_fingerprint(doc), before)
+        doc["stop_audit"]["route_frontier"][0]["reason"] = "Reopened after a contradictory source"
+        self.assertNotEqual(runner.review_fingerprint(doc), before)
+
+    def test_missing_source_excerpt_has_a_specific_diagnostic(self):
+        from validate_run import source_evidence_error
+        evidence = {"url": "https://example.test/news", "date": "2026-06-01", "date_basis": "published",
+                    "source": {"provider": "public_web", "operation": "open", "route_id": "source-1"}}
+        self.assertEqual(source_evidence_error(evidence, "qualification"),
+                         "qualification requires dated source evidence; missing or invalid: text (supporting source excerpt)")
 
     def test_profile_gate_precedes_email_spend_and_reuses_current_profile(self):
         self.start()
@@ -947,12 +1019,32 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(packet["status"], "review_required")
         self.assertIn("One vacancy does not establish rapid hiring", packet["instructions"])
         self.assertFalse((self.path.parent / "leads.xlsx").exists())
-        self.tools.review(companies=[{"target": "example.com", "decision": "accept", "reason": "Final writing reviewed",
+        revised_signal = {"criterion": "recent integration", "importance": "required", "status": "pass",
+            "claim": "The integration announcement is supported", "signal": row["signal_evidence"]["signal"],
+            "evidence": [{"ref": "web:0:0"}]}
+        self.tools.review(companies=[{"target": "example.com", "decision": "hold_account", "reason": "Final source interpretation needs correction",
+            "qualification_checks": [dict(revised_signal, status="unknown", claim="Review the release wording")]}],
+            web=[{"target": "example.com", "purpose": "Final source review", "query": "example.com actual release text",
+                "operation": "open", "response": {"status": "ok", "results": [{"url": row["signal_evidence"]["evidence_url"],
+                    "date": row["signal_evidence"]["evidence_date"], "text": "Released its warehouse integration."}]}}],
+            sources=[{"ref": "web:0", "state": "exhausted", "reason": "Reviewed release meaning and date"}])
+        corrected = json.loads(self.path.read_text())["unresolved"][0]
+        self.assertEqual(corrected["primary_contact"], saved["accepted"][0]["primary_contact"])
+        self.assertEqual(len([r for r in self.provider.requests if r.get("tool") == "zerobounce_validate" and r.get("operation") == "execute"]), 1)
+        revised_signal["evidence"] = corrected["qualification_checks"][-1]["evidence"]
+        self.tools.review(companies=[{"target": "example.com", "decision": "accept", "reason": "Final writing and source meaning reviewed",
+            "qualification_checks": [revised_signal],
             "intent_details": row["intent_details"] + " Its manufacturing business depends on coordinated fulfillment."}])
         stale = self.tools.finish(review_ref=packet["review_ref"])
         self.assertEqual(stale["status"], "review_required")
         self.assertNotEqual(stale["review_ref"], packet["review_ref"])
-        result = self.tools.call("tyche_finish", {"review_ref": stale["review_ref"], "commentary": "Offline fixture. Required evidence and the selected buyer were reviewed; no live research was performed."})
+        with patch("research_tools.subprocess.run", return_value=type("FailedExport", (), {"returncode": 1, "stderr": "Temporary export failure", "stdout": ""})()):
+            failed = self.tools.call("tyche_finish", {"review_ref": stale["review_ref"], "commentary": "Offline fixture. Required evidence and the selected buyer were reviewed; no live research was performed."})
+        self.assertEqual(failed["status"], "needs_repair")
+        # A new process can finish the already reviewed snapshot without
+        # another review token, email request or reconstructed company record.
+        resumed = ResearchTools(self.path, execute=self.provider)
+        result = resumed.finish()
         validation = json.loads((self.path.parent / "validation.json").read_text())
         self.assertTrue(validation["delivery_allowed"])
         self.assertIn("completed_at", validation)
@@ -961,6 +1053,7 @@ class ResearchToolTests(unittest.TestCase):
         cells = read_first_sheet_rows(Path(result["export"]["path"]))[1]
         self.assertEqual(cells[9:12], ["Columbus", "Ohio", "United States"])
         self.assertEqual(cells[14], "201-500")
+        self.assertEqual(cells[16].count("Released its warehouse integration."), 1)
         report = Path(result["report"]).read_text()
         self.assertIn("Offline fixture.", report)
         self.assertIn("Accepted 1 of 1", report)

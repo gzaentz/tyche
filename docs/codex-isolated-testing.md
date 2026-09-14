@@ -188,6 +188,22 @@ count a group once and require every member to belong to the run. An explicit
 entry remains unknown. This ledger reconciliation is separate from automatic
 worker usage capture; never rerun a paid request to discover its bill.
 
+The native finish path now reads one bounded recent-call page and automatically
+settles unique completed, posted entries matched by request ID, provider and
+operation. It preserves the original response, reservation and budget cap,
+and saves the matched billing proof in the existing ledger. Unmatched, pending,
+free-state and multi-group entries remain uncertain in this implementation;
+do not infer a zero charge or group membership. A changed call set or later
+resume permits another bounded read. Billing unavailability does not trigger
+new research or repeat paid requests.
+
+Final review approval is bound to the current research and source-review state.
+The launcher can retry deterministic export once after an interrupted finish
+only when that exact state was already reviewed. It verifies the saved results
+and workbook hashes and writes `worker-status.json`. A model usage limit,
+unreviewed shortfall or unavailable service stays resumable with the existing
+ledger; the launcher never relaunches research or approves evidence itself.
+
 The temporary profile and its session history are removed when the launcher
 exits. Files saved in the project, including sourcing results and receipts,
 remain. Start a fresh launch after editing the skill to avoid stale context.

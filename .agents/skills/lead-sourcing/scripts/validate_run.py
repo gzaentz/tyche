@@ -1238,11 +1238,21 @@ def source_evidence_error(item, path):
         date_valid = isinstance(date, str) and datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%d") == date
     except ValueError:
         date_valid = False
-    if (not isinstance(url, str) or re.fullmatch(r"https?://[^\s]+", url) is None
-            or not date_valid or not isinstance(basis, str) or basis not in {"published", "posted", "updated", "observed_current"}
-            or not _nonempty_text(excerpt) or not isinstance(source, dict)
-            or any(not _nonempty_text(source.get(k)) for k in ("provider", "operation", "route_id"))):
-        return f"{path} requires dated source evidence"
+    missing = []
+    if not isinstance(url, str) or re.fullmatch(r"https?://[^\s]+", url) is None:
+        missing.append("url (HTTP/HTTPS source)")
+    if not date_valid:
+        missing.append("date (YYYY-MM-DD)")
+    if not isinstance(basis, str) or basis not in {"published", "posted", "updated", "observed_current"}:
+        missing.append("date_basis (published, posted, updated or observed_current)")
+    if not _nonempty_text(excerpt):
+        missing.append("text (supporting source excerpt)")
+    if not isinstance(source, dict):
+        missing.append("source (saved receipt reference)")
+    else:
+        missing += ["source." + k for k in ("provider", "operation", "route_id") if not _nonempty_text(source.get(k))]
+    if missing:
+        return f"{path} requires dated source evidence; missing or invalid: " + ", ".join(missing)
     return None
 
 

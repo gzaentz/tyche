@@ -1,16 +1,66 @@
 import os
 import contextlib
 import io
+import hashlib
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
-from codex_tyche import smoke, tool_configuration, workspace_environment
+from codex_tyche import smoke, tool_configuration, workspace_environment, close_worker
 
 
 class WorkspaceRuntimeTests(unittest.TestCase):
+    def test_worker_limit_saves_resumable_status_without_relaunch_or_export(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = root / 'request.txt'
+            request.write_text('fixture')
+            run = root / 'results.json'
+            run.write_text(json.dumps({'request': {'target_count': 10}, 'accepted': [{}] * 4}))
+            before = run.read_bytes()
+            receipt = SimpleNamespace(data={'exit_code': 1, 'failure_kind': 'model_usage_limit'})
+            with patch('codex_tyche.subprocess.Popen', side_effect=AssertionError('Do not relaunch a model')):
+                status = json.loads(close_worker(request, receipt).read_text())
+            self.assertFalse(status['delivery_allowed'])
+            self.assertEqual(status['reason'], 'model_usage_limit')
+            self.assertEqual(status['accepted_count'], 4)
+            self.assertEqual(run.read_bytes(), before)
+
+    def test_worker_recovers_only_an_explicit_current_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = root / 'request.txt'; request.write_text('fixture')
+            run = root / 'results.json'
+            document = {'request': {'target_count': 1}, 'accepted': [{}], 'unresolved': [], 'rejected': []}
+            reviewed = hashlib.sha256(json.dumps(dict(document, source_reviews=[]), sort_keys=True).encode()).hexdigest()
+            document['final_review'] = {'review_ref': reviewed}
+            run.write_text(json.dumps(document))
+            receipt = SimpleNamespace(data={'exit_code': 1})
+            # Import the tool class via close_worker before patching; an
+            # unreviewed initial pass must not invoke any exporter.
+            original = run.read_text()
+            run.write_text(json.dumps({k: v for k, v in document.items() if k != 'final_review'}))
+            self.assertEqual(json.loads(close_worker(request, receipt).read_text())['status'], 'review_required')
+            run.write_text(original)
+            def exported(*args, **kwargs):
+                book = root / 'leads.xlsx'; book.write_bytes(b'fixture workbook')
+                (root / 'validation.json').write_text(json.dumps({'delivery_allowed': True,
+                    'results_sha256': hashlib.sha256(run.read_bytes()).hexdigest(),
+                    'workbook_sha256': hashlib.sha256(book.read_bytes()).hexdigest()}))
+                return {'export': {'path': str(book)}}
+            with patch('research_tools.ResearchTools.finish', side_effect=exported) as finish:
+                status = json.loads(close_worker(request, receipt, {'TYCHE_WORKSPACE_NODE': '/fixture/node'}).read_text())
+            finish.assert_called_once()
+            self.assertTrue(status['delivery_allowed'])
+            with patch('research_tools.ResearchTools.finish', side_effect=AssertionError('Already delivered')):
+                self.assertTrue(json.loads(close_worker(request, receipt).read_text())['delivery_allowed'])
+            document['accepted'] = [{'changed': True}]
+            run.write_text(json.dumps(document))
+            with patch('research_tools.ResearchTools.finish', side_effect=AssertionError('Stale review')):
+                self.assertFalse(json.loads(close_worker(request, receipt).read_text())['delivery_allowed'])
+
     def test_installed_bundle_paths_are_supplied_without_changing_parent(self):
         with tempfile.TemporaryDirectory() as directory:
             bundle=Path(directory)/'.cache/codex-runtimes/codex-primary-runtime/dependencies'

@@ -64,6 +64,12 @@ class RunCostsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 estimate(bad, 'gpt-5.6-luna')
 
+    def test_worker_failure_category_does_not_copy_error_payload(self):
+        receipt = self.receipt()
+        receipt.observe({'type': 'turn.failed', 'error': {'message': 'Usage limit reached; private account detail'}})
+        self.assertEqual(receipt.data['failure_kind'], 'model_usage_limit')
+        self.assertNotIn('private account detail', receipt.path.read_text())
+
     def test_aggregate_input_does_not_trigger_per_request_long_context_rates(self):
         receipt = self.receipt()
         usage = dict(self.usage, input_tokens=200000, cached_input_tokens=100000, total_tokens=200100)

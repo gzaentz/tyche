@@ -190,7 +190,7 @@ def normalize_provider_request(provider, request, label):
 def prepare_lookup(value, label="lookup"):
     """The agent selects target, purpose and request; derive bookkeeping only."""
     object_fields(value, {"provider", "request", "scope", "phase", "purpose", "approach",
-                          "max_cost_credits", "status_read", "pricing_basis"}, label)
+                          "max_cost_credits", "status_read", "pricing_basis", "contact_ref"}, label)
     provider = value.get("provider", "deepline")
     _, request = normalize_provider_request(provider, value.get("request"), label)
     catalog = provider == "deepline" and request.get("operation") in {"search", "describe"}
@@ -205,6 +205,8 @@ def prepare_lookup(value, label="lookup"):
         action["status_read"] = value["status_read"]
     if "pricing_basis" in value:
         action["pricing_basis"] = copy.deepcopy(value["pricing_basis"])
+    if "contact_ref" in value:
+        action["contact_ref"] = text(value["contact_ref"], label + ".contact_ref")
     return {"action": action, "request": request}
 
 
@@ -252,6 +254,21 @@ def _criterion_key(value):
     return " ".join(text(value, "criterion").split()).casefold()
 
 
+def canonical_requested_role(value, roles):
+    """Resolve spacing/case and unambiguous C-suite abbreviations in saved roles."""
+    aliases = {"ceo": "chief executive officer", "coo": "chief operating officer",
+               "cno": "chief nursing officer"}
+    # Do not expand ambiguous abbreviations such as CMO or invent buyer roles.
+    def key(role):
+        return " ".join(role.casefold().split()) if isinstance(role, str) else ""
+    exact = [r for r in roles if key(r) == key(value)]
+    if len(exact) == 1:
+        return exact[0]
+    expanded = aliases.get(key(value), key(value))
+    matches = [r for r in roles if aliases.get(key(r), key(r)) == expanded]
+    return matches[0] if len(matches) == 1 else value
+
+
 def company_update(document, item):
     """Apply explicit field/criterion updates, preserving unrelated evidence."""
     object_fields(item, {"scope", "state", "stage", "reason_code", "reason_text", "company",
@@ -295,10 +312,9 @@ def company_update(document, item):
             matches = [index for index, saved in enumerate(checks) if _criterion_key(saved.get("criterion")) == key]
             if len(matches) > 1:
                 raise ValueError(f"multiple saved checks for criterion {key}; reconcile before updating")
-            update = copy.deepcopy(checks[matches[0]]) if matches else {}
-            # A judgment selects its current evidence. Omitted metadata stays;
-            # original provider receipts remain the immutable audit record.
-            update.update(copy.deepcopy(check))
+            # A replacement judgment owns its classification as well as facts.
+            # Omitted signal labels must not survive a corrected judgment.
+            update = copy.deepcopy(check)
             update["criterion"] = key
             if matches:
                 checks[matches[0]] = update
@@ -309,6 +325,23 @@ def company_update(document, item):
             # These are explicit complete replacements, never an implicit
             # recursive merge of contacts or conflicting source identities.
             row[key] = copy.deepcopy(item[key])
+    primary = row.get("signal_evidence") or {}
+    canonical = (not primary or primary.get("criterion") or
+                 any(check.get("signal") == primary.get("signal") and any(
+                     not primary.get("evidence_url") or (e.get("url"), e.get("date")) ==
+                     (primary.get("evidence_url"), primary.get("evidence_date")) for e in check.get("evidence", []))
+                     for check in checks if check.get("signal")))
+    if canonical and (primary.get("criterion") or any(check.get("signal") for check in checks)
+                      or any(check.get("signal") for check in old.get("qualification_checks", []))):
+        # Qualification checks are authoritative. Retain the legacy primary
+        # field as a derived view for existing validators and old integrations.
+        signals = [check for check in checks if check.get("signal") and check.get("status") == "pass"]
+        row.pop("signal_evidence", None)
+        if signals and signals[0].get("evidence"):
+            evidence = signals[0]["evidence"][0]
+            row["signal_evidence"] = {"criterion": signals[0]["criterion"], "signal": signals[0]["signal"], **{
+                "evidence_" + key if key in {"url", "date", "date_basis", "text"} else key: value
+                for key, value in evidence.items()}}
     if state == "accepted":
         for key in ("stage", "reason_code", "reason_text"):
             row.pop(key, None)

@@ -2,6 +2,7 @@
 """Launch a fresh, project-only Codex test without changing global settings."""
 
 import argparse
+import hashlib
 from datetime import datetime, timezone
 import json
 import os
@@ -21,6 +22,50 @@ SKILL_ROOT = ROOT / '.agents' / 'skills'
 MODEL = 'gpt-5.6-luna'
 REASONING_EFFORT = 'xhigh'
 SERVICE_TIER = 'fast'
+
+
+def close_worker(request_file, receipt, environment=None):
+    """One local export recovery after explicit review; never relaunch research."""
+    directory = Path(request_file).resolve().parent
+    path = directory / 'results.json'
+    sys.path.insert(0, str(SKILL_ROOT / 'lead-sourcing' / 'scripts'))
+    from research_tools import ResearchTools
+    from run_attempt import review_fingerprint
+    def delivered():
+        validation = directory / 'validation.json'
+        workbook = directory / 'leads.xlsx'
+        if not (path.exists() and validation.exists() and workbook.exists()):
+            return False
+        saved = json.loads(validation.read_text())
+        current = json.loads(path.read_text())
+        return (saved.get('delivery_allowed') is True
+                and current.get('final_review', {}).get('review_ref') == review_fingerprint(current)
+                and saved.get('results_sha256') == hashlib.sha256(path.read_bytes()).hexdigest()
+                and saved.get('workbook_sha256') == hashlib.sha256(workbook.read_bytes()).hexdigest())
+    status = {'status': 'interrupted', 'delivery_allowed': False, 'run_file': str(path),
+              'worker_exit_code': receipt.data.get('exit_code'), 'reason': receipt.data.get('failure_kind', 'worker_ended_before_delivery'),
+              'resume': 'Resume this saved run and ledger. Do not restart accounting or repeat uncertain paid requests.'}
+    try:
+        document = json.loads(path.read_text()) if path.exists() else {}
+        status['accepted_count'] = len(document.get('accepted', []))
+        status['target_count'] = document.get('request', {}).get('target_count')
+        reviewed = document.get('final_review', {}).get('review_ref') == review_fingerprint(document)
+        if not delivered() and reviewed:
+            # The agent already approved this exact research. Retry only the
+            # deterministic finish, once, with existing budget/evidence gates.
+            status['finish_recovery'] = ResearchTools(path, environment=environment).finish()
+        if delivered():
+            status.update(status='complete', delivery_allowed=True, reason='verified_saved_workbook')
+        elif not reviewed and not receipt.data.get('failure_kind'):
+            status.update(status='review_required' if status['accepted_count'] == status['target_count'] else 'incomplete',
+                          reason='research_or_review_still_required')
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        status['finish_error'] = str(exc)[:2000]
+    output = directory / 'worker-status.json'
+    temporary = output.with_suffix('.tmp')
+    temporary.write_text(json.dumps(status, indent=2) + '\n', encoding='utf-8')
+    temporary.replace(output)
+    return output
 ISOLATION_INSTRUCTIONS = (
     'You are already inside the isolated TYCHE runtime (TYCHE_ISOLATED_RUN=1). '
     'You are the sourcing worker, not the outer monitor. '
@@ -311,6 +356,7 @@ def main():
                 try:
                     return execute_with_usage(command, ROOT, env, receipt, profile=tyche_codex_home)
                 finally:
+                    print(json.dumps({'worker_status': str(close_worker(args.exec_file, receipt, env))}), flush=True)
                     print(json.dumps({'run_cost_report': str(save_report(args.exec_file.resolve().parent))}), flush=True)
             return subprocess.call(
                 command, cwd=ROOT, env=env,

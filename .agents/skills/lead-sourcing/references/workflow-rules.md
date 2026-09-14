@@ -100,8 +100,8 @@ Command paths below are relative to the skill directory, not this reference.
 - If `contact_role_groups` is present, search and rank its `primary` roles
   first. Use `secondary` roles as valid fallbacks when no primary-role contact
   passes; a secondary-role contact may fill `primary_contact` and must not be
-  rejected only because it is secondary. Set the optional contact
-  `role_group` to `primary` or `secondary` when the group is known. The output
+  rejected only because it is secondary. Save its requested role and role match;
+  native tools derive `role_group` from the saved request. The output
   slot name `primary_contact` is separate from this role group.
 - The lookup helper maintains the frontier for paid and no-cost public-web work. Each concrete
   route/query path is `untried`, `continuable`, `exhausted`, or `blocked`. A
@@ -319,7 +319,8 @@ that person's location. Follow the [field contract](output-contract.md#linkedin-
 Missing intent remains unknown even when size passes.
 
 The account gate requires canonical `company` and `domain`, an evidenced
-`account_fit`, and separate `signal_evidence`. Apply the qualification policy:
+`account_fit`, and separate signal evidence. Native reviews store signals once
+in `qualification_checks`; code derives `signal_evidence`. Apply the qualification policy:
 require a current observed signal only when the request requires it. Otherwise
 `signal_evidence` may contain a clearly labeled inferred use case grounded in
 sourced business facts, with unknown pain, intent and incumbent tools disclosed.

@@ -70,15 +70,21 @@ they do not decide which funding stage is current. Compatible `sources` decision
 for different results in one lookup are combined into its existing route review;
 conflicting states require one explicit decision for that lookup.
 Supply reviewed `text`, `date` and `date_basis` only when interpreting an event, distinguishing announcement
-from completion. `signal_evidence` also needs `signal`; qualification checks
-use the existing `criterion`, `importance`, `status`, `claim`, `evidence` contract.
+from completion. Store signals in `qualification_checks` using `criterion`,
+`importance`, `status`, `claim`, `signal`, and `evidence`. Use `signal` only for
+requested intent. Code derives the legacy primary `signal_evidence` field.
+A replacement check without `signal` removes the old label; do not copy signal
+facts into a second field. The workbook and final review use these same checks.
 Contact-stage and delivery checks compare reviewed signal dates with the saved
 request's time windows. Historical evidence can remain on an unresolved account;
 it cannot be promoted as a current signal. Errors after a web observation was
 saved return its reusable reference; correct the judgment without rewriting the observation.
 Company/profile `ref` values must select the matched Harvest getter. Add industry,
 subindustry and the two-sentence description as reviewed facts. For contacts,
-supply requested role, role match, and role group when the request uses groups.
+supply requested role and role match; code derives the saved role group.
+For email lookup, pass `contact_ref` with the selected profile reference and
+omit routine name, company domain and LinkedIn inputs; code fills the native
+fields from the verified receipt. Supply an exact email when validating it.
 A later `primary_contact: {"email_ref":"lookup-validation:0"}` supplies the exact
 address and verdict from the selected validation result. An existing different
 email is a conflict; explicitly select the new email to replace it. Changing
@@ -95,7 +101,10 @@ the same observation is safe; replacing it with different content is rejected.
 
 `recover` never redispatches: it finishes recording a saved normalized receipt.
 An outcome marked `recorded: true` is already saved; repeated recovery cannot
-settle unknown billing. Keep its cost bound until provider billing evidence arrives.
+settle unknown billing. At finish, one bounded read-only billing lookup can match
+posted charges by request ID and operation. Unmatched, ambiguous or pending
+charges keep their reservations. A later resume permits a fresh bounded read.
+Original research receipts are preserved.
 If only a pending or raw response survived, retain the reservation and reconcile
 it locally through diagnostics. Never retry an uncertain paid call. Explicit
 `sources` reviews retain the existing continuation/exhaustion rules; saving a
@@ -122,8 +131,11 @@ connection failure returns a clear operational block with its captured exit code
 validated artifact paths. On `review_required`, review the company's source
 meaning and writing in the returned packet, then pass its `review_ref`. Changes
 to research invalidate that reference. Correct named errors through `tyche_review`
-and finish again; do not repeat an unchanged failing call or read implementation
-code to construct bookkeeping.
+and finish again. Source observations for accepted companies can still be saved
+after reaching the target; corrections preserve verified contacts and emails.
+The review approval is saved for that exact state. If export is interrupted,
+code can retry it once when the worker ends without repeating research or
+approving an unreviewed snapshot. Do not repeat unchanged failing calls.
 
 ## Diagnostic CLI
 

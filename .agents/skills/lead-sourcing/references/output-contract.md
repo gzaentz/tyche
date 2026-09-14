@@ -274,6 +274,7 @@ top-level result list or hide rejected/unresolved rows in a count.
     "schema_version": {"enum": ["1.0", "1.1", "1.2"]},
     "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"},
     "retrieved_at": {"type": "string", "format": "date-time"},
+    "final_review": {"type": "object", "required": ["review_ref", "reviewed_at"], "additionalProperties": false, "properties": {"review_ref": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "reviewed_at": {"type": "string", "format": "date-time"}}},
     "request": {"$ref": "#/$defs/request_snapshot"},
     "budget": {"$ref": "#/$defs/output_budget"},
     "routes": {"type": "array", "items": {"$ref": "#/$defs/route"}},
@@ -426,6 +427,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "additionalProperties": false,
       "required": ["signal", "evidence_url", "evidence_date", "evidence_date_basis", "evidence_text", "source"],
       "properties": {
+        "criterion": {"type": "string", "minLength": 1, "description": "Code-owned reference to the authoritative qualification check."},
         "signal": {"type": "string", "minLength": 1},
         "evidence_url": {"$ref": "#/$defs/url"},
         "evidence_date": {"$ref": "#/$defs/date"},
@@ -492,6 +494,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "additionalProperties": false,
       "required": ["full_name", "current_title", "requested_role", "role_match", "company", "domain", "contact_url", "country", "location_evidence", "evidence_url", "evidence_date", "evidence_date_basis", "evidence_text", "source"],
       "properties": {
+        "profile_ref": {"type": "string", "minLength": 1},
         "full_name": {"type": "string", "minLength": 1},
         "current_title": {"type": "string", "minLength": 1},
         "requested_role": {"type": "string", "minLength": 1},
@@ -594,6 +597,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "progress_before": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "status_read": {"type": "boolean"},
+        "contact_ref": {"type": "string", "minLength": 1},
         "entity_type": {"type": "string", "minLength": 1},
         "error": {"type": "string", "minLength": 1}
       }
@@ -617,6 +621,7 @@ top-level result list or hide rejected/unresolved rows in a count.
         "phase": {"enum": ["account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"]},
         "approach": {"type": "string", "minLength": 1},
         "status_read": {"type": "boolean"},
+        "contact_ref": {"type": "string", "minLength": 1},
         "operation": {"type": "string", "minLength": 1},
         "tool": {"type": "string", "minLength": 1},
         "request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
@@ -644,6 +649,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "required": ["route_id", "phase", "provider", "operation", "request_summary", "state", "reason"],
       "properties": {
         "status_read": {"type": "boolean"},
+        "contact_ref": {"type": "string", "minLength": 1},
         "scope": {"type": "string", "minLength": 1},
         "approach": {"type": "string", "minLength": 1},
         "request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
@@ -1399,7 +1405,7 @@ route outcomes. Uniqueness is by canonical domain. Use these exact mappings:
 | `HQ Country` | `company.hq_country`, otherwise blank |
 | `Company Employee Range` | required `company.employee_range` from LinkedIn through HarvestAPI |
 | `Description` | required `company.description`, exactly two factual sentences |
-| `Signals` | `signal_evidence` plus passed `qualification_checks` explicitly tagged with `signal`; facts, original source dates and available source URLs |
+| `Signals` | Passed `qualification_checks` tagged with `signal`; older independent primary signals remain supported; facts, dates and source URLs |
 | `Intent Details` | `intent_details`, a natural paragraph explaining the activity, its context and why the company matters now |
 | `Phone` | `primary_contact.phone`, otherwise blank |
 
@@ -1415,11 +1421,14 @@ Excel dates. A classification note gets an `Industry` source row with blank URL
 and dates; it explains the selected pair and does not replace source evidence.
 The `Signals` cell uses one block per signal/source, labels observation dates
 `Observed on` and other evidence dates `Source date`, and omits missing values.
-It does not infer event dates. Store additional signals in the existing
+It does not infer event dates. Store all reviewed signals in the existing
 `qualification_checks` with an optional short `signal` label and supporting
 evidence; only `pass` checks enter `Signals`. Unknown/failed checks remain in
 the audit and must not be presented as verified activity. No duplicate prose
-field is needed for this column. The `Sources` rows for verified signals use
+field is needed for this column. Native review derives `signal_evidence` from
+the first passed signal check for compatibility; callers do not maintain both.
+Only intent checks have signal labels; ordinary fit/geography checks do not.
+The `Sources` rows for verified signals use
 `Field: Signals`; they also support the factual claims in `Intent Details`.
 
 `Email` and `Phone` are blank unless the

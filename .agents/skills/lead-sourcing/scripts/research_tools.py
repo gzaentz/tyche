@@ -38,6 +38,7 @@ QUALIFICATION_CHECK = obj({"criterion": STRING, "importance": {"enum": ["require
 CHECK = obj({"target": STRING, "purpose": STRING, "phase": {"enum": [
     "account_discovery", "account_verification", "contact_discovery", "contact_verification", "email_validation"]},
     "provider": {"enum": ["deepline", "scrapingdog"]}, "tool": STRING, "inputs": OBJECT,
+    "contact_ref": {**REFERENCE, "description": "Reviewed profile for email work. Code supplies native name, company domain and LinkedIn inputs; supply email or provider options when needed."},
     "approach": STRING, "max_cost_credits": {"type": "number", "minimum": 0},
     "status_read": {"type": "boolean"}}, ("target", "purpose", "phase", "inputs"))
 COMPANY = obj({"target": STRING, "decision": {"enum": ["hold_account", "qualify_account", "hold_contact", "reject", "accept"]},
@@ -59,9 +60,9 @@ TOOLS = {
         obj({"request": OBJECT, "max_usd": {"type": "number", "minimum": 0},
              "verification_reserve_credits": {"type": "number", "minimum": 0},
              "scrapingdog_usd_per_credit": {"type": "number", "exclusiveMinimum": 0}}, ("request",))),
-    "tyche_lookup": ("Execute 1–3 independent research choices, at most one check per company in a batch. Run discovery pilots singly. Choose the target, phase, tool and native inputs. Schemas, pricing, receipts and IDs are managed here. operationally_blocked means save remaining judgments and report the blocker; more discovery or finalization cannot repair it. Use inspect(query=...) to find a capability. Never retry an uncertain paid call; inspect(recover=reference) records its saved response without dispatch. max_cost_credits is only a verified whole-call bound for pricing the catalog cannot express.",
+    "tyche_lookup": ("Execute 1–3 independent research choices, at most one check per company in a batch. Run discovery pilots singly. Choose the target, phase, tool and native inputs. For email work pass contact_ref from the reviewed profile; omit routine names, company domain and LinkedIn inputs. Code supplies them from the receipt. Schemas, pricing, receipts and IDs are managed here. operationally_blocked means save remaining judgments and report the blocker; more discovery or finalization cannot repair it. Use inspect(query=...) to find a capability. Never retry an uncertain paid call; inspect(recover=reference) records its saved response without dispatch. max_cost_credits is only a verified whole-call bound for pricing the catalog cannot express.",
         obj({"checks": {"type": "array", "items": CHECK, "minItems": 1, "maxItems": 3}}, ("checks",))),
-    "tyche_review": ("Save judgments and changed fields only. With a Harvest ref, omit receipt-owned names, URLs, size/location fields and their evidence; code supplies them. Company example: {ref, industry, sub_industry, description}. Contact example: {ref, requested_role, role_match, role_group}. Evidence normally needs only {ref} to reuse saved URL, text and date; override text/date only when source interpretation requires it. Select an email validation result with email_ref to supply its exact address and verdict. Never infer a rejection from missing evidence. Include observed web results and reference them as web:0:0. Review source continuation/exhaustion explicitly with sources; saving a fact does not exhaust a source.",
+    "tyche_review": ("Save judgments and changed fields only. With a Harvest ref, omit receipt-owned names, URLs, size/location fields and their evidence; code supplies them. Company example: {ref, industry, sub_industry, description}. Contact example: {ref, requested_role, role_match}; code derives the role group. Store each signal once in qualification_checks with a signal label only for requested intent, never geography or general fit. The primary signal field and workbook are derived from these checks. A replacement check without signal removes its prior signal label. Evidence normally needs only {ref} to reuse saved URL, text and date; override text/date only when source interpretation requires it. Select an email validation result with email_ref to supply its exact address and verdict. Never infer a rejection from missing evidence. Include observed web results and reference them as web:0:0. Review source continuation/exhaustion explicitly with sources; saving a fact does not exhaust a source.",
         obj({"companies": {"type": "array", "items": COMPANY}, "web": {"type": "array", "items": WEB},
              "sources": {"type": "array", "items": SOURCE}})),
     "tyche_inspect": ("Read compact run/company state or saved results. query searches the free capability catalog; tool returns cached inputs/pricing. Describe only capabilities needed for the next step. Use ref=route with offset/limit (1–10) to page saved results, or field to select a nested field from a result, tool, company or run. With target, fields such as intent_details and qualification_checks select the saved company record directly. recover records an unrecorded saved response without dispatch; it does not settle unknown billing. Full receipts remain on disk.",
@@ -123,12 +124,14 @@ def compact(value, depth=0):
 
 
 class ResearchTools:
-    def __init__(self, run_file, *, execute=None, readonly=False):
+    def __init__(self, run_file, *, execute=None, readonly=False, environment=None):
         if Path(run_file).is_symlink():
             raise ValueError("Bound run file must be a regular file, not a symlink")
         self.path = Path(run_file).resolve()
         self.execute = execute
         self.readonly = readonly
+        self.environment = dict(os.environ if environment is None else environment)
+        self._billing_checked = False
         self._catalog_lock = threading.RLock()
         self._review_lock = threading.RLock()
         self._dispatch_slots = threading.BoundedSemaphore(3)
@@ -306,13 +309,28 @@ class ResearchTools:
         if blocker:
             return self._blocked_result(blocker)
         specs = []
-        for item in checks:
+        for original in checks:
+            item = copy.deepcopy(original)
             provider = item.get("provider", "deepline")
             if provider == "deepline":
                 if not item.get("tool"):
                     raise ValueError("Deepline lookup requires the selected tool ID")
                 contract = self._description(item.get("tool"))
                 request = {"operation": "execute", "tool": item["tool"], "payload": item["inputs"]}
+                if item.get("contact_ref"):
+                    action = dict(scope=item["target"], phase=item["phase"], contact_ref=item["contact_ref"],
+                                  paid_calls=1, status_read=item.get("status_read", False))
+                    if not email_receipts.email_work(action, request):
+                        raise ValueError("contact_ref is for email work on a reviewed profile")
+                    document = self._document()
+                    company, contact = runner._email_gate(self.path, document, action, request)
+                    fields = linkedin_receipts.email_identity_fields(document, self.path, company, contact)
+                    schema = contract.get("inputSchema", {})
+                    allowed = set(schema.get("jsonSchema", {}).get("properties", {})) | {f["name"] for f in schema.get("fields", [])}
+                    for key in allowed & fields.keys():
+                        item["inputs"].setdefault(key, fields[key])
+                    for key in fields.keys() - allowed:
+                        item["inputs"].pop(key, None)
                 research_input.check_tool_contract({"results": [contract]}, request)
                 try:
                     cost = self._price(contract, item["inputs"], item.get("max_cost_credits"))
@@ -331,7 +349,7 @@ class ResearchTools:
                 stored = provider_pricing.profile_price(contract, item["inputs"])
                 if stored:
                     spec["pricing_basis"] = copy.deepcopy(stored)
-            for field in ("approach", "status_read"):
+            for field in ("approach", "status_read", "contact_ref"):
                 if field in item:
                     spec[field] = item[field]
             specs.append(spec)
@@ -432,7 +450,7 @@ class ResearchTools:
         evidence = {"url": row.get("evidence_url") or row.get("url") or row.get("contact_url") or row.get("company_linkedin_url"),
                     "date": date or self._document()["request"]["as_of_date"],
                     "date_basis": basis,
-                    "text": row.get("evidence_text", row.get("text")), "source": source}
+                    "text": row.get("evidence_text") or row.get("text") or row.get("snippet"), "source": source}
         if signal:
             evidence = {"evidence_" + k if k != "source" else k: v for k, v in evidence.items()}
             value = {"evidence_" + k if k in {"url", "date", "date_basis", "text"} else k: v for k, v in value.items()}
@@ -445,7 +463,8 @@ class ResearchTools:
         value = copy.deepcopy(value)
         if "ref" not in value:
             return value
-        row, source, _ = self._resolve(value.pop("ref"))
+        reference = value.pop("ref")
+        row, source, _ = self._resolve(reference)
         expected = "harvestapi_get_profile" if person else "harvestapi_get_company"
         if source.get("tool") != expected:
             raise ValueError("Company/contact selection requires a saved " + expected + " result. "
@@ -455,7 +474,7 @@ class ResearchTools:
                     "evidence_date": self._document()["request"]["as_of_date"], "evidence_date_basis": "observed_current",
                     "evidence_text": "Current LinkedIn profile fields returned by HarvestAPI.", "source": source}
         if person:
-            facts = {"full_name": row.get("contact_name"), "current_title": row.get("contact_title"),
+            facts = {"profile_ref": reference, "full_name": row.get("contact_name"), "current_title": row.get("contact_title"),
                      "company": row.get("company"), "domain": target, "linkedin_url": row.get("contact_url"),
                      "contact_url": row.get("contact_url"), **{k: row.get(k) for k in ("country", "state", "city")},
                      "location_evidence": evidence, **evidence}
@@ -485,7 +504,7 @@ class ResearchTools:
         contact = self._harvest(value, target, person=True)
         previous = next((r.get("primary_contact", {}) for state in ("accepted", "unresolved")
                          for r in self._document().get(state, []) if runner._company_key(r) == target), {})
-        if patch_primary and previous and "ref" not in value:
+        if patch_primary and previous and ("ref" not in value or contact.get("linkedin_url") == previous.get("linkedin_url")):
             for key in ("full_name", "linkedin_url", "contact_url"):
                 if key in value and value[key] != previous.get(key):
                     raise ValueError("Select a new profile ref when changing contact identity")
@@ -494,6 +513,13 @@ class ResearchTools:
                 previous.pop("email_validation", None)
                 previous.pop("email_source", None)
             contact = {**previous, **contact}
+        request = self._document()["request"]
+        role = research_input.canonical_requested_role(contact.get("requested_role"), request.get("requested_roles", []))
+        if role:
+            contact["requested_role"] = role
+            for group, roles in request.get("contact_role_groups", {}).items():
+                if role in roles:
+                    contact["role_group"] = group
         ref = contact.pop("email_ref", None)
         if ref:
             row, source, _ = self._resolve(ref)
@@ -760,6 +786,11 @@ class ResearchTools:
     def _finish(self, commentary, review_ref):
         if not self.path.exists():
             return self.inspect()
+        if self.execute is None:
+            from billing_reconciliation import reconcile
+            fresh = not self._billing_checked
+            self._billing_checked = True
+            reconcile(self.path, refresh=fresh)
         blocker = self._operational_block()
         if blocker:
             return self._blocked_result(blocker)
@@ -768,28 +799,35 @@ class ResearchTools:
             return {"status": "needs_research", "delivery_allowed": False, "progress": progress,
                     "next": "Resolve the listed gaps using lookup/review. Prefer affordable completion_candidates; no export has run. Do not invent rejected companies or repeat unchanged finalization."}
         document = self._document()
-        reviewed = {k: document.get(k) for k in ("request", "accepted", "unresolved", "rejected")}
-        expected = hashlib.sha256(json.dumps(reviewed, sort_keys=True).encode()).hexdigest()
-        if review_ref != expected:
+        expected = runner.review_fingerprint(document)
+        approval = document.get("final_review", {})
+        if (review_ref is not None and review_ref != expected) or (review_ref is None and approval.get("review_ref") != expected):
             return {"status": "review_required", "delivery_allowed": False, "review_ref": expected,
                     "request": document["request"],
                     "companies": [{k: compact(v) for k, v in row.items()} for row in document.get("accepted", [])],
                     "instructions": "Review each signal against its source: identity, date, geography, event status and claim strength. One vacancy does not establish rapid hiring; repeated hiring needs dated repeated observations. An aggregator's ambiguous Arizona location does not establish Arizona operations. Signals need concise facts/date/source, not copied pages. Intent Details must mention each verified signal, explain each signal's relevance, and close by connecting the activity to the company's product/service. Description is exactly two factual sentences. Correct with tyche_review and request a fresh packet; otherwise return this review_ref to finish. This is research judgment, not an automatic semantic pass."}
+        if approval.get("review_ref") != expected:
+            def approve(saved):
+                if runner.review_fingerprint(saved) != expected:
+                    raise ValueError("Research changed during review; request the current review packet")
+                saved["final_review"] = {"review_ref": expected, "reviewed_at": datetime.now(timezone.utc).isoformat()}
+                return saved
+            runner.mutate(self.path, approve)
         if commentary is not None or not (self.path.parent / "research-commentary.md").exists():
             commentary = commentary or "No additional research commentary supplied."
             (self.path.parent / "research-commentary.md").write_text(commentary + "\n", encoding="utf-8")
         exporter = Path(__file__).with_name("export_xlsx.mjs")
-        node = os.environ.get("TYCHE_WORKSPACE_NODE", "node")
-        result = subprocess.run([node, str(exporter), str(self.path)], capture_output=True, text=True, timeout=180)
+        node = self.environment.get("TYCHE_WORKSPACE_NODE", "node")
+        result = subprocess.run([node, str(exporter), str(self.path)], capture_output=True, text=True, timeout=180, env=self.environment)
         if result.returncode:
             return {"status": "needs_repair", "delivery_allowed": False,
                     "errors": [(result.stderr or result.stdout)[-9000:]], "progress": self._overview(),
                     "next": "Correct the named saved fields or source reviews with tyche_review, then finish again. Do not read implementation code or repeat unchanged finalization."}
         # The final launcher pass adds closed model usage without rewriting
         # research prose or changing the validated results/workbook.
-        report = subprocess.run([os.environ.get("TYCHE_WORKSPACE_PYTHON", "python3"),
+        report = subprocess.run([self.environment.get("TYCHE_WORKSPACE_PYTHON", "python3"),
             str(Path(__file__).resolve().parents[4] / "scripts/run_costs.py"), str(self.path)],
-            capture_output=True, text=True, timeout=30)
+            capture_output=True, text=True, timeout=30, env=self.environment)
         if report.returncode:
             raise ValueError("Workbook saved; report needs repair: " + report.stderr[-2000:])
         return {"export": json.loads(result.stdout.strip().splitlines()[-1]), "progress": self._overview(),

@@ -87,6 +87,14 @@ class UsageReceipt:
             except ValueError as exc:
                 self.capture_error(exc)
             self.save()
+        elif event.get('type') in {'error', 'turn.failed'}:
+            message = str(event.get('message', event.get('error', ''))).casefold()
+            # Keep the failure category, not a second copy of private tool data.
+            self.data['failure_kind'] = ('model_usage_limit' if any(term in message for term in
+                ('usage limit', 'quota', 'rate limit', 'limit reached')) else
+                'model_connection_error' if any(term in message for term in ('connection', 'stream disconnected', 'network'))
+                else 'worker_error')
+            self.save()
 
     def observe_response(self, payload, timestamp, model):
         if payload.get('thread_id') != self.data['thread_id']:

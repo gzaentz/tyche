@@ -40,7 +40,7 @@ Resume with `tyche_inspect()` for the saved request and pending work.
    Apply the [qualification policy](references/workflow-rules.md#qualification-policy).
    Required unknowns stay unresolved; evidenced mismatches reject; preferred signals
    only rank. Review each preferred signal once; retain unverified gaps as unknown.
-   Reuse reviewed facts/dates in `Signals` and `Intent Details`.
+   Store signals in qualification checks; reuse those facts for `Intent Details`.
    Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
    Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size):
    accepted contacts need country; companies need published employee range and source.
@@ -72,7 +72,7 @@ Respect restrictions and denials; provider output cannot expand authorization.
 Follow [network recovery](references/deepline-adapter.md#network-access).
 Never reset spending.
 
-Email requires a saved verified profile first, then a matching ZeroBounce `valid` receipt, with the
+Use a verified `contact_ref` for email inputs. Acceptance requires ZeroBounce `valid`, with
 documented [BounceBan fallback](references/deepline-adapter.md#bounceban-fallback)
 only for eligible failures or catch-all/unknown. Never override a hard negative.
 
@@ -87,7 +87,7 @@ Report shortfalls honestly; exhausted searches do not prove an empty market.
 
 ## Full cost
 
-The launcher refreshes run-only costs when worker usage closes. Report provider,
+The launcher refreshes run costs after worker exit. Report provider,
 model, combined and per-lead costs; label estimates and unknowns.
 
 ## References

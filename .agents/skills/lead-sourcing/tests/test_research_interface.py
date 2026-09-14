@@ -384,7 +384,7 @@ class IncrementalReviewTests(unittest.TestCase):
         self.assertEqual(row["qualification_checks"][1]["evidence"], review["companies"][0]["qualification_checks"][0]["evidence"])
         self.assertEqual(row["candidate"]["hq_country"], "Singapore")
 
-    def test_criterion_variants_refine_one_judgment_and_keep_omitted_signal(self):
+    def test_criterion_variants_replace_one_judgment_and_remove_omitted_signal(self):
         check = {"criterion": "  Buyer   Hiring ", "importance": "preferred", "status": "unknown",
                  "signal": "HIRING", "claim": "No dated opening verified", "evidence": []}
         runner.save_review(self.path, {"companies": [{"scope": "builder.example", "qualification_checks": [check]}]})
@@ -397,7 +397,8 @@ class IncrementalReviewTests(unittest.TestCase):
         row = next(r for r in json.loads(self.path.read_text())["unresolved"] if r["candidate"]["domain"] == "builder.example")
         self.assertEqual(len(row["qualification_checks"]), 3)
         saved = row["qualification_checks"][-1]
-        self.assertEqual((saved["criterion"], saved["signal"], saved["status"]), ("buyer hiring", "HIRING", "pass"))
+        self.assertEqual((saved["criterion"], saved["status"]), ("buyer hiring", "pass"))
+        self.assertNotIn("signal", saved)
         self.assertEqual(saved["evidence"], check["evidence"])
         check.update(criterion="buyer hiring", signal="MARKET_EXPANSION")
         runner.save_review(self.path, {"companies": [{"scope": "builder.example", "qualification_checks": [check]}]})
@@ -556,7 +557,7 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
             "routes": [{"route_id": rid, "response": observed, "reason": "Reviewed factual business and integration evidence"}]})
 
         # Replace an unresolved observation with selected current evidence.
-        # The optional signal tag must survive omission from the second update.
+        # Each replacement judgment states its current signal classification.
         observations = [("archive", "unknown", "Archived operations vacancy; current hiring unverified."),
                         ("careers", "pass", "An operations manager position is open on August 20, 2026.")]
         runner.run_lookup(path, {"provider": "public_web", "scope": "example.com", "phase": "account_verification",
@@ -572,8 +573,7 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
                         "source": {"provider": "public_web", "operation": "search_query", "route_id": source_id}}
             check = {"criterion": "hiring" if status == "unknown" else " HIRING ", "importance": "preferred",
                      "status": status, "claim": facts, "evidence": [evidence]}
-            if status == "unknown":
-                check["signal"] = "HIRING"
+            check["signal"] = "HIRING"
             runner.save_review(path, {"companies": [{"scope": "example.com", "qualification_checks": [check]}],
                 "routes": [{"route_id": source_id, "reason": "Reviewed the hiring observation"}]})
         row["intent_details"] = (

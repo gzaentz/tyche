@@ -14,7 +14,7 @@ import budget_guard
 import research_input
 from email_receipts import check_fallback, validator_for_tool, verification_finished
 from email_receipts import email_work
-from linkedin_receipts import contact_verification_errors
+from linkedin_receipts import contact_verification_errors, email_identity_fields
 from provider_output import ResponseFile, load_json
 from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
 from validate_run import (BLOCKING_PROVIDER_STATUSES, DETERMINATE_PROVIDER_STATUSES, _company_key,
@@ -23,6 +23,13 @@ from validate_run import (BLOCKING_PROVIDER_STATUSES, DETERMINATE_PROVIDER_STATU
                           validate_run)
 
 ATTEMPT_STATUSES = DETERMINATE_PROVIDER_STATUSES | BLOCKING_PROVIDER_STATUSES
+
+
+def review_fingerprint(document):
+    reviewed = {k: document.get(k) for k in ("request", "accepted", "unresolved", "rejected")}
+    reviewed["source_reviews"] = [{k: route.get(k) for k in ("route_id", "state", "reason", "continuation_route_ids")}
+        for route in document.get("stop_audit", {}).get("route_frontier", [])]
+    return hashlib.sha256(json.dumps(reviewed, sort_keys=True).encode()).hexdigest()
 
 
 def start_run(run_file, setup):
@@ -146,14 +153,18 @@ def _email_gate(run_file, document, action, request):
     payload = request.get("payload", request)
     name = payload.get("full_name", payload.get("fullName", payload.get("name"))) or " ".join(
         str(payload.get(a, payload.get(b, ""))) for a, b in (("first_name", "firstName"), ("last_name", "lastName"))).strip()
-    url = payload.get("linkedin_url", payload.get("linkedinUrl", payload.get("url", "")))
+    url = payload.get("linkedin_url", payload.get("linkedinUrl", payload.get("profile_url", payload.get("url", ""))))
     email = payload.get("email")
-    if name:
+    reference = action.get("contact_ref")
+    if reference:
+        contacts = [(company, c) for company, c in contacts if c.get("profile_ref") == reference
+                    and reference.split(":")[0] == (c.get("location_evidence") or c).get("source", {}).get("route_id")]
+    elif name:
         contacts = [(company, c) for company, c in contacts if str(c.get("full_name") or "").casefold() == name.casefold()]
     if "linkedin.com/in/" in str(url):
         contacts = [(company, c) for company, c in contacts
                     if str(c.get("linkedin_url") or "").rstrip("/").casefold() == url.rstrip("/").casefold()]
-    if not name and "linkedin.com/in/" not in str(url):
+    if not reference and not name and "linkedin.com/in/" not in str(url):
         matches = [(company, c) for company, c in contacts if isinstance(email, str)
                    and str(c.get("email") or "").casefold() == email.casefold()]
         # Without another selected identity, email work belongs to the saved
@@ -165,6 +176,15 @@ def _email_gate(run_file, document, action, request):
         errors = contact_verification_errors(document, run_file, company, contact)
     if errors:
         raise ValueError("Email work requires verified identity, current company and requested-role match before spending: " + "; ".join(errors))
+    if reference:
+        fields = email_identity_fields(document, run_file, company, contact)
+        for key in fields.keys() & payload.keys():
+            actual, expected = str(payload[key]).strip().casefold(), fields[key].strip().casefold()
+            if key in {"url", "profile_url", "linkedin_url", "linkedinUrl"}:
+                actual, expected = actual.rstrip("/"), expected.rstrip("/")
+            if actual != expected:
+                raise ValueError(f"Email input {key} conflicts with the selected profile; omit it and use contact_ref")
+    return company, contact
 
 
 def run_status(document, decision):
@@ -186,6 +206,8 @@ def finalize_run(run_file):
         refresh(document)
         ledger = budget_guard.load_ledger(run_file)
         problems = budget_guard.audit_ledger(run_file, document, state=ledger)
+        if document.get("final_review") and document["final_review"].get("review_ref") != review_fingerprint(document):
+            problems.append("Research changed after final review; request and approve the current review packet")
         decision = evaluate_stop(document, execution_budget=ledger)
         problems.extend(decision["errors"])
         stop = decision["decision"]
@@ -448,7 +470,13 @@ def _prepare(run_file, validated):
         actions = document["stop_check"]["next_actions"]
         actions[:] = [a for a in actions if a["id"] != action["id"]] + [action]
         decision = evaluate_stop(document, execution_budget=budget_guard.load_ledger(run_file))
-        if action["id"] not in decision["eligible_actions"]:
+        # Saving an already observed source for an accepted company remains
+        # possible during final review. This executes no provider call and
+        # does not reopen discovery or extend a user-specified time limit.
+        review_observation = (decision["decision"] == "target_met" and provider == "public_web"
+            and action["phase"] == "account_verification" and action["paid_calls"] == 0
+            and action["scope"] in {_company_key(row) for row in document["accepted"]})
+        if action["id"] not in decision["eligible_actions"] and not review_observation:
             reason = decision.get("blocked_actions", {}).get(action["id"])
             if reason:
                 # Keep the agent's concrete, unaffordable choice for the stop

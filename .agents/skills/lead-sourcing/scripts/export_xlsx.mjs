@@ -127,8 +127,8 @@ function intentDetails(signal) {
     .join("; ");
 }
 
-function signalsFor(row) {
-  const signals = [object(row.signal_evidence)];
+function reviewedSignals(row) {
+  const signals = [];
   for (const check of row.qualification_checks || []) {
     if (check.status !== "pass" || !text(check.signal)) continue;
     for (const evidence of check.evidence || []) {
@@ -137,6 +137,16 @@ function signalsFor(row) {
         evidence_url: evidence.url });
     }
   }
+  // Native reviews mark the primary as a derived view. Older files can still
+  // have an independent primary signal plus additional tagged checks.
+  const primary = object(row.signal_evidence);
+  const sameEvent = signal => [signal.signal, signal.evidence_date, signal.evidence_date_basis, signal.evidence_url].join("|");
+  if (!primary.criterion && !signals.some(signal => sameEvent(signal) === sameEvent(primary))) signals.unshift(primary);
+  return signals;
+}
+
+function signalsFor(row) {
+  const signals = reviewedSignals(row);
   return [...new Set(signals.map((signal) => {
     const dateLabel = signal.evidence_date_basis === "observed_current" ? "Observed on" : "Source date";
     return [text(signal.signal),
@@ -261,15 +271,13 @@ export function sourcesFor(document) {
       });
     };
     add("Description", row.account_fit);
-    const signal = object(row.signal_evidence);
-    add("Signals", signal, signal.signal);
+    for (const signal of reviewedSignals(row)) add("Signals", signal, signal.signal);
     add("Role", row.primary_contact);
     add("Contact Location", row.primary_contact.location_evidence);
     add("Company Employee Range", company.employee_range_evidence);
     for (const check of row.qualification_checks || []) {
       for (const evidence of check.evidence || []) {
-        add(check.status === "pass" && text(check.signal) ? "Signals" : check.criterion,
-          evidence, text(check.signal));
+        if (!(check.status === "pass" && text(check.signal))) add(check.criterion, evidence, text(check.signal));
       }
     }
     if (text(company.classification_note)) {
@@ -523,7 +531,8 @@ async function main() {
     if (createHash("sha256").update(resultText).digest("hex") !== checked.results_sha256) throw new ExportError("Saved results changed during validation");
     const document = JSON.parse(resultText);
     const receipt = await exportXlsx(document, destination, { ...options, resultsPath });
-    await fs.writeFile(path.join(path.dirname(destination), "validation.json"), JSON.stringify({ ...checked, completed_at: new Date().toISOString() }, null, 2) + "\n");
+    const workbook_sha256 = createHash("sha256").update(await fs.readFile(destination)).digest("hex");
+    await fs.writeFile(path.join(path.dirname(destination), "validation.json"), JSON.stringify({ ...checked, workbook_sha256, completed_at: new Date().toISOString() }, null, 2) + "\n");
     process.stdout.write(`${JSON.stringify({ exported: true, path: destination, rows: receipt.rows, columns: receipt.columns })}\n`);
     return 0;
   } catch (error) {

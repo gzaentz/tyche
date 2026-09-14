@@ -14,7 +14,7 @@ from validate_run import validate_continuations
 
 
 IDENTITY = ("route_id", "phase", "provider", "operation", "request_summary")
-AUDIT_IDENTITY = ("scope", "approach", "request_fingerprint", "entity_type", "status_read")
+AUDIT_IDENTITY = ("scope", "approach", "request_fingerprint", "entity_type", "status_read", "contact_ref")
 STATES = {"untried", "continuable", "exhausted", "blocked"}
 COST_FIELDS = {"cost_credits", "cost_upper_bound_credits", "cost_basis"}
 

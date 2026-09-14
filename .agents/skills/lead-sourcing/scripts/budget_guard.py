@@ -314,10 +314,19 @@ def _reconciled_receipt(run_file, receipt_file, route_id, call):
     spend = receipt.get("spend_receipt", {})
     billing = receipt.get("billing", {})
     action = receipt.get("attempt", {}).get("action", {})
+    posted = call.get("billing_evidence")
+    if posted:
+        from billing_reconciliation import evidence_error
+        route = next((r for r in read_object(Path(run_file)).get("routes", []) if r.get("route_id") == route_id), {})
+        if evidence_error(run_file, route, call):
+            raise BudgetError("posted billing proof does not match this run")
+        billing = {"credits_charged": posted["credits"]}
+        if call["actual_usd"] is not None:
+            billing["cost_usd"] = float(call["actual_usd"])
     if (receipt.get("run_fingerprint") != run_fingerprint(run_file)
             or receipt.get("provider") != call["provider"]
             or receipt.get("status") in {"partial", "timeout"}
-            or spend != {"route_id": route_id, "ledger": str(ledger_path(run_file)), "state": "settled"}
+            or spend != {"route_id": route_id, "ledger": str(ledger_path(run_file)), "state": "reserved" if posted else "settled"}
             or action.get("id") != route_id
             or amount(action.get("cost_upper_bound_credits"), "original reservation") != amount(call["maximum_credits"], "ledger reservation")
             or call["actual_credits"] is None
@@ -398,6 +407,10 @@ def audit_ledger(run_file, document, *, state=None, allow_unbound=False):
             errors.append("paid route IDs must match the execution ledger; record every reserved call")
         for route_id in set(paid) & set(state["calls"]):
             route, call = paid[route_id], state["calls"][route_id]
+            if call.get("billing_evidence"):
+                from billing_reconciliation import evidence_error
+                if error := evidence_error(run_file, route, call):
+                    errors.append(f"{route_id}: {error}")
             if price_overrun(call, state):
                 reconciliation = call.get("reconciliation")
                 if not isinstance(reconciliation, dict) or not reconciliation.get("pricing_note"):

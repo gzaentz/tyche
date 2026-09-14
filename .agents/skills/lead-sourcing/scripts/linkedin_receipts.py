@@ -109,6 +109,27 @@ def contact_verification_errors(document, run_file, company, contact):
     return errors
 
 
+def email_identity_fields(document, run_file, company, contact):
+    """Provider inputs from the verified receipt, not retyped display names."""
+    profile = _saved_profile(run_file, (contact.get("location_evidence") or contact).get("source", {}),
+        contact.get("linkedin_url"), "in", document.get("routes", []), company.get("linkedin_url"))
+    def name(value):
+        if not isinstance(value, str):
+            return None
+        value = re.sub(r"^Dr\.?\s+", "", value.strip(), flags=re.I)
+        # Strip credential suffixes only. Preserve surnames, initials and Jr/Sr.
+        return re.sub(r",\s*(?:(?:Ph\.?D\.?|BCBA(?:-D)?|MBA|MD|RN|LCSW|LPC)\s*,?\s*)+$", "", value, flags=re.I).strip()
+    first = name(profile.get("firstName", profile.get("first_name")))
+    last = name(profile.get("lastName", profile.get("last_name")))
+    full = " ".join((first, last)) if first and last else name(profile.get("contact_name"))
+    values = {"first_name": first, "firstName": first, "last_name": last, "lastName": last,
+              "full_name": full, "fullName": full, "name": full,
+              "linkedin_url": contact.get("linkedin_url"), "linkedinUrl": contact.get("linkedin_url"),
+              "profile_url": contact.get("linkedin_url"), "url": contact.get("linkedin_url"),
+              "domain": company.get("domain"), "company_domain": company.get("domain")}
+    return {key: value for key, value in values.items() if value}
+
+
 def linkedin_receipt_errors(document, run_file, *, fill_missing=False):
     """Read-only by default; review saves may fill missing values before validation."""
     if not isinstance(document, dict) or not isinstance(document.get("accepted", []), list):
