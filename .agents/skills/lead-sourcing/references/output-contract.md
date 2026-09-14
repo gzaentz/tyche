@@ -1261,6 +1261,9 @@ requirements, not new `results.json` fields or workbook columns.
   Calculate `elapsed_seconds = completed_at - started_at` and display total
   elapsed time in minutes/seconds. Also show time to `leads_ready_at` when known.
   Elapsed time is wall-clock time, including waits and pauses, not CPU time.
+- Native tools record `leads_ready_at` in the existing `stop_check` and the
+  exporter records `completed_at` in `validation.json`. The report derives its
+  timing from these saved timestamps; the LLM does not calculate them manually.
 - A resumed run keeps its original start. If the start was not recorded, say
   runtime is unavailable or explicitly label a known-interval estimate with its
   boundaries. Never present a reconstructed interval as full runtime.
@@ -1508,6 +1511,10 @@ only for version `1.2`; billing and all existing eligibility checks still apply.
 The exporter does not write narratives, classify companies, or infer dates.
 
 ## `report.md` minimum contents
+
+In native runs, `tyche_finish` renders the audit from saved records plus the
+agent's research commentary. The launcher updates costs after worker usage
+closes. No additional paid call is needed solely for report attribution.
 
 The Markdown report is the human audit receipt. Include the normalized request,
 assumptions and as-of date; signal hypotheses and why routes differ; every

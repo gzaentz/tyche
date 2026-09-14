@@ -329,7 +329,88 @@ def save_report(run_directory, results_path=None):
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(output, indent=2) + '\n', encoding='utf-8')
     temporary.replace(path)
+    commentary = directory / 'research-commentary.md'
+    if commentary.exists():
+        write_research_report(directory, results, output, commentary.read_text(encoding='utf-8'))
     return path
+
+
+def write_research_report(directory, results, costs, commentary):
+    """Render saved facts and accounting. Research prose remains agent-authored."""
+    def cell(value):
+        return str(value if value is not None else 'unknown').replace('|', '\\|').replace('\n', ' ')
+
+    def source(value):
+        if not isinstance(value, dict) or not value:
+            return 'unknown'
+        ref = value.get('source', value)
+        label = '/'.join(str(ref[k]) for k in ('provider', 'tool') if ref.get(k)) or 'unknown'
+        rid = ref.get('route_id')
+        # IDs are generated/validated by the run helpers; never accept a path.
+        if rid and all(c.isalnum() or c in '._-' for c in rid):
+            label += f' ([{rid}](receipts/{rid}.json))'
+        url = value.get('evidence_url', value.get('url'))
+        return label + (f' — {url}' if url else '')
+
+    validation_path = directory / 'validation.json'
+    validation = json.loads(validation_path.read_text()) if validation_path.exists() else {}
+    clock = results.get('stop_check', {})
+    def elapsed(end):
+        try:
+            delta = datetime.fromisoformat(end.replace('Z', '+00:00')) - datetime.fromisoformat(clock['started_at'].replace('Z', '+00:00'))
+            seconds = round(delta.total_seconds())
+            return f'{seconds // 60}m {seconds % 60:02d}s' if seconds >= 0 else 'unavailable'
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return 'unavailable'
+
+    accepted = results.get('accepted', [])
+    request = results.get('request', {})
+    lines = ['# TYCHE run report', '',
+        f"Accepted {len(accepted)} of {request.get('target_count', 'unknown')} requested companies. Stop: {results.get('stop_reason', 'still running')}.",
+        f"Started: {clock.get('started_at', 'unavailable')}. Leads ready: {clock.get('leads_ready_at', 'unavailable')}. "
+        f"Workbook checked: {validation.get('completed_at', 'unavailable')}.",
+        f"Time to leads: {elapsed(clock.get('leads_ready_at'))}. Time to checked workbook: {elapsed(validation.get('completed_at'))}.",
+        '', '## Research commentary', '', commentary.strip(), '', '## Run-only costs', '']
+    for label, key in [('Provider USD (confirmed / maximum)', 'provider_usd'),
+                       ('Worker models, Standard API equivalent USD', 'worker_standard_api_equivalent_usd'),
+                       ('Combined Standard API equivalent USD', 'combined_standard_equivalent_usd'),
+                       ('Cost per accepted lead, Standard API equivalent USD', 'cost_per_accepted_lead_standard_equivalent_usd')]:
+        value = costs.get(key)
+        lines.append(f'- {label}: {json.dumps(value) if value is not None else "unavailable"}.')
+    lines.extend('- ' + note for note in costs.get('missing', []) + costs.get('limitations', []))
+    lines += ['', 'Full numeric receipts: [run-costs.json](run-costs.json).', '', '## Accepted-lead sources', '',
+              '| Company / domain | Discovery | Fit | Intent | Buyer role | Email lookup | Validation |',
+              '| --- | --- | --- | --- | --- | --- | --- |']
+    counts = {kind: {} for kind in ('discovery', 'email', 'validation')}
+    for row in accepted:
+        company, contact = row.get('company', {}), row.get('primary_contact', {})
+        discovery = source(company.get('discovery_source', row.get('discovery_source')))
+        email = source(contact.get('email_source')) if 'email' in request.get('contact_fields', ['email']) else 'not requested'
+        verifier = source(contact.get('email_validation')) if email != 'not requested' else 'not requested'
+        values = [f"{company.get('canonical_name', '')} / {company.get('domain', '')}", discovery,
+                  source(row.get('account_fit')), source(row.get('signal_evidence')), source(contact), email, verifier]
+        lines.append('| ' + ' | '.join(cell(v) for v in values) + ' |')
+        for kind, evidence in [('discovery', discovery), ('email', email), ('validation', verifier)]:
+            label = evidence.split(' (')[0]
+            counts[kind][label] = counts[kind].get(label, 0) + 1
+    lines += ['', 'Source counts (unknown attribution is retained): ' + json.dumps(counts) + '.',
+              '', '## Reviewed companies', '', '| State | Company | Decision / remaining gap |', '| --- | --- | --- |']
+    for state in ('accepted', 'rejected', 'unresolved'):
+        for row in results.get(state, []):
+            company = row.get('company', row.get('candidate', {}))
+            lines.append('| ' + ' | '.join(cell(v) for v in (state, company.get('domain'), row.get('reason_text', 'Qualified; see saved evidence and contact selection'))) + ' |')
+    lines += ['', '## Research routes', '', '| Receipt | Provider / tool | Scope / phase | Status | Rows | Credits / bound | Cost basis |',
+              '| --- | --- | --- | --- | --- | --- | --- |']
+    for route in results.get('routes', []):
+        values = [route.get('route_id'), source(route), f"{route.get('scope')} / {route.get('phase')}", route.get('provider_status'),
+                  route.get('rows_returned'), f"{route.get('cost_credits')} / {route.get('cost_upper_bound_credits')}", route.get('cost_basis')]
+        lines.append('| ' + ' | '.join(cell(v) for v in values) + ' |')
+    lines += ['', '## Saved request and audit', '', 'The request, qualification evidence, contact selections and source frontier are in [results.json](results.json).', '',
+              '```json', json.dumps({k: results.get(k) for k in ('request', 'summary', 'cost_summary', 'stop_audit')}, indent=2), '```', '']
+    path = directory / 'report.md'
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text('\n'.join(lines), encoding='utf-8')
+    temporary.replace(path)
 
 
 if __name__ == '__main__':

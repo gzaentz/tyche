@@ -9,8 +9,8 @@ reference or repeat completed research.
 
 | When | Reference |
 |---|---|
-| Before the first provider call | [Shared adapter I/O](adapter-io.md): credentials, saved responses, uncertain outcomes. Read once. |
-| Deepline discovery or execution | [Deepline adapter](deepline-adapter.md): discovery first, core contract before execution, email sections only at validation. |
+| Normal sourcing | [Native tools](adapter-io.md#native-tools): research choices, evidence references, recovery. |
+| Deepline tool input or provider failure | `tyche_inspect(tool=...)` for the current schema; [Deepline adapter](deepline-adapter.md) for the specific failure or email gate. |
 | ScrapingDog execution | [ScrapingDog adapter](scrapingdog-adapter.md): common bounds/status handling plus the chosen operation row. |
 | A route needs more options | The relevant section of [provider capabilities](provider-capabilities.md), not its entire catalog. |
 
@@ -23,9 +23,9 @@ reloading them for every call.
 ## Choose by evidence gap
 
 These are discovery seeds, not executable Deepline IDs. Search the live
-catalog, then describe the selected tool before its first execution in the run.
-Reuse that description for subsequent calls unless its schema, price or access
-becomes stale or untrusted. Discover the next useful tool when it is needed.
+catalog with `tyche_inspect(query=...)`; lookup automatically describes the selected
+tool and caches its schema. Inspect that schema when constructing native inputs.
+Discover the next useful tool when it is needed.
 Connection state, schema, native result limits, and conservative cost bounds
 must be checked live. Catalog categories are not permissions: useful reads
 can be labeled `admin`, and research jobs can have side effects or unknown costs.

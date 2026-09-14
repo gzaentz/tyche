@@ -62,19 +62,26 @@ JSON, and Excel workbook contracts are in
 The LLM chooses candidates, sources, tools, queries, follow-ups and qualification
 judgments. The existing helpers handle the mechanical work:
 
-- `run_attempt.py --start-file`: create the run and ledger from the interpreted
-  request; `--status` restores the saved ICP and pending work.
-- `--lookup-file`: run the chosen lookup or up to three independent checks,
-  supplying IDs, request metadata, budget reservations and saved receipts.
-- `--review-file`: save incremental company facts and explicit judgments,
-  optionally including observed web responses in the same call.
-- `export_xlsx.mjs`: validate reviewed results, export and check the saved workbook.
+- `tyche_start`: create/resume the bound run, ledger and verification reserve
+  from the interpreted request.
+- `tyche_lookup`: execute the selected tool or up to three independent checks;
+  cache its live schema, calculate known price bounds, reserve spending and save receipts.
+- `tyche_review`: save changed facts, selected evidence and explicit judgments;
+  include built-in web observations in the same call when used.
+- `tyche_inspect`: restore the saved ICP, inspect a company/result, discover a
+  capability or recover a saved normalized receipt without another provider call.
+- `tyche_finish`: run the existing strict validator/exporter, check the saved
+  workbook and generate the audit report. The launcher refreshes run-only costs.
 
 These are capabilities the agent chooses when needed, not a provider waterfall
 or fixed research sequence. The [helper interface](.agents/skills/lead-sourcing/references/adapter-io.md)
-reuses the current providers, ledger, validators and exporter; no new service,
-database or dependency is required. Existing action/request inputs still work.
-Pass `-` to supply helper JSON directly on stdin. Lookup and review responses
+reuses the current providers, ledger, validators and exporter. A small local
+MCP stdio adapter exposes these functions inside file-backed isolated runs;
+there is no network listener, separate deployment or new package dependency.
+It forwards execution to a child using Codex's actual sandbox metadata, including
+the worker's network restrictions. The adapter starts with the run and exits
+with its connection. Existing CLI inputs remain available for diagnostics and
+interactive runtimes without native tools. Lookup and review responses
 include a compact reminder of companies awaiting review; it does not choose
 their qualification or block further research.
 Detailed safeguards and audit procedures are

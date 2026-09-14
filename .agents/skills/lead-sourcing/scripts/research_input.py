@@ -311,7 +311,7 @@ def company_update(document, item):
         row["backup_shortfall"] = max(0, document["request"].get("contacts_per_company", 1) - row["contact_candidate_count"])
     else:
         row.setdefault("stage", item.get("stage", "account"))
-        if state != old_state or "reason_code" not in row:
+        if state != old_state or item.get("stage", row["stage"]) != row["stage"] or "reason_code" not in row:
             row["reason_code"] = ("not_icp_fit" if state == "rejected" else
                                   "missing_contact_evidence" if item.get("stage", row["stage"]) == "contact" else "missing_account_evidence")
         for key in ("stage", "reason_code", "reason_text"):

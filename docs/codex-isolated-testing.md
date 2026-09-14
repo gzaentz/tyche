@@ -69,6 +69,33 @@ Your global configuration is not edited. Codex's built-in system instructions
 and managed permissions remain in force. This isolates supplied context; it is
 not a filesystem security boundary preventing all possible external reads.
 
+## Native research tools
+
+File-backed runs register five local tools only in the temporary profile:
+`tyche_start`, `tyche_lookup`, `tyche_review`, `tyche_inspect`, `tyche_finish`.
+The run file comes from the launcher's request-file directory, not model input.
+Provider credentials and bundled runtime paths are forwarded as environment
+variables; values are never copied into the temporary config or prompt.
+
+The stdio relay advertises Codex's `codex/sandbox-state-meta` capability. On the
+first tool call it starts one child through `codex sandbox --sandbox-state-json`
+using that exact caller metadata. This matters: a standalone workspace sandbox
+does not by itself reproduce the worker's managed network proxy. Missing or
+changed metadata fails before further research. The project network allowlist
+and worker settings remain unchanged. `--check` verifies discovery; `--smoke`
+also exercises the sandboxed read-only tool call without sourcing providers.
+
+The child uses the existing helpers, one ledger and three provider dispatch
+slots shared by native calls. Research decisions and source exhaustion remain
+explicit LLM inputs. Built-in web search stays available separately; one review
+call saves its observed evidence alongside findings, without a plan-file cycle.
+
+Closing the connection cancels queued requests and lets dispatched work save
+receipts where possible. Forced process termination can still leave an uncertain
+provider outcome; retain its reservation and reconcile instead of retrying.
+No daemon survives intentionally between runs. Legacy interactive/`--exec`
+sessions keep the CLI helper path because they do not supply a bound run file.
+
 ## Checks
 
 Check isolation and initialize a session with the same project sandbox and

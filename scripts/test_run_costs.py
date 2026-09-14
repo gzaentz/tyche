@@ -205,6 +205,27 @@ class RunCostsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'different run'):
             report(self.results(), [receipt.path], self.root / 'another-run')
 
+    def test_native_report_refreshes_costs_without_replacing_research_or_results(self):
+        results = self.results()
+        results.update(request={'target_count': 5}, stop_reason='target_met',
+                       stop_check={'started_at':'2026-09-13T00:00:00Z', 'leads_ready_at':'2026-09-13T00:24:10Z'})
+        result_path = self.root / 'results.json'
+        result_path.write_text(json.dumps(results))
+        (self.root / 'validation.json').write_text(json.dumps({'completed_at':'2026-09-13T00:25:30Z'}))
+        (self.root / 'research-commentary.md').write_text('Reviewed signals and contact selection. Fixture only.')
+        before = result_path.read_bytes()
+        save_report(self.root)
+        first = (self.root / 'report.md').read_text()
+        self.assertIn('25m 30s', first)
+        self.assertIn('Sourcing model usage was not captured', first)
+        self.completed()
+        save_report(self.root)
+        final = (self.root / 'report.md').read_text()
+        self.assertIn('Reviewed signals and contact selection. Fixture only.', final)
+        self.assertNotIn('Sourcing model usage was not captured', final)
+        self.assertIn('0.831176', final)
+        self.assertEqual(result_path.read_bytes(), before)
+
     def test_explicit_compaction_link_explains_cli_total_but_all_responses_are_priced(self):
         receipt=self.receipt()
         self.record_response(receipt,response_id='ordinary')

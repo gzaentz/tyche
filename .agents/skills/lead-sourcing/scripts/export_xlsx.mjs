@@ -523,7 +523,7 @@ async function main() {
     if (createHash("sha256").update(resultText).digest("hex") !== checked.results_sha256) throw new ExportError("Saved results changed during validation");
     const document = JSON.parse(resultText);
     const receipt = await exportXlsx(document, destination, { ...options, resultsPath });
-    await fs.writeFile(path.join(path.dirname(destination), "validation.json"), JSON.stringify(checked, null, 2) + "\n");
+    await fs.writeFile(path.join(path.dirname(destination), "validation.json"), JSON.stringify({ ...checked, completed_at: new Date().toISOString() }, null, 2) + "\n");
     process.stdout.write(`${JSON.stringify({ exported: true, path: destination, rows: receipt.rows, columns: receipt.columns })}\n`);
     return 0;
   } catch (error) {

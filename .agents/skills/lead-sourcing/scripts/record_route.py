@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+import threading
 
 from validate_run import validate_continuations
 
@@ -89,7 +90,17 @@ def record(document, frontier, receipt=None):
     return result
 
 
+_WRITE_LOCK = threading.RLock()
+
+
 def mutate(path, update):
+    # Native tool requests share a process. Preserve the existing cross-process
+    # lock while serializing only local writes, never provider execution.
+    with _WRITE_LOCK:
+        return _mutate(path, update)
+
+
+def _mutate(path, update):
     """Apply one state update under the existing lock and atomic-write checks."""
     path = Path(path)
     lock = path.with_name(path.name + ".lock")

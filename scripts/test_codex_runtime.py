@@ -1,9 +1,13 @@
 import os
+import contextlib
+import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from codex_tyche import workspace_environment
+from types import SimpleNamespace
+from codex_tyche import smoke, tool_configuration, workspace_environment
 
 
 class WorkspaceRuntimeTests(unittest.TestCase):
@@ -25,6 +29,30 @@ class WorkspaceRuntimeTests(unittest.TestCase):
         env=workspace_environment(supplied)
         for k in supplied:
             if k!='PATH':self.assertEqual(env[k],supplied[k])
+
+    def test_native_config_binds_paths_and_forwards_names_not_secrets(self):
+        with tempfile.TemporaryDirectory(prefix='tyche space ') as directory:
+            path = Path(directory) / 'results.json'
+            with patch.dict(os.environ, {'DEEPLINE_API_KEY': 'not-a-real-secret'}):
+                config = tool_configuration(path, readonly=True)
+            self.assertIn(str(path), config)
+            self.assertIn('--read-only', config)
+            self.assertIn('DEEPLINE_API_KEY', config)
+            self.assertIn('CODEX_HOME', config)
+            self.assertNotIn('not-a-real-secret', config)
+            self.assertNotIn('sandbox_mode', config)
+            self.assertNotIn('permission-profile', config)
+            self.assertIn('required = true', config)
+
+    def test_smoke_requires_successful_native_call_even_when_model_exits_zero(self):
+        event = {'type':'item.completed', 'item':{'type':'mcp_tool_call', 'server':'tyche', 'tool':'tyche_inspect', 'status':'completed'}}
+        for status in ('completed', 'failed'):
+            event['item']['status'] = status
+            output = SimpleNamespace(returncode=0, stdout=(json.dumps(event)+'\n') * 2, stderr='')
+            with patch('codex_tyche.subprocess.run', return_value=output), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                if status == 'completed': self.assertEqual(smoke(['fixture'], {}), 0)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'smoke test failed'): smoke(['fixture'], {})
 
 
 if __name__=='__main__':unittest.main()

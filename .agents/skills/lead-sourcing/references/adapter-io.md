@@ -1,10 +1,78 @@
 # Shared adapter I/O
 
-Read once before the first provider call, and revisit for receipt or transport
-failures. This is the shared credential, response-file, and recovery contract;
+Use the native tools for normal sourcing. The later CLI sections are diagnostics
+for specific tool failures and compatibility with runtimes without native tools.
+This is the shared credential, response-file, and recovery contract;
 provider-specific inputs and statuses live in [Deepline](deepline-adapter.md)
 and [ScrapingDog](scrapingdog-adapter.md). Examples beginning with `.agents/`
 run from the repository root.
+
+## Native tools
+
+The launcher binds these tools to the assigned `results.json`; callers supply
+research choices, not paths, route IDs or accounting envelopes.
+
+| Tool | Agent input | Code handles |
+| --- | --- | --- |
+| `tyche_start` | Interpreted `request`, authorized `max_usd` if supplied | Original clock, files, defaults, ledger, priced email reserve; safe resume |
+| `tyche_lookup` | `checks` (1–3): `target`, `phase`, `purpose`, `tool`, `inputs` | Cached live description, schema checks, whole-call bound where known, reservations, dispatch, receipts |
+| `tyche_review` | Changed company fields, evidence refs, explicit decisions/source reviews; optional observed `web` | Existing company updates, authoritative LinkedIn/email fields, bookkeeping |
+| `tyche_inspect` | No arguments, or `target`, `ref`, `tool`, `query`, `recover` | Compact state, saved request or detail, catalog search, local receipt recovery |
+| `tyche_finish` | Research `commentary` (assumptions, caveats, route-choice reasoning) | Strict validation, workbook/readback/preview, audit report and run-cost links |
+
+`target` is the canonical company domain or `discovery`. Phases are
+`account_discovery`, `account_verification`, `contact_discovery`,
+`contact_verification`, and `email_validation`. `provider` defaults to Deepline;
+for ScrapingDog, pass `provider: "scrapingdog"` and its wrapper input in `inputs`.
+`approach` may name a stable strategy. Unknown pricing still needs a verified
+whole-call `max_cost_credits`; ScrapingDog also needs its plan conversion at start.
+A caller-supplied bound cannot undercut a known catalog price. Code never chooses
+a different provider, recipient, criterion or qualification judgment.
+
+Lookup returns a route and result references such as `lookup-abc:0`. Inspect a
+route to see its response status/results, or select a result and `field` for
+more detail. Lists support `offset`/`limit`; long text returns `next_offset`.
+`tyche_inspect(tool=...)` returns the native provider schema; `refresh: true` is
+for a confirmed schema/pricing/access change. Retained receipts remain complete.
+
+Company decisions: `hold_account` (research missing fit), `qualify_account`
+(ready for contacts), `hold_contact`, `reject` (supported mismatch), `accept`.
+Example review inputs, with references selected from actual results:
+
+```json
+{"companies":[{"target":"example.com","decision":"hold_account",
+  "reason":"Current funding stage still needs evidence",
+  "company":{"ref":"lookup-company:0","industry":"Financial Services","sub_industry":"Banking"},
+  "account_fit":{"ref":"lookup-source:0","fit_claim":"Provides the requested payments platform"}}],
+ "sources":[{"ref":"lookup-source","state":"exhausted","reason":"Reviewed the complete product page"}]}
+```
+
+Evidence refs expand into saved source/URL/date/text. Supply reviewed `text`,
+`date` and `date_basis` when interpreting an event, distinguishing announcement
+from completion. `signal_evidence` also needs `signal`; qualification checks
+use the existing `criterion`, `importance`, `status`, `claim`, `evidence` contract.
+Company/profile `ref` values must select the matched Harvest getter. Add industry,
+subindustry and the two-sentence description as reviewed facts. For contacts,
+supply requested role, role match, and role group when the request uses groups.
+A later `primary_contact: {"email_ref":"lookup-validation:0"}` updates the saved
+person using the exact email verdict. Changing people requires a new profile ref;
+changing email clears the old email evidence. Backup entries are full selections.
+
+For built-in web tools, execute the chosen search/read, then send its observed
+`status` and `results` with `target`, `purpose`, `query` and `operation` under
+`web` in the review call. Reference the first observed page as `web:0:0` and the
+whole observation in `sources` as `web:0`. The tool records this observation;
+it cannot invoke or independently capture Codex's built-in browser. Replaying
+the same observation is safe; replacing it with different content is rejected.
+
+`recover` never redispatches: it finishes recording a saved normalized receipt.
+If only a pending or raw response survived, retain the reservation and reconcile
+it locally through diagnostics. Never retry an uncertain paid call. Explicit
+`sources` reviews retain the existing continuation/exhaustion rules; saving a
+company does not automatically exhaust its sources. A `valid` email on a catch-all
+domain stays valid; fallback eligibility is checked before spending.
+
+## Diagnostic CLI
 
 Use `-` to supply JSON directly on stdin, normally with a quoted heredoc as
 shown below. The helper saves durable records; routine lookups and reviews
@@ -284,8 +352,9 @@ that decision without a separate status or stop-check command.
 For built-in public-web checks, add `--plan-only` to prepare up to three receipts,
 then execute those independent searches/reads together through the available
 tool's parallel-call facility. Python only plans and records this work; it does
-not invoke the built-in browser. Save each observed response to a separate file
-and attach it with `--complete <route-id> --response-file <response.json>` serially.
+not invoke the built-in browser. Include observed responses in one `--review-file -`
+call with company findings and source reviews. Separate response files are only
+needed for targeted diagnostic recovery.
 
 Wait for the batch to finish, then save its decisions with `--review-file` and
 use the returned next step. Batch completion alone does not qualify leads.

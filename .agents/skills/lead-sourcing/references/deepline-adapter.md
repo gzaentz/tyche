@@ -1,9 +1,9 @@
 # Deepline adapter
 
-For discovery, read [Capability discovery](#capability-discovery). Before the
-first Deepline execution, read the core wrapper contract below and
-[shared I/O](adapter-io.md), unless already loaded. The core contract ends at
-Email validation. Read the [ZeroBounce gate](#deepline-zerobounce-email-gate)
+Normal sourcing uses [native tools](adapter-io.md#native-tools), which supply
+envelopes, descriptions, receipts and accounting. These wrapper contracts are
+diagnostics, not setup work for every lookup. Read [Capability discovery](#capability-discovery)
+for search ideas and the [ZeroBounce gate](#deepline-zerobounce-email-gate)
 before validating email; read [BounceBan fallback](#bounceban-fallback) only
 when catch-all/unknown or a ZeroBounce service failure requires it.
 No other validator replaces these gates.
@@ -17,7 +17,10 @@ result.
 
 ### Network access
 
-The wrapper and its CLI subprocess inherit the host's network restrictions.
+The native tool process and its CLI subprocess use the same workspace permission
+profile and provider-domain allowlist as the worker. A failed native call is not
+permission to rerun it through an unrestricted shell. For diagnostic CLI use,
+the wrapper and its subprocess inherit the host's network restrictions.
 When network access is restricted, use the supported approved execution path
 for Deepline calls. In Codex, request `sandbox_permissions: "require_escalated"`
 with a scoped justification on the host execution tool; this is not a shell

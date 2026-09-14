@@ -31,14 +31,20 @@ ISOLATION_INSTRUCTIONS = (
     'Use project-local instructions and skills. '
     'Do not read or use user-global AGENTS.md, skills, or memories. '
     'Normal system instructions, managed permissions, and execution rules still apply. '
-    'Use the project lead-sourcing skill for sourcing requests.'
+    'Use the project lead-sourcing skill for sourcing requests. '
+    'When TYCHE native tools are available, use them for all run setup, provider '
+    'lookups, saving reviews, inspecting state and finalization. The tools are '
+    'bound to this run. Read source code or use diagnostic CLIs only for a '
+    'specific tool failure; ordinary research needs no shell bookkeeping.'
 )
 SMOKE_PROMPT = (
     'This is a read-only configuration smoke test, not a sourcing job. '
     'List the available skill names from your supplied skill catalog. '
     'Read .agents/skills/lead-sourcing/SKILL.md and state the required deliverable filenames. '
     'Do not read global instruction or skill files, call providers, search the web, '
-    'delegate work, or modify files.'
+    'delegate work, or modify files. Call tyche_inspect with no arguments twice '
+    'in sequence to verify the native tool connection can be reused; both calls '
+    'are read-only and make no provider calls.'
 )
 
 
@@ -67,7 +73,27 @@ def workspace_environment(env):
     return env
 
 
-def inspect_runtime(env, overrides, start_thread=False):
+def tool_configuration(run_file, *, readonly=False):
+    """Bind the MCP process to this run and the existing command sandbox.
+
+    The stdio relay obtains sandbox metadata from Codex on the first tool call.
+    Research executes in its child with that exact filesystem/network policy.
+    """
+    args = [str(SKILL_ROOT / 'lead-sourcing/scripts/tyche_tools.py'),
+            '--run-file', str(Path(run_file).resolve())]
+    if readonly:
+        args.append('--read-only')
+    forwarded = ['CODEX_HOME', 'DEEPLINE_API_KEY', 'DEEPLINE_BIN', 'SCRAPINGDOG_API_KEY',
+                 'DEEPLINE_NO_AUTO_UPDATE', 'DEEPLINE_SKIP_SKILLS_SYNC', 'TYCHE_WORKSPACE_NODE',
+                 'TYCHE_WORKSPACE_NODE_MODULES', 'TYCHE_WORKSPACE_PYTHON', 'PYTHONDONTWRITEBYTECODE']
+    return ('\n[mcp_servers.tyche]\ncommand = ' + json.dumps(sys.executable) + '\nargs = ' + json.dumps(args) + '\n'
+            'env_vars = ' + json.dumps(forwarded) + '\n'
+            'cwd = ' + json.dumps(str(ROOT)) + '\nrequired = true\n'
+            'startup_timeout_sec = 40\ntool_timeout_sec = 900\n'
+            'default_tools_approval_mode = "approve"\n')
+
+
+def inspect_runtime(env, overrides, start_thread=False, native_tools=False):
     """Use the installed runtime's discovery results, not a filesystem guess."""
     messages = queue.Queue()
     with tempfile.TemporaryFile(mode='w+') as errors:
@@ -130,6 +156,13 @@ def inspect_runtime(env, overrides, start_thread=False):
                     raise RuntimeError('This Codex version cannot report loaded instruction sources.')
                 result['instruction_sources'] = started['instructionSources']
                 result['model'] = started.get('model')
+                result['native_tools'] = []
+                if native_tools:
+                    servers = request(4, 'mcpServerStatus/list', {'limit': 100})
+                    tyche = next((r for r in servers.get('data', []) if r.get('name') == 'tyche'), None)
+                    if tyche is None or len(tyche.get('tools', {})) != 5:
+                        raise RuntimeError('TYCHE native tools did not initialize; no model turn or provider call was started.')
+                    result['native_tools'] = list(tyche['tools'])
             return result
         finally:
             proc.terminate()
@@ -141,6 +174,27 @@ def inspect_runtime(env, overrides, start_thread=False):
             reader.join(timeout=1)
             proc.stdin.close()
             proc.stdout.close()
+
+
+def smoke(command, env):
+    """A model exit code alone cannot prove the native tool actually worked."""
+    completed = subprocess.run(command, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, timeout=120)
+    print(completed.stdout, end='', flush=True)
+    print(completed.stderr, end='', file=sys.stderr, flush=True)
+    calls = []
+    for line in completed.stdout.splitlines():
+        try:
+            event = json.loads(line)
+            item = event.get('item', {}) if isinstance(event, dict) else {}
+            if event.get('type') == 'item.completed' and item.get('type') == 'mcp_tool_call' and item.get('server') == 'tyche':
+                calls.append(item)
+        except (ValueError, AttributeError):
+            continue
+    if (completed.returncode or len(calls) != 2 or any(call.get('tool') != 'tyche_inspect'
+            or call.get('status') != 'completed' for call in calls)):
+        raise RuntimeError('Read-only native tool smoke test failed; no sourcing run was started.')
+    return 0
 
 
 def main():
@@ -170,8 +224,12 @@ def main():
     # parent environment and the user's global instruction/config files stay intact.
     with tempfile.TemporaryDirectory(prefix='tyche-codex-home-') as profile:
         tyche_codex_home = Path(profile)
+        native_tools = args.exec_file is not None or args.check or args.smoke
+        tool_run_file = (args.exec_file.resolve().parent / 'results.json' if args.exec_file is not None
+                         else tyche_codex_home / 'tool-check/results.json')
         (tyche_codex_home / 'config.toml').write_text(
             '[projects.' + json.dumps(str(ROOT)) + ']\ntrust_level = "trusted"\n'
+            + (tool_configuration(tool_run_file, readonly=args.check or args.smoke) if native_tools else '')
         )
         for name in ('auth.json', 'rules'):
             source = source_home / name
@@ -204,7 +262,7 @@ def main():
         overrides.extend(['-c', 'skills.config=[' + ','.join(
             '{path=' + json.dumps(path) + ',enabled=false}' for path in excluded
         ) + ']'])
-        verified = inspect_runtime(env, overrides, start_thread=True)
+        verified = inspect_runtime(env, overrides, start_thread=True, native_tools=native_tools)
         active = [skill for skill in verified['skills'] if skill['enabled']]
         if not active or any(not inside(skill['path'], SKILL_ROOT) for skill in active):
             raise RuntimeError('Skill isolation failed; no test was launched.')
@@ -217,6 +275,7 @@ def main():
             'plugins_enabled': False, 'apps_enabled': False, 'memories_enabled': False,
             'model': verified['model'], 'reasoning_effort': REASONING_EFFORT,
             'service_tier': SERVICE_TIER,
+            'native_tools': verified['native_tools'],
         }
         print(json.dumps(summary, indent=2), flush=True)
         if args.check:
@@ -228,7 +287,7 @@ def main():
             # File-based runs retain a journal only inside this temporary
             # profile, long enough to capture numeric per-response usage.
             command = ['codex', 'exec', *([] if args.exec_file is not None else ['--ephemeral']), *overrides]
-            if args.exec_file is not None:
+            if args.exec_file is not None or args.smoke:
                 command.append('--json')
             if args.smoke:
                 command.extend(['--sandbox', 'read-only', '-c', 'web_search="disabled"',
@@ -240,6 +299,8 @@ def main():
             if args.prompt:
                 command.append(args.prompt)
         try:
+            if args.smoke:
+                return smoke(command, env)
             if args.exec_file is not None:
                 receipt = UsageReceipt(args.exec_file, MODEL, REASONING_EFFORT, SERVICE_TIER)
                 print(json.dumps({'model_usage_receipt': str(receipt.path)}), flush=True)
