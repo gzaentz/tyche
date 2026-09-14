@@ -72,6 +72,33 @@ class NoMatchEnvelopeTests(unittest.TestCase):
         self.assertEqual(result["results"], [])
         self.assertEqual(result["entity_type"], "company")
 
+    def test_email_finder_no_match_metadata_keeps_outcome_and_billing_identity(self):
+        for tool, email in (("leadmagic_email_finder", None), ("zerobounce_email_finder", "")):
+            for charge in (None, 0, .34):
+                with self.subTest(tool=tool, charge=charge):
+                    record = {"email": email, "first_name": "Alex", "last_name": "Buyer",
+                              "domain": "example.test", "mx_record": "mail.example.test", "status": None}
+                    body = {"job_id": "saved-billing-id", "status": "no_result", "toolResponse": {"rawV2": record, "raw": record}}
+                    if charge is not None:
+                        body["billing"] = {"credits_charged": charge}
+                    result = DEEPLINE._execute_output(body, tool)
+                    self.assertEqual(result["status"], "no_results")
+                    self.assertEqual(result["results"], [])
+                    self.assertEqual(result["job_id"], "saved-billing-id")
+                    if charge is None:
+                        self.assertNotIn("billing", result)
+                    else:
+                        self.assertEqual(result["billing"]["credits_charged"], charge)
+
+    def test_email_finder_conflicting_address_or_error_is_not_no_match(self):
+        for fields in ({"email": "alex@example.test"}, {"email": None, "work_email": "alex@example.test"},
+                       {"email": None, "emails": ["alex@example.test"]}):
+            body = {"status": "no_result", "toolResponse": {"rawV2": {"domain": "example.test", **fields}}}
+            self.assertEqual(DEEPLINE._execute_output(body, "leadmagic_email_finder")["status"], "schema_error")
+        body = {"status": "no_result", "error": "authentication failed",
+                "toolResponse": {"rawV2": {"email": None, "domain": "example.test"}}}
+        self.assertEqual(DEEPLINE._execute_output(body, "leadmagic_email_finder")["status"], "auth_failed")
+
 
 if __name__ == "__main__":
     unittest.main()

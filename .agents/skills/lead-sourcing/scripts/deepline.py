@@ -1585,7 +1585,15 @@ def _execute_output(
         nested = parsed.get("toolResponse", parsed.get("tool_response", {}))
         nested_status = _envelope_status(nested)
         error = _envelope_error(parsed)
-        outcome = "schema_error" if records else "no_results"
+        # Email finders echo the searched name/domain and MX metadata even
+        # when no address was found. These are not contradictory positive rows.
+        empty_finder = tool.endswith("_email_finder") and all(
+            isinstance(record, dict) and "email" in record and record["email"] in (None, "")
+            and not any(record.get(key) for key in ("emails", "work_email", "workEmail"))
+            and not any(normalize_evidence(record, "deepline", tool).get(key)
+                        for key in ("email", "contact_email"))
+            for record in records)
+        outcome = "schema_error" if records and not empty_finder else "no_results"
         if nested_status in _FAILURE_STATUSES or error:
             outcome = nested_status if nested_status in _FAILURE_STATUSES else _classify_error(json.dumps(error))
         body = {"status": outcome, "provider": "deepline", "operation": "execute",
