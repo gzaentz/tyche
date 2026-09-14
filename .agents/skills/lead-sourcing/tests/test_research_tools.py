@@ -107,6 +107,7 @@ class ResearchToolTests(unittest.TestCase):
         with patch.dict(os.environ, {"TYCHE_RUN_STARTED_AT": started}):
             self.start()
         self.assertEqual(json.loads(self.path.read_text())["stop_check"]["started_at"], started)
+        self.assertGreaterEqual(self.tools.inspect()["elapsed_seconds"], 90)
         with patch.dict(os.environ, {"TYCHE_RUN_STARTED_AT": datetime.now(timezone.utc).isoformat()}):
             self.start()
         self.assertEqual(json.loads(self.path.read_text())["stop_check"]["started_at"], started)
@@ -170,6 +171,48 @@ class ResearchToolTests(unittest.TestCase):
             self.tools._evidence({"ref": route + ":1", "date_basis": "published"})
         current = self.tools._evidence({"ref": route + ":1"})
         self.assertEqual(current["date_basis"], "observed_current")
+
+    def test_missing_attached_web_date_fails_before_saving_and_corrected_retry_works(self):
+        self.start()
+        web = [{"target": "example.test", "purpose": "Review event", "query": "example event",
+                "response": {"status": "ok", "results": [{"url": "https://example.test/news", "text": "Opened a plant"}]}}]
+        companies = [{"target": "example.test", "decision": "hold_account", "reason": "More evidence needed",
+                      "signal_evidence": {"ref": "web:0:0", "signal": "FACILITY_OPENING", "date_basis": "published"}}]
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, "no publication/event date"):
+            self.tools.review(companies=companies, web=web)
+        self.assertEqual(self.path.read_bytes(), before)
+        web[0]["response"]["results"][0]["published_date"] = json.loads(self.path.read_text())["request"]["as_of_date"]
+        result = self.tools.review(companies=companies, web=web)
+        self.assertIn("web:0", result["web_references"])
+
+    def test_failed_judgment_returns_reusable_saved_web_reference(self):
+        self.start()
+        web = [{"target": "example.test", "purpose": "Read observed page", "query": "observed page",
+                "response": {"status": "ok", "results": [{"url": "https://example.test", "text": "Verified page text"}]}}]
+        with self.assertRaisesRegex(ValueError, "Web observations were saved as") as error:
+            self.tools.review(web=web, companies=[{"target": "example.test", "decision": "accept", "reason": "Missing contact evidence"}])
+        rid = json.loads(self.path.read_text())["routes"][-1]["route_id"]
+        self.assertIn(rid, str(error.exception))
+        self.assertEqual(self.tools.inspect(ref=rid + ":0")["facts"]["text"], "Verified page text")
+
+    def test_signal_age_is_checked_at_account_gate_and_delivery(self):
+        request = {"as_of_date": "2026-09-14", "time_window": {"max_age_days": 365},
+                   "buying_signals": [{"kind": "FACILITY_OPENING", "max_age_days": 365}, {"kind": "HIRING", "max_age_days": 90}]}
+        row = {"stage": "contact", "candidate": {"domain": "example.test"},
+               "signal_evidence": {"signal": "FACILITY_OPENING", "evidence_date": "2025-04-01"}}
+        document = {"request": request, "unresolved": [row]}
+        self.assertIn("outside the requested", ";".join(runner.qualification_errors(document)))
+        row["stage"] = "account"
+        self.assertEqual(runner.qualification_errors(document), [])
+        row["stage"] = "contact"
+        for date, valid in [("2025-09-14", True), ("2025-09-13", False), ("2026-09-15", False)]:
+            row["signal_evidence"]["evidence_date"] = date
+            self.assertEqual(not runner.qualification_errors(document), valid)
+        row["signal_evidence"] = {"signal": "HIRING", "evidence_date": "2026-06-15"}
+        self.assertIn("0–90 day", ";".join(runner.qualification_errors(document)))
+        document["accepted"], document["unresolved"] = [row], []
+        self.assertIn("0–90 day", ";".join(runner.qualification_errors(document)))
 
     def test_schema_and_unknown_price_fail_before_paid_dispatch(self):
         self.start()
@@ -261,6 +304,78 @@ class ResearchToolTests(unittest.TestCase):
             found += page["text"]
             offset = page["next_offset"]
         self.assertEqual(found, text)
+
+    def test_saved_result_pages_keep_absolute_references_without_new_calls(self):
+        self.start()
+        rows = [{"url": f"https://example.test/{i}", "text": f"Observed result {i}"} for i in range(13)]
+        observed = self.tools.review(web=[{"target": "discovery", "purpose": "Read result list", "query": "company signals",
+            "response": {"status": "ok", "results": rows}}])
+        rid = observed["web_references"]["web:0"]
+        calls = len(self.provider.requests)
+        page = self.tools.inspect(ref=rid)
+        self.assertEqual(page["next_offset"], 10)
+        page = self.tools.inspect(ref=rid, offset=page["next_offset"])
+        self.assertEqual([r["ref"] for r in page["results"]], [f"{rid}:{i}" for i in range(10, 13)])
+        self.assertIsNone(page["next_offset"])
+        self.assertEqual(self.tools.inspect(ref=page["results"][2]["ref"])["facts"], rows[12])
+        self.assertEqual(len(self.provider.requests), calls)
+
+    def test_tool_view_omits_sdk_help_but_preserves_cached_native_contract(self):
+        self.start()
+        def annotated(request, capture):
+            body, code = self.provider(request, capture)
+            if request["operation"] == "describe":
+                body["results"][0].update(usageGuidance={"sdk_help": "irrelevant SDK help " * 1000},
+                    outputSchema={"fields": [{"name": "element", "type": "object"}],
+                                  "jsonSchema": {"properties": {"element": {"type": "object"}}}})
+            return body, code
+        self.tools.execute = annotated
+        view = self.tools.inspect(tool="harvestapi_get_company")["tool"]
+        self.assertNotIn("usageGuidance", view)
+        self.assertEqual(view["inputSchema"]["fields"][0]["name"], "url")
+        self.assertEqual(view["pricing"]["creditsPerUnit"], .2)
+        self.assertEqual(view["output_fields"][0]["name"], "element")
+        self.assertEqual(self.tools._description_view({"outputSchema": None})["output_fields"], [])
+        calls = len(self.provider.requests)
+        schema = self.tools.inspect(tool="harvestapi_get_company", field="outputSchema.jsonSchema")["tool"]
+        self.assertEqual(schema["properties"]["element"]["type"], "object")
+        self.lookup()
+        self.assertEqual(len([r for r in self.provider.requests if r["operation"] == "describe"]), 1)
+        self.assertEqual(len(self.provider.requests), calls + 1)
+
+    def test_inspection_selects_company_and_run_fields_instead_of_ignoring_them(self):
+        self.start()
+        self.tools.review(companies=[{"target": "example.test", "decision": "hold_account", "reason": "Needs funding evidence",
+                                     "company": {"canonical_name": "ExamplePay"}}])
+        selected = self.tools.inspect(target="example.test", field="company.candidate.canonical_name")
+        self.assertEqual(selected, {"value": "ExamplePay"})
+        self.assertEqual(self.tools.inspect(field="stop_check.started_at")["value"],
+                         json.loads(self.path.read_text())["stop_check"]["started_at"])
+        with self.assertRaises(KeyError):
+            self.tools.inspect(field="nonexistent")
+
+    def test_recorded_provider_error_explains_recovery_without_releasing_unknown_cost(self):
+        self.start()
+        calls = []
+        def failing(request, capture):
+            if request["operation"] != "execute":
+                return self.provider(request, capture)
+            calls.append(request)
+            def dispatch():
+                raw = {"exit_code": 1, "body": {"error": "Bad request"}, "stderr": ""}
+                capture(raw)
+                return deepline.normalize_response(request, raw)
+            return budget.guarded_call(request, "deepline", dispatch)
+        self.tools.execute = failing
+        found = self.lookup()["lookups"][0]
+        self.assertTrue(found["recorded"])
+        self.assertEqual(runner.read_receipt(self.path, found["route"])["result"]["receipt_status"], "complete")
+        self.assertIn("cannot resolve unknown billing", found["recovery_note"])
+        before = budget.ledger_path(self.path).read_bytes()
+        self.tools.inspect(recover=found["route"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(budget.ledger_path(self.path).read_bytes(), before)
+        self.assertIsNone(budget.load_ledger(self.path)["calls"][found["route"]]["actual_credits"])
 
     def test_sandbox_relay_requires_host_metadata_and_refuses_policy_drift(self):
         relay = SandboxedTools(self.path)

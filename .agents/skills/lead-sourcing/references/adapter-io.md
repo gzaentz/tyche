@@ -31,9 +31,11 @@ a different provider, recipient, criterion or qualification judgment.
 
 Lookup returns a route and result references such as `lookup-abc:0`. Inspect a
 route to see its response status/results, or select a result and `field` for
-more detail. Lists support `offset`/`limit`; long text returns `next_offset`.
-`tyche_inspect(tool=...)` returns the native provider schema; `refresh: true` is
-for a confirmed schema/pricing/access change. Retained receipts remain complete.
+more detail. Page a saved route with `offset`/`limit` and its returned `next_offset`;
+long text also returns `next_offset`. `tyche_inspect(tool=...)` returns cached
+native inputs/pricing and output field names. Use `field` for a specific nested
+tool, company or run field; `refresh: true` is only for a confirmed schema,
+pricing or access change. Retained receipts and execution contracts remain complete.
 
 Company decisions: `hold_account` (research missing fit), `qualify_account`
 (ready for contacts), `hold_contact`, `reject` (supported mismatch), `accept`.
@@ -51,6 +53,10 @@ Evidence refs expand into saved source/URL/date/text. Supply reviewed `text`,
 `date` and `date_basis` when interpreting an event, distinguishing announcement
 from completion. `signal_evidence` also needs `signal`; qualification checks
 use the existing `criterion`, `importance`, `status`, `claim`, `evidence` contract.
+Contact-stage and delivery checks compare reviewed signal dates with the saved
+request's time windows. Historical evidence can remain on an unresolved account;
+it cannot be promoted as a current signal. Errors after a web observation was
+saved return its reusable reference; correct the judgment without rewriting the observation.
 Company/profile `ref` values must select the matched Harvest getter. Add industry,
 subindustry and the two-sentence description as reviewed facts. For contacts,
 supply requested role, role match, and role group when the request uses groups.
@@ -66,6 +72,8 @@ it cannot invoke or independently capture Codex's built-in browser. Replaying
 the same observation is safe; replacing it with different content is rejected.
 
 `recover` never redispatches: it finishes recording a saved normalized receipt.
+An outcome marked `recorded: true` is already saved; repeated recovery cannot
+settle unknown billing. Keep its cost bound until provider billing evidence arrives.
 If only a pending or raw response survived, retain the reservation and reconcile
 it locally through diagnostics. Never retry an uncertain paid call. Explicit
 `sources` reviews retain the existing continuation/exhaustion rules; saving a

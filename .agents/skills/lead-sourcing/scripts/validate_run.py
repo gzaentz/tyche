@@ -72,6 +72,41 @@ def excluded_company(request: dict, row: dict) -> bool:
     return bool({_identity(n) for n in names} & ({_identity(n) for n in exclusions} - {""}))
 
 
+def signal_age_errors(request: dict, row: dict, path: str) -> list[str]:
+    """Check date arithmetic for reviewed signals; interpreting the event stays with the LLM."""
+    if not isinstance(request, dict):
+        return []
+    window = request.get("time_window", {})
+    window = window if isinstance(window, dict) else {}
+    try:
+        as_of = datetime.strptime(window.get("as_of_date", request.get("as_of_date", "")), "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return []  # The request contract handles an absent/malformed clock.
+    signals = request.get("buying_signals", [])
+    signals = signals if isinstance(signals, list) else []
+    evidence = [(row.get("signal_evidence", {}), path + ".signal_evidence")]
+    for check in row.get("qualification_checks", []):
+        if isinstance(check, dict) and check.get("signal") and check.get("status") == "pass":
+            items = check.get("evidence", [])
+            evidence.extend(({**item, "signal": check["signal"]}, path + ".qualification_checks." + str(check.get("criterion")))
+                            for item in (items if isinstance(items, list) else []) if isinstance(item, dict))
+    errors = []
+    for item, label in evidence:
+        if not isinstance(item, dict):
+            continue
+        matching = [s.get("max_age_days") for s in signals if isinstance(s, dict) and _identity(s.get("kind")) == _identity(item.get("signal"))]
+        maximum = matching[0] if len(matching) == 1 and matching[0] is not None else window.get("max_age_days")
+        if type(maximum) is not int or maximum < 0:
+            continue
+        try:
+            age = (as_of - datetime.strptime(item.get("evidence_date", item.get("date", "")), "%Y-%m-%d")).days
+        except (ValueError, TypeError):
+            continue  # Dated-source validation reports malformed evidence.
+        if age < 0 or age > maximum:
+            errors.append(f"{label}: signal date is {age} days before {as_of.date()}, outside the requested 0–{maximum} day window; correct the date or signal judgment before contact work/delivery.")
+    return errors
+
+
 def qualification_errors(document: dict) -> list[str]:
     errors = []
     owners = set()
@@ -108,6 +143,7 @@ def qualification_errors(document: dict) -> list[str]:
                         errors.append(f"{path}: employee_range is outside or only partly inside request.icp.company_size")
             failed = [c for c in required if c.get("status") == "fail" and c.get("evidence")]
             if state == "accepted" or (state == "unresolved" and row.get("stage") == "contact"):
+                errors.extend(signal_age_errors(request, row, path))
                 if document.get("schema_version") == "1.2":
                     for check in required:
                         for item in (check.get("evidence") if isinstance(check.get("evidence"), list) else []):

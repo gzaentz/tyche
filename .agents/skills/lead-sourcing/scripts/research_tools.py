@@ -51,10 +51,10 @@ TOOLS = {
     "tyche_review": ("Save judgments and changed fields only. With a Harvest ref, omit receipt-owned names, URLs, size/location fields and their evidence; code supplies them. Company example: {ref, industry, sub_industry, description}. Contact example: {ref, requested_role, role_match, role_group}. Evidence objects may use {ref, text, date_basis}; select an email receipt with email_ref. Never infer a rejection from missing evidence. Include observed web results and reference them as web:0:0. Review source continuation/exhaustion explicitly with sources; saving a fact does not exhaust a source.",
         obj({"companies": {"type": "array", "items": COMPANY}, "web": {"type": "array", "items": WEB},
              "sources": {"type": "array", "items": SOURCE}})),
-    "tyche_inspect": ("Read compact run/company state, a saved result, or a selected result field. query searches the free capability catalog; tool returns its cached schema/pricing. recover reconciles an existing receipt without repeating its provider request. Full evidence remains on disk; use ref and field rather than shell searches.",
+    "tyche_inspect": ("Read compact run/company state or saved results. query searches the free capability catalog; tool returns cached inputs/pricing. Describe only capabilities needed for the next step. Use ref=route with offset/limit to page saved results, or field to select a nested field from a result, tool, company or run. recover records an unrecorded saved response without dispatch; it does not settle unknown billing. Full receipts remain on disk.",
         obj({"target": STRING, "ref": REFERENCE, "field": STRING, "tool": STRING, "query": STRING,
              "recover": REFERENCE, "offset": {"type": "integer", "minimum": 0},
-             "limit": {"type": "integer", "minimum": 1, "maximum": 10}, "refresh": {"type": "boolean"}})),
+             "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 10}, "refresh": {"type": "boolean"}})),
     "tyche_finish": ("After reviewing evidence and writing, save report commentary and run the existing strict validator and workbook exporter. Returns artifact paths or specific unresolved problems. Final run-only costs are refreshed by the launcher when model usage closes.",
         obj({"commentary": STRING})),
 }
@@ -255,15 +255,39 @@ class ResearchTools:
         attempts = result.get("attempts", [result])
         return {"lookups": [self._lookup_view(a) for a in attempts], "progress": self._overview()}
 
-    def _lookup_view(self, attempt):
+    def _lookup_view(self, attempt, offset=0, limit=10):
         body = attempt.get("result", {})
         rid = body.get("attempt", {}).get("action", {}).get("id") or attempt.get("route_id")
         if not rid and attempt.get("receipt_file"):
             rid = Path(attempt["receipt_file"]).stem
-        return {"route": rid, "status": body.get("status", "error"),
+        rows = body.get("results", [])
+        recorded = any(r.get("route_id") == rid for r in self._document().get("routes", [])) if rid else False
+        view = {"route": rid, "status": body.get("status", "error"), "recorded": recorded,
                 "error": compact(attempt.get("error", body.get("error"))),
-                "results": [{"ref": f"{rid}:{i}", "facts": compact(runner._harvest_display(r))} for i, r in enumerate(body.get("results", [])[:10])],
-                "result_count": len(body.get("results", [])), "pending_verification": body.get("pending_verification")}
+                "results": [{"ref": f"{rid}:{i}", "facts": compact(runner._harvest_display(r))}
+                            for i, r in enumerate(rows[offset:offset + limit], offset)],
+                "result_count": len(rows), "next_offset": offset + limit if offset + limit < len(rows) else None,
+                "pending_verification": body.get("pending_verification")}
+        if recorded and body.get("status") in {"provider_error", "no_results", "partial", "timeout"}:
+            view["recovery_note"] = "This outcome is already recorded. Recovering it cannot resolve unknown billing; preserve the bound until provider billing evidence is available."
+        return view
+
+    @staticmethod
+    def _field(value, field):
+        for key in field.split("."):
+            value = value[int(key)] if isinstance(value, list) else value[key]
+        return value
+
+    @staticmethod
+    def _description_view(contract):
+        # Execution still uses the complete saved contract. The researcher needs
+        # native inputs and pricing, not duplicate SDK/getter implementation help.
+        keys = ("toolId", "id", "description", "inputSchema", "pricing", "connected", "callable",
+                "disabled", "disabledReason", "asyncGetAction", "asyncFlow", "defaultExecutionMode")
+        view = {k: contract[k] for k in keys if k in contract}
+        output = contract.get("outputSchema")
+        view["output_fields"] = output.get("fields", []) if isinstance(output, dict) else []
+        return view
 
     def _resolve(self, reference):
         match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9._-]{0,95}):(\d+)", reference)
@@ -283,16 +307,21 @@ class ResearchTools:
         source["route_id"] = rid
         return copy.deepcopy(rows[index]), source, saved
 
-    def _evidence(self, value, signal=False):
-        if not isinstance(value, dict) or "ref" not in value:
-            return copy.deepcopy(value)
-        value = copy.deepcopy(value)
-        row, source, _ = self._resolve(value.pop("ref"))
+    @staticmethod
+    def _evidence_date(row, value):
         date = next((row.get(k) for k in ("evidence_date", "date", "published_date", "publishedDate", "publication_date") if row.get(k)), None)
         basis = value.get("date_basis", value.get("evidence_date_basis",
                     row.get("evidence_date_basis", row.get("date_basis", "published" if date else "observed_current"))))
         if basis != "observed_current" and not (date or value.get("date") or value.get("evidence_date")):
             raise ValueError("Selected source has no publication/event date. Supply a verified date, or use observed_current only for current-state evidence.")
+        return date, basis
+
+    def _evidence(self, value, signal=False):
+        if not isinstance(value, dict) or "ref" not in value:
+            return copy.deepcopy(value)
+        value = copy.deepcopy(value)
+        row, source, _ = self._resolve(value.pop("ref"))
+        date, basis = self._evidence_date(row, value)
         evidence = {"url": row.get("evidence_url") or row.get("url") or row.get("contact_url") or row.get("company_linkedin_url"),
                     "date": date or self._document()["request"]["as_of_date"],
                     "date_basis": basis,
@@ -377,18 +406,42 @@ class ResearchTools:
         else:
             result = runner.run_lookup(self.path, spec, plan_only=True)
             rid = Path(result["receipt_file"]).stem
-        runner.complete_public_web(self.path, rid, item["response"], check_stop=False)
+        try:
+            runner.complete_public_web(self.path, rid, item["response"], check_stop=False)
+        except ValueError as exc:
+            raise ValueError(f"{exc}. Existing web reference: {rid}. Inspect and reuse the saved observation; put revised interpretation in company evidence.") from exc
         return rid
 
     def review(self, companies=(), web=(), sources=()):
         # Expansion of partial contact updates and the existing atomic save
         # share one lock; concurrent reviews cannot overwrite newer fields.
         with self._review_lock:
-            return self._review(companies, web, sources)
+            aliases = {}
+            try:
+                return self._review(companies, web, sources, aliases)
+            except ValueError as exc:
+                if aliases:
+                    raise ValueError(f"{exc}. Web observations were saved as {json.dumps(aliases)}; reuse these references when correcting the judgment.") from exc
+                raise
 
-    def _review(self, companies, web, sources):
+    def _review(self, companies, web, sources, aliases):
         # Validate selected provider facts before persisting attached web
         # observations. Input corrections should not create partial web saves.
+        def check_web_dates(value):
+            if isinstance(value, dict):
+                match = re.fullmatch(r"web:(\d+):(\d+)", str(value.get("ref", "")))
+                if match:
+                    try:
+                        row = web[int(match[1])]["response"]["results"][int(match[2])]
+                    except (IndexError, KeyError, TypeError) as exc:
+                        raise ValueError("Web evidence reference does not select an attached result") from exc
+                    self._evidence_date(row, value)
+                for child in value.values():
+                    check_web_dates(child)
+            elif isinstance(value, list):
+                for child in value:
+                    check_web_dates(child)
+        check_web_dates(list(companies))
         selected = copy.deepcopy(list(companies))
         for item in selected:
             target = item["target"]
@@ -398,7 +451,8 @@ class ResearchTools:
                 item["primary_contact"] = self._contact(item["primary_contact"], target)
             if "backup_contacts" in item:
                 item["backup_contacts"] = [self._contact(c, target, patch_primary=False) for c in item["backup_contacts"]]
-        aliases = {f"web:{i}": self._observe_web(item) for i, item in enumerate(web)}
+        for i, item in enumerate(web):
+            aliases[f"web:{i}"] = self._observe_web(item)
         def refs(value):
             if isinstance(value, dict):
                 return {k: refs(v) for k, v in value.items()}
@@ -453,12 +507,13 @@ class ResearchTools:
         pending = [{"ref": r["route_id"], "target": r.get("scope"), "reason": r.get("reason")}
                    for r in document["stop_audit"].get("route_frontier", []) if r["route_id"] not in completed]
         return {"summary": document.get("summary", {}), "companies": rows[:12], "company_count": len(rows),
+                "elapsed_seconds": decision.get("elapsed_seconds"),
                 "budget": {"cap_usd": ledger["usd_limit"], "costs": totals, "blocked": ledger.get("blocked")},
                 "pending": pending[:12],
                 "review_due": runner.review_reminder(document), "stop": decision["decision"], "errors": decision["errors"],
                 "blocked_actions": decision.get("blocked_actions", {})}
 
-    def inspect(self, target=None, ref=None, field=None, tool=None, query=None, recover=None, offset=0, limit=5, refresh=False):
+    def inspect(self, target=None, ref=None, field=None, tool=None, query=None, recover=None, offset=0, limit=10, refresh=False):
         if sum(v is not None for v in (target, ref, tool, query, recover)) > 1:
             raise ValueError("Inspect one company, result, capability query, tool or recovery reference at a time")
         if refresh and not tool:
@@ -466,10 +521,11 @@ class ResearchTools:
         if not self.path.exists():
             return {"status": "not_started", "next": "Use tyche_start with the interpreted request"}
         if tool:
-            return {"tool": self._description(tool, refresh=refresh)}
+            contract = self._description(tool, refresh=refresh)
+            return {"tool": compact(self._field(contract, field)) if field else self._description_view(contract)}
         if query:
             result = runner.run_lookup(self.path, {"request": {"operation": "search", "query": query}}, execute=self._execute)
-            return self._lookup_view(result)
+            return self._lookup_view(result, offset, limit)
         if recover:
             rid = recover.split(":")[0]
             saved = runner.read_receipt(self.path, rid)["result"]
@@ -478,11 +534,10 @@ class ResearchTools:
         if ref:
             if ":" not in ref:
                 receipt = runner.read_receipt(self.path, ref)
-                return self._lookup_view(receipt)
+                return {"value": compact(self._field(receipt["result"], field))} if field else self._lookup_view(receipt, offset, limit)
             value, source, _ = self._resolve(ref)
             if field:
-                for key in field.split("."):
-                    value = value[int(key)] if isinstance(value, list) else value[key]
+                value = self._field(value, field)
             if isinstance(value, list):
                 return {"source": source, "items": compact(value[offset:offset + limit]), "total": len(value)}
             if isinstance(value, str):
@@ -493,9 +548,15 @@ class ResearchTools:
             document = self._document()
             rows = [r for state in ("accepted", "unresolved", "rejected") for r in document.get(state, []) if runner._company_key(r) == target]
             routes = [r for r in document["routes"] if r.get("scope") == target]
-            return {"company": compact(rows[0]) if rows else None, "route_count": len(routes),
+            value = {"company": rows[0] if rows else None, "route_count": len(routes),
                     "recent_sources": [{"ref": r["route_id"], "purpose": r.get("request_summary"),
                                         "phase": r.get("phase"), "status": r.get("provider_status"), "rows": r.get("rows_returned")} for r in routes[-limit:]]}
+            if field:
+                return {"value": compact(self._field(value, field))}
+            value["company"] = compact(value["company"])
+            return value
+        if field:
+            return {"value": compact(self._field(self._document(), field))}
         return {"request": self._document()["request"], **self._overview()}
 
     def finish(self, commentary=None):
