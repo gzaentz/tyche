@@ -10,6 +10,10 @@ report with sources and costs.
 [Quick start](#quick-start) · [Requests and defaults](#requests-and-defaults) ·
 [Outputs](#outputs) · [Build on TYCHE](#build-on-tyche)
 
+**Leadpoet Arena:** [Trigger TYCHE through `harness.run_icp(icp)`](docs/leadpoet-arena.md)
+and receive reviewed company/contact JSON using the existing broker and output
+contract. This optional runtime uses PydanticAI; local Codex sourcing stays the same.
+
 ## What it does
 
 - **Qualifies companies first.** Checks company fit and buying signals separately,
