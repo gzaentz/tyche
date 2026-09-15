@@ -125,6 +125,18 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(contact["role_group"], "primary")
         self.assertEqual(json.loads(self.path.read_text())["request"]["requested_roles"], self.request["requested_roles"])
 
+    def test_email_reference_removes_clinical_credentials_without_editing_profile(self):
+        self.start()
+        ref = self.selected_contact(first="Jaime", last="Scourfield, MS, BCBA, LBA")
+        self.provider.raw = {"status": "ok", "data": {"email": "jaime@example.test"}}
+        self.lookup(check(tool="fixture_email_finder", phase="contact_discovery", contact_ref=ref, inputs={}))
+        sent = [r for r in self.provider.requests if r.get("operation") == "execute"
+                and r.get("tool") == "fixture_email_finder"]
+        self.assertEqual(sent[0]["payload"], {
+            "first_name": "Jaime", "last_name": "Scourfield", "domain": "example.test"})
+        saved = json.loads(self.path.read_text())["unresolved"][0]["primary_contact"]
+        self.assertEqual(saved["full_name"], "Jaime Scourfield, MS, BCBA, LBA")
+
     def test_signal_corrections_replace_derived_view_and_preserve_contact(self):
         source = {"url": "https://example.test/jobs", "date": "2026-06-01", "date_basis": "published", "text": "One nursing vacancy"}
         check = dict(criterion="hiring", importance="required", status="pass", claim="Rapid hiring", signal="HIRING", evidence=[source])

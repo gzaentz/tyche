@@ -118,7 +118,7 @@ def email_identity_fields(document, run_file, company, contact):
             return None
         value = re.sub(r"^Dr\.?\s+", "", value.strip(), flags=re.I)
         # Strip credential suffixes only. Preserve surnames, initials and Jr/Sr.
-        return re.sub(r",\s*(?:(?:Ph\.?D\.?|BCBA(?:-D)?|MBA|MD|RN|LCSW|LPC)\s*,?\s*)+$", "", value, flags=re.I).strip()
+        return re.sub(r",\s*(?:(?:Ph\.?D\.?|BCBA(?:-D)?|MBA|MD|MS|RN|LBA|LCSW|LPC)\s*,?\s*)+$", "", value, flags=re.I).strip()
     first = name(profile.get("firstName", profile.get("first_name")))
     last = name(profile.get("lastName", profile.get("last_name")))
     full = " ".join((first, last)) if first and last else name(profile.get("contact_name"))
