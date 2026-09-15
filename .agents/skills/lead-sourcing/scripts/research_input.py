@@ -41,10 +41,12 @@ def normalize_request(value, run_file, *, saved=None, started_at=None):
     """Apply mechanical defaults to new inputs; never infer roles or intent."""
     allowed = {"target_count", "icp", "buying_signals", "requested_roles", "time_window",
                "budget", "contact_fields", "contacts_per_company", "contact_role_groups",
-               "signal_match_mode", "run_id", "as_of_date", "max_duration_seconds", "product_service"}
+               "signal_match_mode", "run_id", "as_of_date", "max_duration_seconds", "product_service", "original_text"}
     object_fields(value, allowed, "request")
     request = copy.deepcopy(value)
     prior = saved or {}
+    if "original_text" in request:
+        text(request["original_text"], "original_text")
     if "product_service" in request:
         offering = request["product_service"]
         object_fields(offering, {"description", "perspective"}, "product_service")
@@ -271,6 +273,10 @@ def check_tool_contract(receipt, request):
                  "object": isinstance(value, dict), "array": isinstance(value, list)}
         if kind in valid and not valid[kind]:
             raise ValueError(f"provider payload.{name} must be {kind}")
+    if request["tool"] == "hunter_email_finder" and "last_name" in payload:
+        last = payload["last_name"]
+        if isinstance(last, str) and sum(c.isalpha() for c in last) < 2:
+            raise ValueError("Hunter requires at least two surname letters; the selected surname is too short for this endpoint. Verify the full surname or choose an eligible LinkedIn-based lookup. Do not guess a name. No paid call was made.")
 
 
 def _criterion_key(value):
@@ -321,11 +327,31 @@ def company_update(document, item):
             raise ValueError("qualification_checks must be an array")
         seen = set()
         for check in item["qualification_checks"]:
-            object_fields(check, {"criterion", "importance", "status", "claim", "evidence", "signal"}, "qualification check")
+            object_fields(check, {"criterion", "importance", "status", "claim", "evidence", "signal", "requirement_ref"}, "qualification check")
+            check = copy.deepcopy(check)
+            if "requirement_ref" in check:
+                from validate_run import request_requirements
+                options = request_requirements(document["request"])
+                selected = next((r for r in options if r["ref"] == check["requirement_ref"]), None)
+                if selected is None:
+                    raise ValueError("Unknown requirement_ref; select one of " + str(options))
+                check.pop("requirement_ref")
+                check.setdefault("criterion", selected["label"])
+                if selected["ref"].startswith("attribute:"):
+                    if _criterion_key(check["criterion"]) != _criterion_key(selected["label"]):
+                        raise ValueError("An attribute check's criterion must match its selected requirement; omit criterion to derive it")
+                    if check.get("signal"):
+                        raise ValueError("A required attribute is not a buying signal")
+                else:
+                    if check.get("signal", selected["label"]) != selected["label"]:
+                        raise ValueError("Omit signal when selecting requirement_ref; code supplies the saved kind")
+                    check["signal"] = selected["label"]
+                if check.get("importance", selected["importance"]) != selected["importance"]:
+                    raise ValueError("Importance must match the selected requirement")
+                check["importance"] = selected["importance"]
             key = _criterion_key(check.get("criterion"))
             if key in seen:
                 raise ValueError(f"duplicate criterion update: {key}")
-            check = copy.deepcopy(check)
             if check.get("signal"):
                 from validate_run import requested_signal
                 signal = requested_signal(document["request"], check["signal"])

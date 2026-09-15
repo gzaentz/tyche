@@ -5,33 +5,35 @@ description: Source evidence-backed companies with buying signals and requested-
 
 # TYCHE Lead Sourcing
 
-The LLM chooses research and qualification; tools handle bookkeeping and validation.
+LLM: research and qualification. Tools: bookkeeping and validation.
 No CRM writes or outreach.
 
 ## Setup
 
 Read [workflow rules](references/workflow-rules.md), the [input contract](references/output-contract.md#input-contract)
 and [lifecycle invariants](references/output-contract.md#lifecycle-invariants).
-Interpret the request once: separate must-haves/preferences and buyer roles/hiring
-signals. Preserve product/service description and seller/target perspective in
-`request.product_service`. Mark signals `required` or `preferred`; never strengthen criteria.
+Interpret once: separate must-haves/preferences and buyer roles/hiring signals.
+Preserve offering and seller/target perspective in `request.product_service`.
+Mark signals `required`/`preferred`; put non-signal must-haves in `icp.required_attributes`.
+Compare criteria with launcher-saved `original_text` before paid research;
+never strengthen, weaken or add requirements.
 Call `tyche_start` with that `request` and any authorized `max_usd`.
-Code supplies the clock, ledger and verification reserve. Catalog prices take
-precedence over [stored planning rates](references/provider-pricing.md); receipts
-supply actual charges. Defaults: one contact/company; USD 0.50/requested lead.
+Code supplies time, ledger and verification reserve. Catalog prices override
+[stored planning rates](references/provider-pricing.md); receipts supply charges.
+Defaults: one contact/company; USD 0.50/requested lead.
 Only the user can change criteria. Never import another run or guess prices.
 Credentials and runtime paths come from the launcher.
 
 Use [native tools](references/adapter-io.md#native-tools), without shell bookkeeping
-or implementation-code reads. CLI instructions are for diagnostics.
+or implementation-code reads.
 Resume with `tyche_inspect()` for the saved request and pending work.
 
 ## Research loop
 
 1. **Choose ready work.** Prefer affordable `completion_candidates` before fresh discovery unless blocked. Select tools through [tools.md](references/tools.md).
    Use `tyche_inspect(query=...)` for capabilities or `tool=...` for native schemas.
-   Refresh cached descriptions after schema, price or access changes.
-   Pilot unproven operations/filter shapes before batching. Preserve native limits.
+   Refresh descriptions after schema/price/access changes. Pilot unproven
+   operations/filters before batching; preserve native limits.
 2. **Check up to three companies concurrently.** Send `tyche_lookup` one to three
    `checks`: target, phase, purpose, tool and native inputs. Batch ready independent
    checks across phases without waiting to fill batches.
@@ -41,16 +43,18 @@ Resume with `tyche_inspect()` for the saved request and pending work.
    Apply the [qualification policy](references/workflow-rules.md#qualification-policy).
    Required unknowns stay unresolved; evidenced mismatches reject; preferred signals
    only rank. Review each preferred signal once; retain unverified gaps as unknown.
-   Use the saved signal `kind` in checks; code supplies importance and checks
-   dates and required `any`/`all` coverage. Reuse facts for `Intent Details`.
+   Select returned `attribute:N` or `signal:N` as `requirement_ref` in checks;
+   code supplies labels/importance and checks dates and coverage.
+   Reuse facts for `Intent Details`.
    Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
    Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size):
    accepted contacts need country; companies need published employee range and source.
 3. **Save decisions as made.** Call `tyche_review` with changed facts, checks,
-   decisions and selected evidence `ref` values. Explicitly review each used source
-   in `sources`, with its reason and continuation/exhaustion decision. For built-in
+   decisions and selected evidence `ref` values. Reviewed single-result company,
+   profile and email-verdict lookups close automatically. Review other used sources
+   in `sources`, with their reason and continuation/exhaustion decision. For built-in
    web tools, include the actual observed response in `web` in the same call.
-   Save decisions promptly; `review_due` identifies outstanding reviews.
+   `review_due` identifies outstanding reviews.
    After two comparable attempts per company/phase without verified progress,
    change strategy. Reopen evidence for gaps/contradictions; independent
    profile/email checks remain eligible.
@@ -79,21 +83,23 @@ only for eligible failures or catch-all/unknown. Never override a hard negative.
 
 ## Delivery
 
-Call `tyche_finish()` for research gaps or a final review packet. Review sources,
-claim strength, dates and writing; correct through `tyche_review`. Return the
-current `review_ref` with commentary to validate/export. Never force completion.
+Call `tyche_finish()` for gaps or final review. Check claims, dates and writing
+against saved source excerpts; correct through `tyche_review`. Use
+`inspect(target=..., field="evidence_review")` during research for the same view.
+Return the current `review_ref` with commentary to validate/export.
+Never force completion.
 Inspect the preview. Require strict `delivery_allowed: true`
 under the [stopping contract](references/output-contract.md#stopping-check).
 Report shortfalls; exhausted searches do not prove an empty market.
 
 ## Full cost
 
-The launcher refreshes run costs after worker exit. Report provider,
-model, combined and per-lead costs; label estimates and unknowns.
+After worker exit, report launcher-refreshed provider, model, combined and
+per-lead costs; label estimates and unknowns.
 
 ## References
 
-Load details as needed:
+Details:
 
 - Evidence: [semantics](references/output-contract.md#semantic-checks),
   [source attribution](references/output-contract.md#accepted-lead-sources),

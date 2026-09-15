@@ -40,6 +40,38 @@ def document(req, checks, state="accepted"):
 
 
 class SignalRequirementsTests(unittest.TestCase):
+    def test_legacy_label_can_be_explicitly_mapped_without_changing_request_or_evidence(self):
+        req = request("any")
+        for signal in req["buying_signals"]:
+            signal.pop("importance")
+        old = check("Expansion")
+        old.update(criterion="legacy event", signal="New location")
+        doc = document(req, [old], "unresolved")
+        before = json.dumps(doc, sort_keys=True)
+        self.assertIn("explicit requirement_ref", " ".join(validate_run.qualification_errors(doc)))
+        patch = {"scope": "example.test", "reason_text": "Explicitly mapped saved evidence to its requested kind", "qualification_checks": [
+            {k: v for k, v in dict(old, requirement_ref="signal:0").items() if k != "signal"}]}
+        result = research_input.company_update(doc, patch)["row"]
+        self.assertEqual(result["qualification_checks"][0]["signal"], "Expansion")
+        self.assertEqual(result["qualification_checks"][0]["evidence"], old["evidence"])
+        self.assertEqual(json.dumps(doc, sort_keys=True), before)
+        doc["unresolved"] = [result]
+        self.assertEqual(validate_run.qualification_errors(doc), [])
+        patch["qualification_checks"][0]["requirement_ref"] = "signal:100"
+        with self.assertRaisesRegex(ValueError, "Unknown requirement_ref"):
+            research_input.company_update(doc, patch)
+
+    def test_missing_or_preferred_attribute_cannot_pass_as_required(self):
+        req = request("any")
+        req["icp"]["required_attributes"] = ["Operates multiple sites"]
+        checks = [check()]
+        self.assertTrue(validate_run.qualification_errors(document(req, checks)))
+        fit = dict(criterion="Operates multiple sites", importance="preferred", status="pass", evidence=check()["evidence"])
+        self.assertTrue(validate_run.qualification_errors(document(req, checks + [fit])))
+        fit["importance"] = "required"
+        self.assertEqual(validate_run.qualification_errors(document(req, checks + [fit])), [])
+        self.assertTrue(validate_run.qualification_errors(document(req, checks + [fit, fit])))
+
     def test_all_requires_every_required_signal_and_any_accepts_one(self):
         checks = [check(), check("Partnership", "unknown"), check("Hiring", "unknown", "preferred")]
         self.assertTrue(validate_run.qualification_errors(document(request(), checks)))

@@ -198,30 +198,35 @@ def run_status(document, decision):
             "stop_decision": decision}
 
 
+def delivery_preflight(run_file, document, *, check_review=True):
+    """Check a proposed final state without writing, shared by review and export."""
+    document = refresh(copy.deepcopy(document))
+    ledger = budget_guard.load_ledger(run_file)
+    problems = budget_guard.audit_ledger(run_file, document, state=ledger)
+    if check_review and document.get("final_review") and document["final_review"].get("review_ref") != review_fingerprint(document):
+        problems.append("Research changed after final review; request and approve the current review packet")
+    decision = evaluate_stop(document, execution_budget=ledger)
+    problems.extend(decision["errors"])
+    stop = decision["decision"]
+    if stop in {"continue", "repair_state"}:
+        problems.append("Run still needs work: " + json.dumps(decision))
+    document["stop_reason"] = stop
+    document["stop_audit"]["frontier_complete"] = True
+    problems.extend(validate_run(document, require_stop_check=True, execution_budget=ledger, run_file=run_file))
+    return document, dict(valid=not problems, errors=list(dict.fromkeys(problems)), stop_policy="strict",
+                          delivery_allowed=not problems, stop_decision=decision,
+                          calculated_cost_summary=calculate_cost_summary(document))
+
+
 def finalize_run(run_file):
     """Prepare derived completion fields only after review and full delivery checks."""
     checked = {}
 
     def update(document):
-        refresh(document)
-        ledger = budget_guard.load_ledger(run_file)
-        problems = budget_guard.audit_ledger(run_file, document, state=ledger)
-        if document.get("final_review") and document["final_review"].get("review_ref") != review_fingerprint(document):
-            problems.append("Research changed after final review; request and approve the current review packet")
-        decision = evaluate_stop(document, execution_budget=ledger)
-        problems.extend(decision["errors"])
-        stop = decision["decision"]
-        if stop in {"continue", "repair_state"}:
-            problems.append("Run still needs work: " + json.dumps(decision))
-        # Validate proposed bookkeeping together with all evidence. Nothing is
-        # persisted if either the readiness checks or strict validation fails.
-        document["stop_reason"] = stop
-        document["stop_audit"]["frontier_complete"] = True
-        problems.extend(validate_run(document, require_stop_check=True, execution_budget=ledger, run_file=run_file))
-        if problems:
-            raise ValueError("; ".join(problems))
-        checked.update(valid=True, errors=[], stop_policy="strict", delivery_allowed=True,
-                       stop_decision=decision, calculated_cost_summary=calculate_cost_summary(document))
+        document, result = delivery_preflight(run_file, document)
+        if result["errors"]:
+            raise ValueError("; ".join(result["errors"]))
+        checked.update(result)
         # Bind the exporter to the exact bytes validated inside the state lock.
         saved = json.dumps(document, indent=2, ensure_ascii=True, allow_nan=False) + "\n"
         checked["results_sha256"] = hashlib.sha256(saved.encode("utf-8")).hexdigest()

@@ -103,6 +103,10 @@ complete artifact. All applicable semantic rules still apply.
    substitute for `fail`. A required check that fails rejects the account. A
    required check that is unknown is unresolved. Preferred checks affect
    ranking and explanation but do not reject an otherwise qualified account.
+   Each entry in `request.icp.required_attributes` needs one passing required
+   check with evidence before contact work or delivery. Native `requirement_ref`
+   values select these attributes or signals from the saved request; the helper
+   expands them into the existing criterion, signal and importance fields.
 
 ## Input contract
 
@@ -123,6 +127,7 @@ this default. No new JSON fields are required.
   "additionalProperties": false,
   "required": ["target_count", "icp", "buying_signals", "requested_roles", "time_window", "budget"],
   "properties": {
+    "original_text": {"type": "string", "minLength": 1, "description": "Original sourcing request supplied by the launcher and preserved unchanged on resume."},
     "target_count": {"type": "integer", "minimum": 1},
     "max_duration_seconds": {"type": ["integer", "null"], "minimum": 1},
     "icp": {"$ref": "#/$defs/icp"},
@@ -796,6 +801,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "additionalProperties": false,
       "required": ["target_count", "icp", "buying_signals", "requested_roles", "contacts_per_company", "time_window", "contact_fields", "budget"],
       "properties": {
+        "original_text": {"type": "string", "minLength": 1, "description": "Original sourcing request supplied by the launcher and preserved unchanged on resume."},
         "target_count": {"type": "integer", "minimum": 1},
         "max_duration_seconds": {"type": ["integer", "null"], "minimum": 1},
         "icp": {"$ref": "#/$defs/icp"},
@@ -1091,7 +1097,10 @@ optional (every saved signal explicitly preferred), missing intent does not bloc
 qualification or export. Leave `signal_evidence` absent and `Signals` empty when
 none is verified. Describe any conditional use case in `intent_details`, grounded
 in `account_fit` evidence and explicitly identified as inference. Do not create a
-signal from a hypothesis. Legacy records retain their existing evidence contract.
+signal from a hypothesis. Legacy request metadata and receipts remain unchanged.
+If an old signal label differs from a requested kind, explicitly map that
+existing check through `requirement_ref` and review its evidence; never guess
+synonyms or bypass current source and date checks.
 Never use this fallback for a required signal. Evidence URLs and sources
 may differ. Follow the [qualification policy](workflow-rules.md#qualification-policy)
 to corroborate the same project across sources: use the dated activity in

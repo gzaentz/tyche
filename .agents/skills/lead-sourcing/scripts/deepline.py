@@ -511,6 +511,9 @@ def normalize_evidence(
     ) or _text(_first(current_position, "companyLinkedinUrl", "company_linkedin_url")) or (
         _text(link.get("linkedin")) if nested_company_identity else None
     )
+    linkedin = _first(source, "linkedin_url", "linkedinUrl")
+    if not result["company_linkedin_url"] and _is_linkedin_company_url(linkedin):
+        result["company_linkedin_url"] = _text(linkedin)
     domain_value = _first(source, "domain", "company_domain")
     if _is_linkedin_url(domain_value):
         domain_value = None
@@ -1088,7 +1091,7 @@ def _records(value: Any) -> List[Any]:
             "url",
         )
     ) or any(key in value for key in _CONTACT_RECORD_KEYS) or (
-        _is_linkedin_company_url(value.get("linkedinUrl")) and _text(value.get("name"))
+        _is_linkedin_company_url(_first(value, "linkedin_url", "linkedinUrl"))
     ):
         return [value]
     scalar = _scalar_result(value)
@@ -1305,7 +1308,7 @@ def _known_envelope(value: Any) -> bool:
             "evidence_url",
         )
     ) or any(key in value for key in _CONTACT_RECORD_KEYS) or (
-        _is_linkedin_company_url(value.get("linkedinUrl")) and _text(value.get("name"))
+        _is_linkedin_company_url(_first(value, "linkedin_url", "linkedinUrl"))
     ):
         return True
     if _is_email_validation_record(value):
@@ -1608,7 +1611,13 @@ def _execute_output(
             and not any(normalize_evidence(record, "deepline", tool).get(key)
                         for key in ("email", "contact_email"))
             for record in records)
-        outcome = "schema_error" if records and not empty_finder else "no_results"
+        # This endpoint echoes the searched company when no person was found.
+        # Treat only that observed shape as empty; never hide positive rows.
+        empty_role = tool == "leadmagic_role_finder" and all(
+            isinstance(record, dict) and record.get("message") == "Role not found."
+            and set(record) <= {"message", "company_name", "company_website"}
+            for record in records)
+        outcome = "schema_error" if records and not (empty_finder or empty_role) else "no_results"
         if nested_status in _FAILURE_STATUSES or error:
             outcome = nested_status if nested_status in _FAILURE_STATUSES else _classify_error(json.dumps(error))
         body = {"status": outcome, "provider": "deepline", "operation": "execute",

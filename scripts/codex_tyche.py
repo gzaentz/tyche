@@ -132,7 +132,7 @@ def tool_configuration(run_file, *, readonly=False):
     forwarded = ['CODEX_HOME', 'DEEPLINE_API_KEY', 'DEEPLINE_BIN', 'SCRAPINGDOG_API_KEY',
                  'DEEPLINE_NO_AUTO_UPDATE', 'DEEPLINE_SKIP_SKILLS_SYNC', 'TYCHE_WORKSPACE_NODE',
                  'TYCHE_WORKSPACE_NODE_MODULES', 'TYCHE_WORKSPACE_PYTHON', 'PYTHONDONTWRITEBYTECODE',
-                 'TYCHE_RUN_STARTED_AT']
+                 'TYCHE_RUN_STARTED_AT', 'TYCHE_REQUEST_FILE']
     return ('\n[mcp_servers.tyche]\ncommand = ' + json.dumps(sys.executable) + '\nargs = ' + json.dumps(args) + '\n'
             'env_vars = ' + json.dumps(forwarded) + '\n'
             'cwd = ' + json.dumps(str(ROOT)) + '\nrequired = true\n'
@@ -290,6 +290,7 @@ def main():
                    TYCHE_RUN_STARTED_AT=launched_at)
         env = workspace_environment(env)
         if args.exec_file is not None:
+            env['TYCHE_REQUEST_FILE'] = str(args.exec_file.resolve())
             for key in ('TYCHE_WORKSPACE_NODE', 'TYCHE_WORKSPACE_PYTHON'):
                 if not Path(env.get(key, '')).is_file():
                     raise RuntimeError(f'Configure {key} before starting a sourcing run')

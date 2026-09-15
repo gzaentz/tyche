@@ -7,6 +7,33 @@ from test_provider_scripts import DEEPLINE
 
 
 class NoMatchEnvelopeTests(unittest.TestCase):
+    def test_company_url_only_response_is_usable_without_inventing_company_facts(self):
+        raw = {"linkedin_url": "https://linkedin.com/company/example-business"}
+        body = {"status": "completed", "job_id": "saved-job", "toolResponse": {"rawV2": raw, "raw": raw},
+                "billing": {"credits_charged": .28, "cost_usd": .028}}
+        result = DEEPLINE._execute_output(body, "limadata_find_company_linkedin")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["results"][0]["company_linkedin_url"], raw["linkedin_url"])
+        self.assertIsNone(result["results"][0]["company"])
+        self.assertIsNone(result["results"][0]["domain"])
+        self.assertEqual(result["billing"], body["billing"])
+        self.assertEqual(result["job_id"], "saved-job")
+        body["status"] = "auth_failed"
+        self.assertEqual(DEEPLINE._execute_output(body, "limadata_find_company_linkedin")["status"], "auth_failed")
+
+    def test_role_not_found_echo_is_empty_and_missing_billing_stays_unknown(self):
+        raw = {"message": "Role not found.", "company_name": "Example", "company_website": "example.test"}
+        body = {"status": "no_result", "job_id": "saved-job", "toolResponse": {"rawV2": raw, "raw": raw}}
+        result = DEEPLINE._execute_output(body, "leadmagic_role_finder")
+        self.assertEqual(result["status"], "no_results")
+        self.assertEqual(result["results"], [])
+        self.assertEqual(result["job_id"], "saved-job")
+        self.assertNotIn("billing", result)
+        for extra in ({"name": "Returned Person"}, {"email": "person@example.test"}, {"error": "timeout"}):
+            conflicting = {**body, "toolResponse": {"rawV2": {**raw, **extra}}}
+            self.assertNotEqual(DEEPLINE._execute_output(conflicting, "leadmagic_role_finder")["status"], "no_results")
+        self.assertEqual(DEEPLINE._execute_output(body, "unrelated_tool")["status"], "schema_error")
+
     HUNTER_MISS = {"ok": False, "error": {
         "message": "not_found: The domain does not exist in our database",
         "code": "UPSTREAM_NOT_FOUND", "details": {"statusCode": 404}}}

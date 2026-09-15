@@ -322,6 +322,8 @@ class OutputContractExtensionTests(unittest.TestCase):
         self.assertEqual(input_schema["$defs"]["signal"], result_schema["$defs"]["signal"])
         self.assertEqual(input_schema["properties"]["product_service"],
                          result_schema["$defs"]["request_snapshot"]["properties"]["product_service"])
+        self.assertEqual(input_schema["properties"]["original_text"],
+                         result_schema["$defs"]["request_snapshot"]["properties"]["original_text"])
 
     def test_main_skill_has_one_short_research_loop_and_links_required_rules(self):
         text = SKILL.read_text(encoding="utf-8")

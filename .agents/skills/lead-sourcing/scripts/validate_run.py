@@ -103,6 +103,35 @@ def signal_request_errors(request: dict) -> list[str]:
     return errors
 
 
+def request_requirements(request: dict) -> list[dict]:
+    """References are positions in the immutable request, not another registry."""
+    problems = signal_request_errors(request)
+    icp = request.get("icp", {}) if isinstance(request, dict) else None
+    attributes = icp.get("required_attributes", []) if isinstance(icp, dict) else None
+    if not isinstance(attributes, list) or any(not isinstance(a, str) or not a.strip() for a in attributes):
+        problems.append("request.icp must be an object with required_attributes as a list of non-empty strings")
+    if problems:
+        raise ValueError("Invalid saved request: " + "; ".join(problems) + ". Restore the original saved request before resuming; do not reset the budget.")
+    return ([{"ref": f"attribute:{index}", "label": label, "importance": "required"}
+             for index, label in enumerate(attributes)] +
+            [{"ref": f"signal:{index}", "label": signal["kind"],
+              "importance": signal.get("importance", "required"),
+              **{k: signal[k] for k in ("query", "min_age_days", "max_age_days") if k in signal}}
+             for index, signal in enumerate(request.get("buying_signals", []))])
+
+
+def required_attribute_errors(request: dict, row: dict, path: str) -> list[str]:
+    """Require reviewed evidence for every explicit must-have, without interpreting it."""
+    errors = []
+    for label in request.get("icp", {}).get("required_attributes", []):
+        checks = [c for c in row.get("qualification_checks", []) if isinstance(c, dict)
+                  and _identity(c.get("criterion")) == _identity(label) and not c.get("signal")]
+        if (len(checks) != 1 or checks[0].get("importance") != "required"
+                or checks[0].get("status") != "pass" or not checks[0].get("evidence")):
+            errors.append(f"{path}: required attribute {label!r} needs one passing evidence-backed check; select its requirement_ref")
+    return errors
+
+
 def requested_signal(request: dict, label: str) -> Optional[dict]:
     """Resolve a saved kind, never a guessed synonym or a broader date window."""
     if errors := signal_request_errors(request):
@@ -113,7 +142,7 @@ def requested_signal(request: dict, label: str) -> Optional[dict]:
     matches = [s for s in signals if isinstance(s, dict) and _identity(s.get("kind")) == _identity(label)]
     if len(matches) != 1:
         choices = ", ".join(str(s.get("kind")) for s in signals if isinstance(s, dict))
-        raise ValueError(f"signal {label!r} must identify one saved request kind: {choices}. Keep the kind unchanged; describe the observed facts in claim/evidence.")
+        raise ValueError(f"signal {label!r} must identify one saved request kind: {choices}. For older labels, inspect requirements and review the same criterion with an explicit requirement_ref; preserve evidence and recheck its meaning. Never guess a synonym.")
     return matches[0]
 
 
@@ -246,6 +275,7 @@ def qualification_errors(document: dict) -> list[str]:
             ordinary_required = [c for c in required if not signal_requirements or not c.get("signal")]
             failed = [c for c in ordinary_required if c.get("status") == "fail" and c.get("evidence")]
             if state == "accepted" or (state == "unresolved" and row.get("stage") == "contact"):
+                errors.extend(required_attribute_errors(request, row, path))
                 errors.extend(signal_coverage_errors(request, row, path))
                 errors.extend(signal_age_errors(request, row, path))
                 if document.get("schema_version") == "1.2":

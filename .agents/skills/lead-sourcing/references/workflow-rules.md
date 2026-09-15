@@ -399,7 +399,10 @@ LLM source review, not a separate rule engine:
 - **Expansion:** an announced partnership, conditional approval, planned rollout
   and completed launch are different claims. Preserve the source's status.
 
-Before delivery, inspect the final packet from `tyche_finish`. Review each
+Before delivery, inspect the final packet from `tyche_finish`. Mechanical
+preflight happens first. Compare each claim with the packet's `sources` excerpts
+from saved receipts, including the source's own date and event status. Inspect
+the full saved text when an excerpt is incomplete. Review each
 verified signal and its date, the following sentence explaining its relevance,
 and the final sentence connecting the activity to the request's product/service
 context. Preserve whether that offering belongs to the seller or target company.

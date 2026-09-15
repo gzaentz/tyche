@@ -40,7 +40,7 @@ class FixtureProvider:
         tool = request.get("tool", "fixture-search")
         if request["operation"] != "execute":
             key = "email" if tool in {"zerobounce_validate", "bounceban_verify_single"} else "url" if tool.startswith("harvestapi") else "query"
-            fields = ["first_name", "last_name", "domain"] if tool == "fixture_email_finder" else [key]
+            fields = ["first_name", "last_name", "domain"] if tool in {"fixture_email_finder", "hunter_email_finder"} else [key]
             return {"provider": "deepline", "operation": request["operation"], "status": "ok", "results": [{
                 "toolId": tool, "callable": True, "connected": True,
                 "inputSchema": {"fields": [{"name": field, "required": True, "type": "string"} for field in fields],
@@ -102,6 +102,116 @@ class ResearchToolTests(unittest.TestCase):
         self.tools.review(companies=[{"target": target, "decision": "hold_contact", "reason": "Selected current buyer",
             "primary_contact": {"ref": profile, "requested_role": "Head of Payments", "role_match": "exact"}}])
         return profile
+
+    def test_original_request_is_bound_once_and_available_on_resume(self):
+        source = self.path.parent.parent / "original.txt"
+        source.write_text("Find multi-site businesses; hiring is preferred.")
+        self.tools.environment["TYCHE_REQUEST_FILE"] = str(source)
+        self.assertEqual(self.start()["request"]["original_text"], source.read_text())
+        before = self.path.read_bytes()
+        source.write_text("Changed outside the saved run")
+        self.start()
+        self.assertEqual(before, self.path.read_bytes())
+        self.assertIn("multi-site", self.tools.inspect()["request"]["original_text"])
+
+    def test_required_attribute_cannot_be_omitted_before_contact_spend(self):
+        self.request["icp"]["required_attributes"] = ["Operates multiple sites"]
+        self.start()
+        ref = self.lookup()["lookups"][0]["results"][0]["ref"]
+        row = {"target": "example.test", "decision": "qualify_account", "reason": "Reviewed company",
+               "company": {"ref": ref}, "account_fit": {"ref": ref},
+               "qualification_checks": self.qualifying_signal(ref)}
+        with self.assertRaisesRegex(ValueError, "required attribute"):
+            self.tools.review(companies=[row])
+        row["qualification_checks"].append({"requirement_ref": "attribute:0", "status": "pass",
+            "claim": "The source identifies two operating sites", "evidence": [{"ref": ref, "text": "Two operating sites are listed"}]})
+        self.tools.call("tyche_review", {"companies": [row]})
+        saved = json.loads(self.path.read_text())["unresolved"][0]
+        self.assertEqual(saved["qualification_checks"][-1]["criterion"], "operates multiple sites")
+        self.assertNotIn("requirement_ref", saved["qualification_checks"][-1])
+
+    def test_review_shows_saved_source_not_only_the_rewritten_claim(self):
+        self.start()
+        self.tools.review(companies=[{"target": "example.test", "decision": "hold_account", "reason": "Review source strength",
+            "account_fit": {"ref": "web:0:0"},
+            "qualification_checks": [{"criterion": "hiring", "importance": "preferred", "status": "unknown",
+                "claim": "Persistence is unverified", "evidence": [{"ref": "web:0:0", "text": "Unproven persistence claim"}]}]}],
+            web=[{"target": "example.test", "purpose": "Inspect hiring evidence", "query": "careers",
+                "operation": "open", "response": {"status": "ok", "results": [
+                    {"url": "https://example.test/jobs", "text": "One current vacancy. No posting date is shown."}]}}])
+        packet = self.tools.inspect(target="example.test", field="evidence_review")
+        proof = next(iter(packet["sources"].values()))
+        self.assertEqual(proof["text"], "One current vacancy. No posting date is shown.")
+        self.assertIsNone(proof["date"])
+        self.assertEqual(packet["company"]["qualification_checks"][0]["evidence"][0]["text"], "Unproven persistence claim")
+        self.assertEqual(json.loads(self.path.read_text())["unresolved"][0]["qualification_checks"][0]["status"], "unknown")
+
+    def test_selected_point_lookups_close_without_closing_searches(self):
+        self.start()
+        profile = self.selected_contact()
+        search = self.lookup(check(tool="fixture_search", inputs={"query": "more companies"}))["lookups"][0]
+        frontier = {r["route_id"]: r for r in json.loads(self.path.read_text())["stop_audit"]["route_frontier"]}
+        self.assertEqual(frontier[profile.split(":")[0]]["state"], "exhausted")
+        self.assertEqual(frontier[search["route"]]["state"], "continuable")
+
+    def test_review_preserves_backup_contacts_and_fallback_verdicts(self):
+        row = {"primary_contact": {"full_name": "Primary Buyer", "email_validation": {"status": "valid"}},
+               "backup_contacts": [{"full_name": "Secondary Buyer", "requested_role": "COO",
+                   "email_validation": {"status": "unknown", "fallback": {"status": "success", "result": "deliverable"}}}]}
+        view = self.tools._company_review(row, {})
+        self.assertEqual(view["primary_contact"]["email_validation"]["status"], "valid")
+        self.assertEqual(view["backup_contacts"][0]["requested_role"], "COO")
+        self.assertEqual(view["backup_contacts"][0]["email_validation"]["fallback"]["result"], "deliverable")
+
+    def test_review_preserves_independent_legacy_signal_beside_other_checks(self):
+        row = {"signal_evidence": {"signal": "Expansion", "evidence_text": "Opened a new location"},
+               "qualification_checks": [{"signal": "Hiring", "status": "unknown", "evidence": []}]}
+        view = self.tools._company_review(row, {})
+        self.assertEqual(view["signal_evidence"]["signal"], "Expansion")
+        self.assertEqual(view["signal_evidence"]["text"], "Opened a new location")
+
+    def test_email_phase_is_derived_and_initial_rejected_before_paid_lookup(self):
+        self.start()
+        ref = self.selected_contact(last="H.")
+        self.tools.inspect(tool="hunter_email_finder")
+        before = budget.ledger_path(self.path).read_bytes()
+        attempted = len([r for r in self.provider.requests if r.get("operation") == "execute"])
+        item = check(tool="hunter_email_finder", contact_ref=ref, inputs={})
+        item.pop("phase")
+        with self.assertRaisesRegex(ValueError, "surname letters"):
+            self.lookup(item)
+        self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
+        self.assertEqual(attempted, len([r for r in self.provider.requests if r.get("operation") == "execute"]))
+
+    def test_profile_email_addon_uses_account_gate_without_an_explicit_phase(self):
+        self.start()
+        item = check(tool="harvestapi_get_profile", contact_ref="unverified:0",
+                     inputs={"url": "https://www.linkedin.com/in/unknown/", "findEmail": True})
+        item.pop("phase")
+        before = budget.ledger_path(self.path).read_bytes()
+        attempted = len([r for r in self.provider.requests if r.get("operation") == "execute"])
+        with self.assertRaisesRegex(ValueError, "account-qualified company"):
+            self.lookup(item)
+        self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
+        self.assertEqual(attempted, len([r for r in self.provider.requests if r.get("operation") == "execute"]))
+
+    def test_malformed_saved_requirements_return_an_actionable_error(self):
+        self.start()
+        document = json.loads(self.path.read_text())
+        for fields in ({"icp": None}, {"buying_signals": [None]}, {"buying_signals": [{}]},
+                       {"icp": {"required_attributes": "not a list"}}):
+            damaged = copy.deepcopy(document)
+            damaged["request"].update(fields)
+            with self.subTest(fields=fields), patch.object(self.tools, "_document", return_value=damaged):
+                with self.assertRaisesRegex(ValueError, "Restore the original saved request"):
+                    self.tools.call("tyche_inspect", {"field": "requirements"})
+
+    def test_unknown_reference_and_cost_inspection_are_actionable(self):
+        self.start()
+        current = self.lookup()["lookups"][0]["route"]
+        with self.assertRaisesRegex(ValueError, current):
+            self.tools.inspect(ref="mistyped-reference:0")
+        self.assertIn("costs", self.tools.inspect(field="costs"))
 
     def test_email_reference_supplies_receipt_names_and_rejects_conflicting_identity(self):
         self.start()
@@ -886,7 +996,7 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual((self.path.read_bytes(), budget.ledger_path(self.path).read_bytes(), len(self.provider.requests)), before)
         self.assertEqual(self.tools.inspect(field="stop_check.started_at")["value"],
                          json.loads(self.path.read_text())["stop_check"]["started_at"])
-        with self.assertRaises(KeyError):
+        with self.assertRaisesRegex(ValueError, "available fields"):
             self.tools.inspect(field="nonexistent")
 
     def test_progress_reports_required_gaps_without_promoting_optional_hiring(self):
@@ -994,6 +1104,9 @@ class ResearchToolTests(unittest.TestCase):
         self.request = template["request"]
         self.request["target_count"] = 1
         self.request["buying_signals"] = [{"kind": row["signal_evidence"]["signal"], "query": "Recent warehouse integration"}]
+        original = self.path.parent.parent / "request.txt"
+        original.write_text("Find one company matching the supplied fixture criteria; verify one current buyer.")
+        self.tools.environment["TYCHE_REQUEST_FILE"] = str(original)
         self.start()
         self.provider.raw = {"status": "ok", "element": {"name": company["canonical_name"],
             "website": company["website"], "linkedinUrl": company["linkedin_url"],
@@ -1035,9 +1148,21 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(saved["accepted"][0]["primary_contact"]["email_validation"]["status"], "valid")
         self.assertEqual(saved["accepted"][0]["primary_contact"]["country"], "United States")
         self.assertIn("leads_ready_at", saved["stop_check"])
+        original_check = saved["accepted"][0]["qualification_checks"][0]
+        wrong_source = copy.deepcopy(original_check)
+        wrong_source["evidence"][0]["url"] = "https://example.com/not-in-this-receipt"
+        self.tools.review(companies=[{"target": "example.com", "decision": "accept", "reason": "Source URL needs review",
+            "qualification_checks": [wrong_source]}])
+        blocked = self.tools.finish()
+        self.assertEqual(blocked["status"], "needs_repair")
+        self.assertTrue(any("absent from the saved receipt" in error for error in blocked["errors"]))
+        self.assertNotIn("review_ref", blocked)
+        self.tools.review(companies=[{"target": "example.com", "decision": "accept", "reason": "Correct saved source selected",
+            "qualification_checks": [original_check]}])
         packet = self.tools.finish()
         self.assertEqual(packet["status"], "review_required")
         self.assertEqual(packet["request"], saved["request"])
+        self.assertEqual(packet["request"]["original_text"], original.read_text())
         self.assertFalse((self.path.parent / "leads.xlsx").exists())
         revised_signal = {"criterion": "recent integration", "importance": "required", "status": "pass",
             "claim": "The integration announcement is supported", "signal": row["signal_evidence"]["signal"],

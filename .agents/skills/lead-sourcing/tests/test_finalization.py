@@ -180,6 +180,21 @@ class FinalizationTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), errors[0])
         self.assertEqual(self.path.read_bytes(), before)
 
+    def test_native_finish_checks_routes_before_issuing_review_packet(self):
+        from research_tools import ResearchTools
+        document = completed_document()
+        document["stop_audit"]["route_frontier"][0]["state"] = "continuable"
+        run_attempt.refresh(document)
+        before = self.save(document)
+        budget_guard.initialize(self.path, max_usd=1, scrapingdog_usd_per_credit=0.1)
+        tools = ResearchTools(self.path, execute=lambda *args: self.fail("No provider call expected"))
+        result = tools.finish()
+        self.assertEqual(result["status"], "needs_repair")
+        self.assertIn("Review attempted routes", " ".join(result["errors"]))
+        self.assertNotIn("review_ref", result)
+        self.assertTrue(result["pending_sources"])
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_export_command_finalizes_and_verifies_the_client_workbook(self):
         from test_client_output import client_document
         from test_export_xlsx import EXPORTER_PATH, read_first_sheet_rows

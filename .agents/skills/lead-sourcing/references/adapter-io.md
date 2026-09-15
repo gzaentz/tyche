@@ -18,7 +18,7 @@ research choices, not paths, route IDs or accounting envelopes.
 | `tyche_lookup` | `checks` (1–3): `target`, `phase`, `purpose`, `tool`, `inputs` | Cached live description, schema checks, whole-call bound where known, reservations, dispatch, receipts |
 | `tyche_review` | Changed company fields, evidence refs, explicit decisions/source reviews; optional observed `web` | Existing company updates, authoritative LinkedIn/email fields, bookkeeping |
 | `tyche_inspect` | No arguments, or `target`, `ref`, `tool`, `query`, `recover` | Compact state, saved request or detail, catalog search, local receipt recovery |
-| `tyche_finish` | No arguments for review; then `review_ref` and research `commentary` | Current evidence/writing packet, strict validation, workbook/readback/preview and run-cost links |
+| `tyche_finish` | No arguments for review; then `review_ref` and research `commentary` | Mechanical preflight, claims beside saved source excerpts, strict export/readback/preview and cost summary |
 
 At start, supply the LLM-selected `contact_role_groups` without repeating
 `requested_roles`; code saves their combined list. A request without groups still
@@ -26,6 +26,10 @@ needs `requested_roles`. Explicit conflicting lists remain errors.
 Save each requested signal's `importance` (`required` or `preferred`) and any
 supplied `product_service` with its `description` and `perspective` (`seller`
 or `target`). These are the LLM's interpretation of the current request.
+The launcher binds the original request file and saves its text once as
+`request.original_text`. Compare it with the interpretation before paid research.
+Every non-signal must-have belongs in `icp.required_attributes` and needs its own passing,
+required evidence check before contact work or delivery.
 
 New runs check the mandatory Harvest company/profile tools and price the email
 verification reserve through free catalog reads before initializing research.
@@ -36,8 +40,10 @@ it. A retry refreshes failed free catalog reads while preserving the clock.
 
 `target` is the canonical company domain or `discovery`. Phases are
 `account_discovery`, `account_verification`, `contact_discovery`,
-`contact_verification`, and `email_validation`. `provider` defaults to Deepline;
-for ScrapingDog, pass `provider: "scrapingdog"` and its wrapper input in `inputs`.
+`contact_verification`, and `email_validation`. `provider` defaults to Deepline.
+For recognized email finders and validators, omit `phase`; code derives it from
+the selected operation without changing providers or spending eligibility.
+For ScrapingDog, pass `provider: "scrapingdog"` and its wrapper input in `inputs`.
 `approach` may name a stable strategy. Unknown pricing still needs a verified
 whole-call `max_cost_credits`; ScrapingDog also needs its plan conversion at start.
 A caller-supplied bound cannot undercut a known catalog price. Code never chooses
@@ -68,8 +74,10 @@ Example review inputs, with references selected from actual results:
 
 Evidence refs expand into saved source/URL/date/text. Usually use `{"ref":"..."}`
 and put the qualification judgment in its `claim`, without copying source fields
-again. A signal check uses the saved request's `kind` as `signal`; omit its
-redundant `importance` because code supplies it. Put multiple supporting sources
+again. Inspect `requirements` and select an `attribute:N` or `signal:N` as a check's
+`requirement_ref`. Code supplies its label and importance; no separate registry
+or semantic matching service is used. For a new check, omit `criterion`, `signal`
+and `importance`. Put multiple supporting sources
 in that check's evidence array. Unknown kinds or conflicting importance are
 input errors, not new requirements. Aviato funding refs retain the supplied announcement date and round name;
 they do not decide which funding stage is current. Compatible `sources` decisions
@@ -114,7 +122,10 @@ Original research receipts are preserved.
 If only a pending or raw response survived, retain the reservation and reconcile
 it locally through diagnostics. Never retry an uncertain paid call. Explicit
 `sources` reviews retain the existing continuation/exhaustion rules; saving a
-company does not automatically exhaust its sources. A `valid` email on a catch-all
+company does not exhaust search results or pagination. Selecting and saving a
+successful single-result company getter, profile getter or email verdict closes
+that individual lookup automatically. Pending jobs and multi-result lookups
+retain explicit review. A `valid` email on a catch-all
 domain stays valid; fallback eligibility is checked before spending.
 
 Native email-validation results include `email_decisions`: receipt-derived
@@ -134,14 +145,27 @@ the saved run and recover receipts; do not resubmit uncertain paid work. A secon
 connection failure returns a clear operational block with its captured exit code.
 
 `tyche_finish` returns `needs_research`, `review_required`, `needs_repair` or
-validated artifact paths. On `review_required`, review the company's source
-meaning and writing in the returned packet, then pass its `review_ref`. Changes
+validated artifact paths. Mechanical errors and pending source reviews appear
+before a review reference is issued. On `review_required`, compare the company's
+claims with `sources`, which contains excerpts from the saved receipts, then
+review dates, meaning and writing before passing `review_ref`. Full excerpts are
+available through ordinary result inspection. `inspect(target=..., field="evidence_review")`
+provides the same view during account research. Changes
 to research invalidate that reference. Correct named errors through `tyche_review`
 and finish again. Source observations for accepted companies can still be saved
 after reaching the target; corrections preserve verified contacts and emails.
 The review approval is saved for that exact state. If export is interrupted,
 code can retry it once when the worker ends without repeating research or
 approving an unreviewed snapshot. Do not repeat unchanged failing calls.
+The success response includes a concise cost summary; final model usage is still
+refreshed by the launcher after exit. Use `inspect(field="costs")` for saved costs.
+
+Older abbreviated signal labels are not automatically guessed or accepted.
+On resume, inspect requirements and explicitly update the existing criterion
+with its selected `requirement_ref`, reviewed claim, status and existing evidence.
+Keep `criterion` unchanged to replace that check; omit the old `signal` label.
+This preserves the request, receipts and ledger while applying current evidence
+and date checks. An ambiguous or unsupported mapping remains unresolved.
 
 ## Diagnostic CLI
 
