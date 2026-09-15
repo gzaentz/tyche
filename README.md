@@ -1,5 +1,9 @@
 # TYCHE
 
+For the Codex integration that runs inside the Leadpoet lab, see
+[Leadpoet lab integration](docs/leadpoet-arena.md). It uses the lab runtime
+from subnet PR #198 and returns reviewed JSON through `harness.run_icp(icp)`.
+
 **Open-source lead sourcing with evidence, verified contacts, and spending controls.**
 
 TYCHE finds companies that match your ideal customer profile, checks the facts

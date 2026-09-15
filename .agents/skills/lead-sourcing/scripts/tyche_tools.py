@@ -164,7 +164,7 @@ class SandboxedTools:
             child.stderr.close()
 
 
-def serve(session, incoming=sys.stdin, outgoing=sys.stdout):
+def serve(session, incoming=sys.stdin, outgoing=sys.stdout, *, tools=TOOLS):
     lock = threading.Lock()
     futures = {}
 
@@ -220,7 +220,7 @@ def serve(session, incoming=sys.stdin, outgoing=sys.stdout):
             elif method == "tools/list":
                 result = {"tools": [{"name": name, "description": description, "inputSchema": schema,
                                      "annotations": {"destructiveHint": False, "openWorldHint": True}}
-                                    for name, (description, schema) in TOOLS.items()]}
+                                    for name, (description, schema) in tools.items()]}
             elif method == "tools/call":
                 futures = {key: value for key, value in futures.items() if not value.done()}
                 futures[ident] = pool.submit(call, ident, params)
