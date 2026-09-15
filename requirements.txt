@@ -1,3 +1,0 @@
-httpx>=0.27,<1
-pydantic-ai-slim[openrouter]==2.37.0
-geonamescache==3.0.2

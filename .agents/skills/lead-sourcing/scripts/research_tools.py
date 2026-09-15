@@ -167,12 +167,11 @@ def reference_paths(value, reference, path="input"):
 
 
 class ResearchTools:
-    def __init__(self, run_file, *, execute=None, readonly=False, environment=None, deliver=None):
+    def __init__(self, run_file, *, execute=None, readonly=False, environment=None):
         if Path(run_file).is_symlink():
             raise ValueError("Bound run file must be a regular file, not a symlink")
         self.path = Path(run_file).resolve()
         self.execute = execute
-        self.deliver = deliver
         self.readonly = readonly
         self.environment = dict(os.environ if environment is None else environment)
         self._billing_checked = False
@@ -1097,11 +1096,6 @@ class ResearchTools:
                 saved["final_review"] = {"review_ref": expected, "reviewed_at": datetime.now(timezone.utc).isoformat()}
                 return saved
             runner.mutate(self.path, approve)
-        if self.deliver is not None:
-            # Alternate delivery uses the same source review and strict gate.
-            # Keep workbook/runtime dependencies out of server integrations.
-            validation = runner.finalize_run(self.path)
-            return self.deliver(self.path, validation)
         if commentary is not None or not (self.path.parent / "research-commentary.md").exists():
             commentary = commentary or "No additional research commentary supplied."
             (self.path.parent / "research-commentary.md").write_text(commentary + "\n", encoding="utf-8")
