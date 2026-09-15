@@ -1,0 +1,4086 @@
+{
+  "leadpoet_revision": "4edd53afc483ac5679067b4e1eba871b59e0fda3",
+  "retrieved_at": "2026-09-15T16:01:33.986526+00:00",
+  "tools": {
+    "exa_answer": {
+      "toolId": "exa_answer",
+      "provider": "exa",
+      "description": "Getting a direct, citation-backed answer from web results | Exa answer input.",
+      "inputSchema": {
+        "description": "Exa answer input.",
+        "fields": [
+          {
+            "description": "Question to answer using web results.",
+            "name": "query",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Stream tokens as they are generated.",
+            "name": "stream",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Include full source text in citations.",
+            "name": "text",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "JSON Schema to return a structured answer. Supports arbitrary user-defined schema shape.",
+            "name": "outputSchema",
+            "required": false,
+            "type": "any"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Exa answer input.",
+          "properties": {
+            "outputSchema": {
+              "description": "JSON Schema to return a structured answer. Supports arbitrary user-defined schema shape.",
+              "type": "any"
+            },
+            "query": {
+              "description": "Question to answer using web results.",
+              "type": "string"
+            },
+            "stream": {
+              "description": "Stream tokens as they are generated.",
+              "type": "boolean"
+            },
+            "text": {
+              "description": "Include full source text in citations.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.07 Deepline credits / $0.007 per call",
+        "unit": "call",
+        "creditsPerUnit": 0.07,
+        "usdPerUnit": 0.007,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "exa_company_search": {
+      "toolId": "exa_company_search",
+      "provider": "exa",
+      "description": "Finding company-level signals and pages for target accounts through Exa entity search. Good for concept-driven company discovery, not for source-scoped or crisp filter-heavy ICP pulls. | Exa company search input.",
+      "inputSchema": {
+        "description": "Exa company search input.",
+        "fields": [
+          {
+            "name": "query",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Additional queries (used with type=\"deep\" to expand coverage).",
+            "name": "additionalQueries",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "name": "type",
+            "required": false,
+            "type": "\"auto\" | \"fast\" | \"deep\" | \"neural\" | \"instant\""
+          },
+          {
+            "description": "Number of results to return (max 100).",
+            "name": "numResults",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "includeDomains",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Exclude results from these domains.",
+            "name": "excludeDomains",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Two-letter ISO country code, e.g. \"US\".",
+            "name": "userLocation",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "contents",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "name": "context",
+            "required": false,
+            "type": "boolean | object"
+          },
+          {
+            "description": "Enable content moderation (may reduce recall).",
+            "name": "moderation",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Exa company search input.",
+          "properties": {
+            "additionalQueries": {
+              "description": "Additional queries (used with type=\"deep\" to expand coverage).",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "contents": {
+              "additionalProperties": false,
+              "properties": {
+                "context": {
+                  "anyOf": [
+                    {
+                      "description": "If true, returns a combined context string from results. Context strings often perform better than highlights for RAG.",
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Context string options. When enabled, combines all result contents into a single string.",
+                      "properties": {
+                        "maxCharacters": {
+                          "description": "Maximum characters for the combined context string. Exa recommends 10,000+ characters for best results.",
+                          "type": "number"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "extras": {
+                  "additionalProperties": false,
+                  "description": "Extra content options.",
+                  "properties": {
+                    "imageLinks": {
+                      "description": "Number of image links to return per result.",
+                      "type": "number"
+                    },
+                    "links": {
+                      "description": "Number of links to return per result.",
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                },
+                "highlights": {
+                  "anyOf": [
+                    {
+                      "description": "If true, returns highlight snippets with default settings (short evidence excerpts).",
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Advanced highlight extraction options.",
+                      "properties": {
+                        "highlightsPerUrl": {
+                          "description": "Number of highlight snippets per URL.",
+                          "type": "number"
+                        },
+                        "maxCharacters": {
+                          "description": "Maximum characters returned for highlights.",
+                          "type": "number"
+                        },
+                        "numSentences": {
+                          "description": "Number of sentences per highlight snippet.",
+                          "type": "number"
+                        },
+                        "query": {
+                          "description": "Custom query to guide highlight selection.",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "livecrawl": {
+                  "enum": [
+                    "never",
+                    "fallback",
+                    "preferred",
+                    "always"
+                  ],
+                  "type": "string"
+                },
+                "livecrawlTimeout": {
+                  "description": "Live crawl timeout in milliseconds.",
+                  "type": "number"
+                },
+                "maxAgeHours": {
+                  "description": "Max age (hours) for cached content before live crawl.",
+                  "type": "number"
+                },
+                "subpageTarget": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  ],
+                  "description": "Subpage keyword(s) to target."
+                },
+                "subpages": {
+                  "description": "Number of subpages to crawl from each result.",
+                  "type": "number"
+                },
+                "summary": {
+                  "additionalProperties": false,
+                  "description": "LLM-generated summary of each page (structured output supported).",
+                  "properties": {
+                    "query": {
+                      "description": "Custom query for the summary.",
+                      "type": "string"
+                    },
+                    "schema": {
+                      "additionalProperties": {},
+                      "description": "JSON Schema for structured summary output (validated).",
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "description": "If true, returns full page text with default settings. If false, disables text return.",
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Advanced text extraction options.",
+                      "properties": {
+                        "excludeSections": {
+                          "description": "Exclude content from these sections.",
+                          "items": {
+                            "enum": [
+                              "header",
+                              "navigation",
+                              "banner",
+                              "body",
+                              "sidebar",
+                              "footer",
+                              "metadata"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "includeHtmlTags": {
+                          "description": "Include HTML tags in the returned text.",
+                          "type": "boolean"
+                        },
+                        "includeSections": {
+                          "description": "Only include content from these sections.",
+                          "items": {
+                            "enum": [
+                              "header",
+                              "navigation",
+                              "banner",
+                              "body",
+                              "sidebar",
+                              "footer",
+                              "metadata"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "maxCharacters": {
+                          "description": "Maximum characters for full page text (use to cap response size).",
+                          "type": "number"
+                        },
+                        "verbosity": {
+                          "enum": [
+                            "compact",
+                            "standard",
+                            "full"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "context": {
+              "anyOf": [
+                {
+                  "description": "If true, returns a combined context string from results. Context strings often perform better than highlights for RAG.",
+                  "type": "boolean"
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "Context string options. When enabled, combines all result contents into a single string.",
+                  "properties": {
+                    "maxCharacters": {
+                      "description": "Maximum characters for the combined context string. Exa recommends 10,000+ characters for best results.",
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "excludeDomains": {
+              "description": "Exclude results from these domains.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "includeDomains": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "moderation": {
+              "description": "Enable content moderation (may reduce recall).",
+              "type": "boolean"
+            },
+            "numResults": {
+              "description": "Number of results to return (max 100).",
+              "type": "number"
+            },
+            "query": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "auto",
+                "fast",
+                "deep",
+                "neural",
+                "instant"
+              ],
+              "type": "string"
+            },
+            "userLocation": {
+              "description": "Two-letter ISO country code, e.g. \"US\".",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Calculated at execution time.",
+        "unit": "result",
+        "creditsPerUnit": null,
+        "usdPerUnit": null,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "exa_contents": {
+      "toolId": "exa_contents",
+      "provider": "exa",
+      "description": "Extracting page contents, summaries, and highlights from URLs | Exa contents input.",
+      "inputSchema": {
+        "description": "Exa contents input.",
+        "fields": [
+          {
+            "description": "URLs to fetch contents for (alias of ids).",
+            "name": "urls",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Document IDs (or URLs) to fetch contents for.",
+            "name": "ids",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "name": "text",
+            "required": false,
+            "type": "boolean | object"
+          },
+          {
+            "name": "highlights",
+            "required": false,
+            "type": "boolean | object"
+          },
+          {
+            "description": "LLM-generated summary of each page (structured output supported).",
+            "name": "summary",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "description": "Live crawl behavior (deprecated in Exa docs; prefer maxAgeHours).",
+            "name": "livecrawl",
+            "required": false,
+            "type": "\"never\" | \"fallback\" | \"preferred\" | \"always\""
+          },
+          {
+            "description": "Live crawl timeout in milliseconds.",
+            "name": "livecrawlTimeout",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "description": "Max age (hours) for cached content before live crawl.",
+            "name": "maxAgeHours",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "description": "Number of subpages to crawl from each result.",
+            "name": "subpages",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "description": "Subpage keyword(s) to target.",
+            "name": "subpageTarget",
+            "required": false,
+            "type": "string | array"
+          },
+          {
+            "description": "Extra content options.",
+            "name": "extras",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "description": "Return a combined context string. When true, combines all result contents into one string (10,000+ chars recommended).",
+            "name": "context",
+            "required": false,
+            "type": "boolean | object"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Exa contents input.",
+          "properties": {
+            "context": {
+              "anyOf": [
+                {
+                  "description": "If true, returns a combined context string from results. Context strings often perform better than highlights for RAG.",
+                  "type": "boolean"
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "Context string options. When enabled, combines all result contents into a single string.",
+                  "properties": {
+                    "maxCharacters": {
+                      "description": "Maximum characters for the combined context string. Exa recommends 10,000+ characters for best results.",
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                }
+              ],
+              "description": "Return a combined context string. When true, combines all result contents into one string (10,000+ chars recommended)."
+            },
+            "extras": {
+              "additionalProperties": false,
+              "description": "Extra content options.",
+              "properties": {
+                "imageLinks": {
+                  "description": "Number of image links to return per result.",
+                  "type": "number"
+                },
+                "links": {
+                  "description": "Number of links to return per result.",
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "highlights": {
+              "anyOf": [
+                {
+                  "description": "If true, returns highlight snippets with default settings (short evidence excerpts).",
+                  "type": "boolean"
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "Advanced highlight extraction options.",
+                  "properties": {
+                    "highlightsPerUrl": {
+                      "description": "Number of highlight snippets per URL.",
+                      "type": "number"
+                    },
+                    "maxCharacters": {
+                      "description": "Maximum characters returned for highlights.",
+                      "type": "number"
+                    },
+                    "numSentences": {
+                      "description": "Number of sentences per highlight snippet.",
+                      "type": "number"
+                    },
+                    "query": {
+                      "description": "Custom query to guide highlight selection.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "ids": {
+              "description": "Document IDs (or URLs) to fetch contents for.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "livecrawl": {
+              "description": "Live crawl behavior (deprecated in Exa docs; prefer maxAgeHours).",
+              "enum": [
+                "never",
+                "fallback",
+                "preferred",
+                "always"
+              ],
+              "type": "string"
+            },
+            "livecrawlTimeout": {
+              "description": "Live crawl timeout in milliseconds.",
+              "type": "number"
+            },
+            "maxAgeHours": {
+              "description": "Max age (hours) for cached content before live crawl.",
+              "type": "number"
+            },
+            "subpageTarget": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ],
+              "description": "Subpage keyword(s) to target."
+            },
+            "subpages": {
+              "description": "Number of subpages to crawl from each result.",
+              "type": "number"
+            },
+            "summary": {
+              "additionalProperties": false,
+              "description": "LLM-generated summary of each page (structured output supported).",
+              "properties": {
+                "query": {
+                  "description": "Custom query for the summary.",
+                  "type": "string"
+                },
+                "schema": {
+                  "additionalProperties": {},
+                  "description": "JSON Schema for structured summary output (validated).",
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "text": {
+              "anyOf": [
+                {
+                  "description": "If true, returns full page text with default settings. If false, disables text return.",
+                  "type": "boolean"
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "Advanced text extraction options.",
+                  "properties": {
+                    "excludeSections": {
+                      "description": "Exclude content from these sections.",
+                      "items": {
+                        "enum": [
+                          "header",
+                          "navigation",
+                          "banner",
+                          "body",
+                          "sidebar",
+                          "footer",
+                          "metadata"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "includeHtmlTags": {
+                      "description": "Include HTML tags in the returned text.",
+                      "type": "boolean"
+                    },
+                    "includeSections": {
+                      "description": "Only include content from these sections.",
+                      "items": {
+                        "enum": [
+                          "header",
+                          "navigation",
+                          "banner",
+                          "body",
+                          "sidebar",
+                          "footer",
+                          "metadata"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "maxCharacters": {
+                      "description": "Maximum characters for full page text (use to cap response size).",
+                      "type": "number"
+                    },
+                    "verbosity": {
+                      "enum": [
+                        "compact",
+                        "standard",
+                        "full"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "urls": {
+              "description": "URLs to fetch contents for (alias of ids).",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Calculated at execution time.",
+        "unit": "result",
+        "creditsPerUnit": null,
+        "usdPerUnit": null,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "exa_people_search": {
+      "toolId": "exa_people_search",
+      "provider": "exa",
+      "description": "Finding people-related pages and profile evidence. Especially useful on tiny startups where classic people databases are thin, but results are candidate entities that still need title/work-history validation. | Exa people search input.",
+      "inputSchema": {
+        "description": "Exa people search input.",
+        "fields": [
+          {
+            "name": "query",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Target company name. When provided, appended to the query for better relevance (e.g. \"CTO at Acme Corp\"). Also included in the response meta for downstream validation.",
+            "name": "company_name",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Additional queries (used with type=\"deep\" to expand coverage).",
+            "name": "additionalQueries",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "name": "type",
+            "required": false,
+            "type": "\"auto\" | \"fast\" | \"deep\" | \"neural\" | \"instant\""
+          },
+          {
+            "description": "Number of results to return (max 100).",
+            "name": "numResults",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "includeDomains",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Exclude results from these domains.",
+            "name": "excludeDomains",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Two-letter ISO country code, e.g. \"US\".",
+            "name": "userLocation",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "contents",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "name": "context",
+            "required": false,
+            "type": "boolean | object"
+          },
+          {
+            "description": "Enable content moderation (may reduce recall).",
+            "name": "moderation",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Exa people search input.",
+          "properties": {
+            "additionalQueries": {
+              "description": "Additional queries (used with type=\"deep\" to expand coverage).",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "company_name": {
+              "description": "Target company name. When provided, appended to the query for better relevance (e.g. \"CTO at Acme Corp\"). Also included in the response meta for downstream validation.",
+              "type": "string"
+            },
+            "contents": {
+              "additionalProperties": false,
+              "properties": {
+                "context": {
+                  "anyOf": [
+                    {
+                      "description": "If true, returns a combined context string from results. Context strings often perform better than highlights for RAG.",
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Context string options. When enabled, combines all result contents into a single string.",
+                      "properties": {
+                        "maxCharacters": {
+                          "description": "Maximum characters for the combined context string. Exa recommends 10,000+ characters for best results.",
+                          "type": "number"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "extras": {
+                  "additionalProperties": false,
+                  "description": "Extra content options.",
+                  "properties": {
+                    "imageLinks": {
+                      "description": "Number of image links to return per result.",
+                      "type": "number"
+                    },
+                    "links": {
+                      "description": "Number of links to return per result.",
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                },
+                "highlights": {
+                  "anyOf": [
+                    {
+                      "description": "If true, returns highlight snippets with default settings (short evidence excerpts).",
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Advanced highlight extraction options.",
+                      "properties": {
+                        "highlightsPerUrl": {
+                          "description": "Number of highlight snippets per URL.",
+                          "type": "number"
+                        },
+                        "maxCharacters": {
+                          "description": "Maximum characters returned for highlights.",
+                          "type": "number"
+                        },
+                        "numSentences": {
+                          "description": "Number of sentences per highlight snippet.",
+                          "type": "number"
+                        },
+                        "query": {
+                          "description": "Custom query to guide highlight selection.",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "livecrawl": {
+                  "enum": [
+                    "never",
+                    "fallback",
+                    "preferred",
+                    "always"
+                  ],
+                  "type": "string"
+                },
+                "livecrawlTimeout": {
+                  "description": "Live crawl timeout in milliseconds.",
+                  "type": "number"
+                },
+                "maxAgeHours": {
+                  "description": "Max age (hours) for cached content before live crawl.",
+                  "type": "number"
+                },
+                "subpageTarget": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  ],
+                  "description": "Subpage keyword(s) to target."
+                },
+                "subpages": {
+                  "description": "Number of subpages to crawl from each result.",
+                  "type": "number"
+                },
+                "summary": {
+                  "additionalProperties": false,
+                  "description": "LLM-generated summary of each page (structured output supported).",
+                  "properties": {
+                    "query": {
+                      "description": "Custom query for the summary.",
+                      "type": "string"
+                    },
+                    "schema": {
+                      "additionalProperties": {},
+                      "description": "JSON Schema for structured summary output (validated).",
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "description": "If true, returns full page text with default settings. If false, disables text return.",
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Advanced text extraction options.",
+                      "properties": {
+                        "excludeSections": {
+                          "description": "Exclude content from these sections.",
+                          "items": {
+                            "enum": [
+                              "header",
+                              "navigation",
+                              "banner",
+                              "body",
+                              "sidebar",
+                              "footer",
+                              "metadata"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "includeHtmlTags": {
+                          "description": "Include HTML tags in the returned text.",
+                          "type": "boolean"
+                        },
+                        "includeSections": {
+                          "description": "Only include content from these sections.",
+                          "items": {
+                            "enum": [
+                              "header",
+                              "navigation",
+                              "banner",
+                              "body",
+                              "sidebar",
+                              "footer",
+                              "metadata"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "maxCharacters": {
+                          "description": "Maximum characters for full page text (use to cap response size).",
+                          "type": "number"
+                        },
+                        "verbosity": {
+                          "enum": [
+                            "compact",
+                            "standard",
+                            "full"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "context": {
+              "anyOf": [
+                {
+                  "description": "If true, returns a combined context string from results. Context strings often perform better than highlights for RAG.",
+                  "type": "boolean"
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "Context string options. When enabled, combines all result contents into a single string.",
+                  "properties": {
+                    "maxCharacters": {
+                      "description": "Maximum characters for the combined context string. Exa recommends 10,000+ characters for best results.",
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "excludeDomains": {
+              "description": "Exclude results from these domains.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "includeDomains": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "moderation": {
+              "description": "Enable content moderation (may reduce recall).",
+              "type": "boolean"
+            },
+            "numResults": {
+              "description": "Number of results to return (max 100).",
+              "type": "number"
+            },
+            "query": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "auto",
+                "fast",
+                "deep",
+                "neural",
+                "instant"
+              ],
+              "type": "string"
+            },
+            "userLocation": {
+              "description": "Two-letter ISO country code, e.g. \"US\".",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Calculated at execution time.",
+        "unit": "result",
+        "creditsPerUnit": null,
+        "usdPerUnit": null,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "exa_search": {
+      "toolId": "exa_search",
+      "provider": "exa",
+      "description": "General web search with Exa ranking and freshness controls. Best for concept-driven discovery and source-finding; expect noisy recall, and do not combine category-based entity search with includeDomains/includeText source scoping. | Exa raw search input.",
+      "inputSchema": {
+        "description": "Exa raw search input.",
+        "fields": [
+          {
+            "description": "The search query string.",
+            "name": "query",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Additional queries (used with type=\"deep\" to expand coverage).",
+            "name": "additionalQueries",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Search type (auto chooses the best strategy).",
+            "name": "type",
+            "required": false,
+            "type": "\"auto\" | \"fast\" | \"deep\" | \"neural\" | \"instant\""
+          },
+          {
+            "description": "Optional result category filter.",
+            "name": "category",
+            "required": false,
+            "type": "\"company\" | \"people\" | \"news\" | \"research paper\" | \"tweet\" | \"personal site\" | \"financial report\""
+          },
+          {
+            "description": "Number of results to return (max 100).",
+            "name": "numResults",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "description": "Only include results from these domains.",
+            "name": "includeDomains",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Exclude results from these domains.",
+            "name": "excludeDomains",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Only include links crawled after this ISO date-time.",
+            "name": "startCrawlDate",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Only include links crawled before this ISO date-time.",
+            "name": "endCrawlDate",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Only include links published after this ISO date-time.",
+            "name": "startPublishedDate",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Only include links published before this ISO date-time.",
+            "name": "endPublishedDate",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Require these text snippets to appear in page content (max 1 string of up to 5 words).",
+            "name": "includeText",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Exclude pages containing these text snippets (max 1 string of up to 5 words).",
+            "name": "excludeText",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Two-letter ISO country code, e.g. \"US\".",
+            "name": "userLocation",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "contents",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "name": "context",
+            "required": false,
+            "type": "boolean | object"
+          },
+          {
+            "description": "Enable content moderation (may reduce recall).",
+            "name": "moderation",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Exa raw search input.",
+          "properties": {
+            "additionalQueries": {
+              "description": "Additional queries (used with type=\"deep\" to expand coverage).",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "category": {
+              "description": "Optional result category filter.",
+              "enum": [
+                "company",
+                "people",
+                "news",
+                "research paper",
+                "tweet",
+                "personal site",
+                "financial report"
+              ],
+              "type": "string"
+            },
+            "contents": {
+              "additionalProperties": false,
+              "properties": {
+                "context": {
+                  "anyOf": [
+                    {
+                      "description": "If true, returns a combined context string from results. Context strings often perform better than highlights for RAG.",
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Context string options. When enabled, combines all result contents into a single string.",
+                      "properties": {
+                        "maxCharacters": {
+                          "description": "Maximum characters for the combined context string. Exa recommends 10,000+ characters for best results.",
+                          "type": "number"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "extras": {
+                  "additionalProperties": false,
+                  "description": "Extra content options.",
+                  "properties": {
+                    "imageLinks": {
+                      "description": "Number of image links to return per result.",
+                      "type": "number"
+                    },
+                    "links": {
+                      "description": "Number of links to return per result.",
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                },
+                "highlights": {
+                  "anyOf": [
+                    {
+                      "description": "If true, returns highlight snippets with default settings (short evidence excerpts).",
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Advanced highlight extraction options.",
+                      "properties": {
+                        "highlightsPerUrl": {
+                          "description": "Number of highlight snippets per URL.",
+                          "type": "number"
+                        },
+                        "maxCharacters": {
+                          "description": "Maximum characters returned for highlights.",
+                          "type": "number"
+                        },
+                        "numSentences": {
+                          "description": "Number of sentences per highlight snippet.",
+                          "type": "number"
+                        },
+                        "query": {
+                          "description": "Custom query to guide highlight selection.",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                },
+                "livecrawl": {
+                  "enum": [
+                    "never",
+                    "fallback",
+                    "preferred",
+                    "always"
+                  ],
+                  "type": "string"
+                },
+                "livecrawlTimeout": {
+                  "description": "Live crawl timeout in milliseconds.",
+                  "type": "number"
+                },
+                "maxAgeHours": {
+                  "description": "Max age (hours) for cached content before live crawl.",
+                  "type": "number"
+                },
+                "subpageTarget": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  ],
+                  "description": "Subpage keyword(s) to target."
+                },
+                "subpages": {
+                  "description": "Number of subpages to crawl from each result.",
+                  "type": "number"
+                },
+                "summary": {
+                  "additionalProperties": false,
+                  "description": "LLM-generated summary of each page (structured output supported).",
+                  "properties": {
+                    "query": {
+                      "description": "Custom query for the summary.",
+                      "type": "string"
+                    },
+                    "schema": {
+                      "additionalProperties": {},
+                      "description": "JSON Schema for structured summary output (validated).",
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "description": "If true, returns full page text with default settings. If false, disables text return.",
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "Advanced text extraction options.",
+                      "properties": {
+                        "excludeSections": {
+                          "description": "Exclude content from these sections.",
+                          "items": {
+                            "enum": [
+                              "header",
+                              "navigation",
+                              "banner",
+                              "body",
+                              "sidebar",
+                              "footer",
+                              "metadata"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "includeHtmlTags": {
+                          "description": "Include HTML tags in the returned text.",
+                          "type": "boolean"
+                        },
+                        "includeSections": {
+                          "description": "Only include content from these sections.",
+                          "items": {
+                            "enum": [
+                              "header",
+                              "navigation",
+                              "banner",
+                              "body",
+                              "sidebar",
+                              "footer",
+                              "metadata"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "maxCharacters": {
+                          "description": "Maximum characters for full page text (use to cap response size).",
+                          "type": "number"
+                        },
+                        "verbosity": {
+                          "enum": [
+                            "compact",
+                            "standard",
+                            "full"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            "context": {
+              "anyOf": [
+                {
+                  "description": "If true, returns a combined context string from results. Context strings often perform better than highlights for RAG.",
+                  "type": "boolean"
+                },
+                {
+                  "additionalProperties": false,
+                  "description": "Context string options. When enabled, combines all result contents into a single string.",
+                  "properties": {
+                    "maxCharacters": {
+                      "description": "Maximum characters for the combined context string. Exa recommends 10,000+ characters for best results.",
+                      "type": "number"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "endCrawlDate": {
+              "description": "Only include links crawled before this ISO date-time.",
+              "type": "string"
+            },
+            "endPublishedDate": {
+              "description": "Only include links published before this ISO date-time.",
+              "type": "string"
+            },
+            "excludeDomains": {
+              "description": "Exclude results from these domains.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "excludeText": {
+              "description": "Exclude pages containing these text snippets (max 1 string of up to 5 words).",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1,
+              "type": "array"
+            },
+            "includeDomains": {
+              "description": "Only include results from these domains.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "includeText": {
+              "description": "Require these text snippets to appear in page content (max 1 string of up to 5 words).",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1,
+              "type": "array"
+            },
+            "moderation": {
+              "description": "Enable content moderation (may reduce recall).",
+              "type": "boolean"
+            },
+            "numResults": {
+              "description": "Number of results to return (max 100).",
+              "type": "number"
+            },
+            "query": {
+              "description": "The search query string.",
+              "type": "string"
+            },
+            "startCrawlDate": {
+              "description": "Only include links crawled after this ISO date-time.",
+              "type": "string"
+            },
+            "startPublishedDate": {
+              "description": "Only include links published after this ISO date-time.",
+              "type": "string"
+            },
+            "type": {
+              "description": "Search type (auto chooses the best strategy).",
+              "enum": [
+                "auto",
+                "fast",
+                "deep",
+                "neural",
+                "instant"
+              ],
+              "type": "string"
+            },
+            "userLocation": {
+              "description": "Two-letter ISO country code, e.g. \"US\".",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Calculated at execution time.",
+        "unit": "result",
+        "creditsPerUnit": null,
+        "usdPerUnit": null,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "firecrawl_scrape": {
+      "toolId": "firecrawl_scrape",
+      "provider": "firecrawl",
+      "description": "Scraping a single URL and extracting content as markdown, HTML, or structured data | Scrape a single URL and return content in specified formats.",
+      "inputSchema": {
+        "description": "Scrape a single URL and return content in specified formats.",
+        "fields": [
+          {
+            "description": "URL to scrape",
+            "name": "url",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Do not store any data (default false)",
+            "name": "zeroDataRetention",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Output formats (default [{\"type\":\"markdown\"}])",
+            "name": "formats",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Only return main content, filtering navs/footers",
+            "name": "onlyMainContent",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Only include these HTML tags",
+            "name": "includeTags",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Exclude these HTML tags",
+            "name": "excludeTags",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Custom HTTP headers",
+            "name": "headers",
+            "required": false,
+            "type": "record"
+          },
+          {
+            "description": "Wait ms after page load before scraping",
+            "name": "waitFor",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "description": "Use mobile user agent",
+            "name": "mobile",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Request timeout in ms (default 30000, max 300000)",
+            "name": "timeout",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "description": "Max cache age in ms (default 172800000)",
+            "name": "maxAge",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "description": "Store result in cache (default true)",
+            "name": "storeInCache",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Document parsers (e.g. PDF)",
+            "name": "parsers",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Browser actions to execute before scraping",
+            "name": "actions",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Geographic location settings",
+            "name": "location",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "description": "Proxy mode",
+            "name": "proxy",
+            "required": false,
+            "type": "\"basic\" | \"enhanced\" | \"auto\""
+          },
+          {
+            "description": "Block ads during scraping",
+            "name": "blockAds",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Strip base64 images from output",
+            "name": "removeBase64Images",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Skip TLS certificate verification",
+            "name": "skipTlsVerification",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Scrape a single URL and return content in specified formats.",
+          "properties": {
+            "actions": {
+              "description": "Browser actions to execute before scraping",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "description": "Scroll amount in pixels",
+                    "type": "number"
+                  },
+                  "direction": {
+                    "description": "Scroll direction",
+                    "enum": [
+                      "up",
+                      "down"
+                    ],
+                    "type": "string"
+                  },
+                  "format": {
+                    "description": "PDF page format",
+                    "enum": [
+                      "A0",
+                      "A1",
+                      "A2",
+                      "A3",
+                      "A4",
+                      "A5",
+                      "A6",
+                      "Letter",
+                      "Legal",
+                      "Tabloid",
+                      "Ledger"
+                    ],
+                    "type": "string"
+                  },
+                  "fullPage": {
+                    "description": "Full-page screenshot",
+                    "type": "boolean"
+                  },
+                  "key": {
+                    "description": "Key to press",
+                    "type": "string"
+                  },
+                  "landscape": {
+                    "description": "PDF landscape orientation",
+                    "type": "boolean"
+                  },
+                  "milliseconds": {
+                    "description": "Wait time in milliseconds",
+                    "type": "number"
+                  },
+                  "scale": {
+                    "description": "PDF scale factor (0.1-2)",
+                    "type": "number"
+                  },
+                  "script": {
+                    "description": "JavaScript to execute",
+                    "type": "string"
+                  },
+                  "selector": {
+                    "description": "CSS selector for the element",
+                    "type": "string"
+                  },
+                  "text": {
+                    "description": "Text to write",
+                    "type": "string"
+                  },
+                  "type": {
+                    "description": "Browser action type",
+                    "enum": [
+                      "wait",
+                      "click",
+                      "write",
+                      "press",
+                      "screenshot",
+                      "scroll",
+                      "pdf",
+                      "scrape",
+                      "executeJavascript"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "blockAds": {
+              "description": "Block ads during scraping",
+              "type": "boolean"
+            },
+            "excludeTags": {
+              "description": "Exclude these HTML tags",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "formats": {
+              "description": "Output formats (default [{\"type\":\"markdown\"}])",
+              "items": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "markdown",
+                      "summary",
+                      "html",
+                      "rawHtml",
+                      "links",
+                      "images",
+                      "screenshot",
+                      "json",
+                      "changeTracking",
+                      "branding"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "markdown",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "summary",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "html",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "rawHtml",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "links",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "images",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "fullPage": {
+                        "description": "Capture full page screenshot",
+                        "type": "boolean"
+                      },
+                      "quality": {
+                        "description": "Screenshot quality 0-100",
+                        "type": "integer"
+                      },
+                      "type": {
+                        "const": "screenshot",
+                        "type": "string"
+                      },
+                      "viewport": {
+                        "additionalProperties": false,
+                        "description": "Custom viewport size",
+                        "properties": {
+                          "height": {
+                            "type": "integer"
+                          },
+                          "width": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "prompt": {
+                        "description": "Natural language extraction instructions",
+                        "type": "string"
+                      },
+                      "schema": {
+                        "additionalProperties": {},
+                        "description": "JSON schema for structured output",
+                        "type": "object"
+                      },
+                      "type": {
+                        "const": "json",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "modes": {
+                        "description": "Change tracking modes",
+                        "items": {
+                          "enum": [
+                            "git-diff",
+                            "json"
+                          ],
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "prompt": {
+                        "description": "Instructions for change tracking",
+                        "type": "string"
+                      },
+                      "schema": {
+                        "additionalProperties": {},
+                        "description": "Schema for tracked changes",
+                        "type": "object"
+                      },
+                      "tag": {
+                        "description": "Tag for this change tracking snapshot",
+                        "type": "string"
+                      },
+                      "type": {
+                        "const": "changeTracking",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "branding",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Custom HTTP headers",
+              "type": "object"
+            },
+            "includeTags": {
+              "description": "Only include these HTML tags",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "location": {
+              "additionalProperties": false,
+              "description": "Geographic location settings",
+              "properties": {
+                "country": {
+                  "description": "Country code (e.g. \"US\")",
+                  "type": "string"
+                },
+                "languages": {
+                  "description": "Language codes",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "maxAge": {
+              "description": "Max cache age in ms (default 172800000)",
+              "type": "integer"
+            },
+            "mobile": {
+              "description": "Use mobile user agent",
+              "type": "boolean"
+            },
+            "onlyMainContent": {
+              "description": "Only return main content, filtering navs/footers",
+              "type": "boolean"
+            },
+            "parsers": {
+              "description": "Document parsers (e.g. PDF)",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "maxPages": {
+                    "description": "Max pages to parse (1-10000)",
+                    "type": "integer"
+                  },
+                  "mode": {
+                    "description": "PDF parsing mode",
+                    "enum": [
+                      "fast",
+                      "auto",
+                      "ocr"
+                    ],
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "pdf",
+                    "description": "Parser type",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "proxy": {
+              "description": "Proxy mode",
+              "enum": [
+                "basic",
+                "enhanced",
+                "auto"
+              ],
+              "type": "string"
+            },
+            "removeBase64Images": {
+              "description": "Strip base64 images from output",
+              "type": "boolean"
+            },
+            "skipTlsVerification": {
+              "description": "Skip TLS certificate verification",
+              "type": "boolean"
+            },
+            "storeInCache": {
+              "description": "Store result in cache (default true)",
+              "type": "boolean"
+            },
+            "timeout": {
+              "description": "Request timeout in ms (default 30000, max 300000)",
+              "type": "number"
+            },
+            "url": {
+              "description": "URL to scrape",
+              "type": "string"
+            },
+            "waitFor": {
+              "description": "Wait ms after page load before scraping",
+              "type": "number"
+            },
+            "zeroDataRetention": {
+              "description": "Do not store any data (default false)",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Base scrape is 0.02 Deepline credits per page.",
+        "unit": "call",
+        "creditsPerUnit": null,
+        "usdPerUnit": null,
+        "currency": "USD",
+        "summary": "Base scrape is 0.02 Deepline credits per page.",
+        "details": [
+          "JSON format and enhanced mode each add about 0.05 Deepline credits per page.",
+          "PDF parsing and Zero Data Retention each add about 0.02 Deepline credits per page or PDF page.",
+          "Final price is calculated from request options and exact returned usage when available."
+        ]
+      },
+      "callable": true
+    },
+    "free_simple_company_search": {
+      "toolId": "free_simple_company_search",
+      "provider": "deepline_native",
+      "description": "Searching the shared free company corpus with a constrained where_sql expression over the companies schema. | Run a single read-only SQL statement against the shared Snowflake-backed free company corpus (~35M companies).\nSchema (table: companies):\nnormalized_domain text \u2014 lowercase root domain (e.g. 'openai.com')\ndomain text \u2014 original domain as-is\ncompany_name text \u2014 company name (NOT NULL)\nindustry text \u2014 e.g. 'computer software', 'financial services', 'hospital & health care'\nlocation text \u2014 comma-separated: locality, region, country (e.g. 'san francisco, california, united states')\nlinkedin_url text \u2014 LinkedIn company URL slug\nemployee_count integer \u2014 upper bound of size bucket (10, 50, 200, 500, 1000, 5000, 10000+)\nyear_founded integer \u2014 e.g. 2015\nupdated_at timestamp\nGuidance:\nPrefer exact company resolution with normalized_domain when you have a website/domain.\nExact normalized_domain equality/IN lookups are the fastest path for known domains.\nUse linkedin_url and company_name equality/IN for small lookup batches; very large batches may still hit the query timeout.\nIf an exact lookup misses, use anchored prefix searches such as company_name ILIKE 'acme%' to generate fallback candidates.\nPlain ILIKE '%keyword%' over broad fields is legal SQL on the Snowflake-backed corpus, but it can still scan the 35M-row table.\nUse dedicated company search providers when you need provider-native facets, live web coverage, or strict market sizing totals.\nVerify the returned company before assuming it is the same entity.\nExample queries:\nSELECT * FROM companies WHERE normalized_domain = 'openai.com' LIMIT 5\nSELECT * FROM companies WHERE normalized_domain IN ('openai.com','anthropic.com') LIMIT 10\nSELECT * FROM companies WHERE linkedin_url IN ('linkedin.com/company/openai') LIMIT 5\nSELECT * FROM companies WHERE company_name ILIKE 'nestle%' LIMIT 10\nSELECT * FROM companies WHERE industry = 'computer software' AND employee_count > 50 LIMIT 100\nSELECT industry, count(*) as cnt FROM companies GROUP BY industry ORDER BY cnt DESC LIMIT 25\nSELECT * FROM companies WHERE location ILIKE 'san francisco%' AND year_founded >= 2020 LIMIT 100\nSupports SELECT, aggregates, GROUP BY, WITH CTEs, and EXPLAIN. SQL must include LIMIT <= 100000.\nBest for company retrieval, shortlist building, exact segment counts, and domain-to-company recovery when exact lookups miss.",
+      "inputSchema": {
+        "description": "Run a single read-only SQL statement against the shared Snowflake-backed free company corpus (~35M companies).\nSchema (table: companies):\nnormalized_domain text \u2014 lowercase root domain (e.g. 'openai.com')\ndomain text \u2014 original domain as-is\ncompany_name text \u2014 company name (NOT NULL)\nindustry text \u2014 e.g. 'computer software', 'financial services', 'hospital & health care'\nlocation text \u2014 comma-separated: locality, region, country (e.g. 'san francisco, california, united states')\nlinkedin_url text \u2014 LinkedIn company URL slug\nemployee_count integer \u2014 upper bound of size bucket (10, 50, 200, 500, 1000, 5000, 10000+)\nyear_founded integer \u2014 e.g. 2015\nupdated_at timestamp\nGuidance:\nPrefer exact company resolution with normalized_domain when you have a website/domain.\nExact normalized_domain equality/IN lookups are the fastest path for known domains.\nUse linkedin_url and company_name equality/IN for small lookup batches; very large batches may still hit the query timeout.\nIf an exact lookup misses, use anchored prefix searches such as company_name ILIKE 'acme%' to generate fallback candidates.\nPlain ILIKE '%keyword%' over broad fields is legal SQL on the Snowflake-backed corpus, but it can still scan the 35M-row table.\nUse dedicated company search providers when you need provider-native facets, live web coverage, or strict market sizing totals.\nVerify the returned company before assuming it is the same entity.\nExample queries:\nSELECT * FROM companies WHERE normalized_domain = 'openai.com' LIMIT 5\nSELECT * FROM companies WHERE normalized_domain IN ('openai.com','anthropic.com') LIMIT 10\nSELECT * FROM companies WHERE linkedin_url IN ('linkedin.com/company/openai') LIMIT 5\nSELECT * FROM companies WHERE company_name ILIKE 'nestle%' LIMIT 10\nSELECT * FROM companies WHERE industry = 'computer software' AND employee_count > 50 LIMIT 100\nSELECT industry, count(*) as cnt FROM companies GROUP BY industry ORDER BY cnt DESC LIMIT 25\nSELECT * FROM companies WHERE location ILIKE 'san francisco%' AND year_founded >= 2020 LIMIT 100\nSupports SELECT, aggregates, GROUP BY, WITH CTEs, and EXPLAIN. SQL must include LIMIT <= 100000.\nBest for company retrieval, shortlist building, exact segment counts, and domain-to-company recovery when exact lookups miss.",
+        "fields": [
+          {
+            "description": "Single read-only SQL statement against the Snowflake-backed companies table (~35M rows). Columns: normalized_domain, domain, company_name, industry, location, linkedin_url, employee_count (integer), year_founded (integer), updated_at. Prefer exact normalized_domain equality or IN lookups when you have domains. Use linkedin_url and company_name equality/IN for small lookup batches. For fallback candidates, prefer anchored prefixes like company_name ILIKE 'acme%'. Broad unanchored ILIKE '%keyword%' scans are legal but can scan the full corpus; use dedicated company search providers for broad keyword discovery or strict market sizing. Supports SELECT, aggregates, GROUP BY, CTEs, EXPLAIN. SQL must include LIMIT <= 100000. Example: SELECT * FROM companies WHERE normalized_domain IN ('openai.com','anthropic.com') LIMIT 10",
+            "name": "sql",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Run a single read-only SQL statement against the shared Snowflake-backed free company corpus (~35M companies).\nSchema (table: companies):\nnormalized_domain text \u2014 lowercase root domain (e.g. 'openai.com')\ndomain text \u2014 original domain as-is\ncompany_name text \u2014 company name (NOT NULL)\nindustry text \u2014 e.g. 'computer software', 'financial services', 'hospital & health care'\nlocation text \u2014 comma-separated: locality, region, country (e.g. 'san francisco, california, united states')\nlinkedin_url text \u2014 LinkedIn company URL slug\nemployee_count integer \u2014 upper bound of size bucket (10, 50, 200, 500, 1000, 5000, 10000+)\nyear_founded integer \u2014 e.g. 2015\nupdated_at timestamp\nGuidance:\nPrefer exact company resolution with normalized_domain when you have a website/domain.\nExact normalized_domain equality/IN lookups are the fastest path for known domains.\nUse linkedin_url and company_name equality/IN for small lookup batches; very large batches may still hit the query timeout.\nIf an exact lookup misses, use anchored prefix searches such as company_name ILIKE 'acme%' to generate fallback candidates.\nPlain ILIKE '%keyword%' over broad fields is legal SQL on the Snowflake-backed corpus, but it can still scan the 35M-row table.\nUse dedicated company search providers when you need provider-native facets, live web coverage, or strict market sizing totals.\nVerify the returned company before assuming it is the same entity.\nExample queries:\nSELECT * FROM companies WHERE normalized_domain = 'openai.com' LIMIT 5\nSELECT * FROM companies WHERE normalized_domain IN ('openai.com','anthropic.com') LIMIT 10\nSELECT * FROM companies WHERE linkedin_url IN ('linkedin.com/company/openai') LIMIT 5\nSELECT * FROM companies WHERE company_name ILIKE 'nestle%' LIMIT 10\nSELECT * FROM companies WHERE industry = 'computer software' AND employee_count > 50 LIMIT 100\nSELECT industry, count(*) as cnt FROM companies GROUP BY industry ORDER BY cnt DESC LIMIT 25\nSELECT * FROM companies WHERE location ILIKE 'san francisco%' AND year_founded >= 2020 LIMIT 100\nSupports SELECT, aggregates, GROUP BY, WITH CTEs, and EXPLAIN. SQL must include LIMIT <= 100000.\nBest for company retrieval, shortlist building, exact segment counts, and domain-to-company recovery when exact lookups miss.",
+          "properties": {
+            "sql": {
+              "description": "Single read-only SQL statement against the Snowflake-backed companies table (~35M rows). Columns: normalized_domain, domain, company_name, industry, location, linkedin_url, employee_count (integer), year_founded (integer), updated_at. Prefer exact normalized_domain equality or IN lookups when you have domains. Use linkedin_url and company_name equality/IN for small lookup batches. For fallback candidates, prefer anchored prefixes like company_name ILIKE 'acme%'. Broad unanchored ILIKE '%keyword%' scans are legal but can scan the full corpus; use dedicated company search providers for broad keyword discovery or strict market sizing. Supports SELECT, aggregates, GROUP BY, CTEs, EXPLAIN. SQL must include LIMIT <= 100000. Example: SELECT * FROM companies WHERE normalized_domain IN ('openai.com','anthropic.com') LIMIT 10",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "sql"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Free",
+        "unit": "call",
+        "creditsPerUnit": 0,
+        "usdPerUnit": 0,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "generic_http_request": {
+      "toolId": "generic_http_request",
+      "provider": "generic_http",
+      "description": "Calling a public API directly with custom HTTP method, headers, cookies, query params, and body.",
+      "inputSchema": {
+        "fields": [
+          {
+            "description": "Absolute http/https URL to call. Private and localhost targets are blocked. Auth-like request values require https.",
+            "name": "url",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "HTTP method. Defaults to GET.",
+            "name": "method",
+            "required": false,
+            "type": "\"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\" | \"HEAD\" | \"OPTIONS\""
+          },
+          {
+            "name": "query",
+            "required": false,
+            "type": "record"
+          },
+          {
+            "description": "Additional request headers. Transport headers like Host are blocked. Auth-like headers require https and reflected values are redacted from results.",
+            "name": "headers",
+            "required": false,
+            "type": "record"
+          },
+          {
+            "description": "Cookie key/value pairs serialized into the Cookie header. Cookies require https and reflected values are redacted from results.",
+            "name": "cookies",
+            "required": false,
+            "type": "record"
+          },
+          {
+            "description": "JSON-serializable request body. Auth-like fields require https and reflected values are redacted from results.",
+            "name": "body_json",
+            "required": false,
+            "type": "unknown"
+          },
+          {
+            "description": "Raw text request body.",
+            "name": "body_text",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "body_form_urlencoded",
+            "required": false,
+            "type": "record"
+          },
+          {
+            "description": "Per-request timeout in milliseconds. Defaults to 30000.",
+            "name": "timeout_ms",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "description": "Whether to follow redirects. Defaults to true.",
+            "name": "follow_redirects",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "body_form_urlencoded": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "body_json": {
+              "description": "JSON-serializable request body. Auth-like fields require https and reflected values are redacted from results."
+            },
+            "body_text": {
+              "description": "Raw text request body.",
+              "type": "string"
+            },
+            "cookies": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Cookie key/value pairs serialized into the Cookie header. Cookies require https and reflected values are redacted from results.",
+              "type": "object"
+            },
+            "follow_redirects": {
+              "description": "Whether to follow redirects. Defaults to true.",
+              "type": "boolean"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Additional request headers. Transport headers like Host are blocked. Auth-like headers require https and reflected values are redacted from results.",
+              "type": "object"
+            },
+            "method": {
+              "description": "HTTP method. Defaults to GET.",
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "HEAD",
+                "OPTIONS"
+              ],
+              "type": "string"
+            },
+            "query": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "timeout_ms": {
+              "description": "Per-request timeout in milliseconds. Defaults to 30000.",
+              "maximum": 120000,
+              "minimum": 100,
+              "type": "integer"
+            },
+            "url": {
+              "description": "Absolute http/https URL to call. Private and localhost targets are blocked. Auth-like request values require https.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Free",
+        "unit": "call",
+        "creditsPerUnit": 0,
+        "usdPerUnit": 0,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "harvestapi_get_company": {
+      "toolId": "harvestapi_get_company",
+      "provider": "harvestapi",
+      "description": "Retrieve one LinkedIn company by URL, universal name, or search text. | Get the LinkedIn company. Required at least one of the query parameters",
+      "inputSchema": {
+        "description": "Get the LinkedIn company. Required at least one of the query parameters",
+        "fields": [
+          {
+            "description": "URL of the LinkedIn company (optional)",
+            "name": "url",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Universal name of the LinkedIn company profile, can be found in URL (optional)",
+            "name": "universalName",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Company name. It will use LinkedIn search and return the most relevant result.",
+            "name": "search",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "required": [
+                    "url"
+                  ]
+                },
+                {
+                  "required": [
+                    "universalName"
+                  ]
+                },
+                {
+                  "required": [
+                    "search"
+                  ]
+                }
+              ]
+            }
+          ],
+          "description": "Get the LinkedIn company. Required at least one of the query parameters",
+          "properties": {
+            "search": {
+              "description": "Company name. It will use LinkedIn search and return the most relevant result.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "universalName": {
+              "description": "Universal name of the LinkedIn company profile, can be found in URL (optional)",
+              "minLength": 1,
+              "type": "string"
+            },
+            "url": {
+              "description": "URL of the LinkedIn company (optional)",
+              "format": "uri",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.03 Deepline credits / $0.003 per call",
+        "unit": "call",
+        "creditsPerUnit": 0.03,
+        "usdPerUnit": 0.003,
+        "currency": "USD",
+        "summary": null,
+        "details": [
+          "Final settlement can differ when the completed request reports a different usage amount.",
+          "Otherwise, Deepline charges the expected rate shown above."
+        ]
+      },
+      "callable": true
+    },
+    "harvestapi_get_profile": {
+      "toolId": "harvestapi_get_profile",
+      "provider": "harvestapi",
+      "description": "Enrich one LinkedIn profile, optionally including email discovery. | Get the LinkedIn profile of the user. Required at least one of the query parameters",
+      "inputSchema": {
+        "description": "Get the LinkedIn profile of the user. Required at least one of the query parameters",
+        "fields": [
+          {
+            "description": "URL of the LinkedIn profile (optional)",
+            "name": "url",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Public identifier of the LinkedIn profile (optional)",
+            "name": "publicIdentifier",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "ID of the LinkedIn profile (optional)",
+            "name": "profileId",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Set this parameter to 'true' to return only main version of the profile that you can see on LinkedIn without expanding profile sections - up to 5 experiences, 2 educations, 2 skills, etc. This version charges less credits",
+            "name": "main",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Include this parameter to find the email of the profile. It will perform SMTP verifications to ensure deliverability. It will also output emails for catch-all domains and mark them as `risky` (deliverability is unknown). This version charges more credits.",
+            "name": "findEmail",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "skipSmtp",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Include this parameter to scrape the \"About this profile\" popup from LinkedIn profiles.",
+            "name": "includeAboutProfile",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "required": [
+                    "url"
+                  ]
+                },
+                {
+                  "required": [
+                    "publicIdentifier"
+                  ]
+                },
+                {
+                  "required": [
+                    "profileId"
+                  ]
+                }
+              ]
+            }
+          ],
+          "description": "Get the LinkedIn profile of the user. Required at least one of the query parameters",
+          "properties": {
+            "findEmail": {
+              "description": "Include this parameter to find the email of the profile. It will perform SMTP verifications to ensure deliverability. It will also output emails for catch-all domains and mark them as `risky` (deliverability is unknown). This version charges more credits.",
+              "type": "string"
+            },
+            "includeAboutProfile": {
+              "description": "Include this parameter to scrape the \"About this profile\" popup from LinkedIn profiles.",
+              "type": "string"
+            },
+            "main": {
+              "description": "Set this parameter to 'true' to return only main version of the profile that you can see on LinkedIn without expanding profile sections - up to 5 experiences, 2 educations, 2 skills, etc. This version charges less credits",
+              "type": "string"
+            },
+            "profileId": {
+              "description": "ID of the LinkedIn profile (optional)",
+              "minLength": 1,
+              "type": "string"
+            },
+            "publicIdentifier": {
+              "description": "Public identifier of the LinkedIn profile (optional)",
+              "minLength": 1,
+              "type": "string"
+            },
+            "skipSmtp": {
+              "type": "string"
+            },
+            "url": {
+              "description": "URL of the LinkedIn profile (optional)",
+              "format": "uri",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Calculated after execution from returned usage.",
+        "unit": "usage",
+        "creditsPerUnit": null,
+        "usdPerUnit": null,
+        "currency": "USD",
+        "summary": null,
+        "details": [
+          "Final settlement can differ when the completed request reports a different usage amount.",
+          "Otherwise, Deepline charges the expected rate shown above."
+        ]
+      },
+      "callable": true
+    },
+    "harvestapi_search_leads": {
+      "toolId": "harvestapi_search_leads",
+      "provider": "harvestapi",
+      "description": "Find LinkedIn profiles with HarvestAPI filters, including employees of one or more companies. | Searches LinkedIn profiles with Sales Navigator-style filters. Use currentCompanies for company employee discovery and preserve sessionId across pages. Known provider behavior: currentCompanies is matched by company name even when a LinkedIn company ID or URL is provided, so similarly named companies can appear. Verify each result's currentPositions.companyId against the intended company ID.",
+      "inputSchema": {
+        "description": "Searches LinkedIn profiles with Sales Navigator-style filters. Use currentCompanies for company employee discovery and preserve sessionId across pages. Known provider behavior: currentCompanies is matched by company name even when a LinkedIn company ID or URL is provided, so similarly named companies can appear. Verify each result's currentPositions.companyId against the intended company ID.",
+        "fields": [
+          {
+            "description": "Free-text profile search.",
+            "name": "search",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated current company names, LinkedIn company URLs, or identifiers; maximum 50. HarvestAPI matches this filter by company name even when an ID or URL is provided, so verify returned currentPositions.companyId values.",
+            "name": "currentCompanies",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated past company filters.",
+            "name": "pastCompanies",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated location filters.",
+            "name": "locations",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated LinkedIn geography IDs.",
+            "name": "geoIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated school filters.",
+            "name": "schools",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated current job-title filters.",
+            "name": "currentJobTitles",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated past job-title filters.",
+            "name": "pastJobTitles",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated first names.",
+            "name": "firstNames",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated last names.",
+            "name": "lastNames",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated LinkedIn industry IDs.",
+            "name": "industryIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated years-at-current-company filter IDs.",
+            "name": "yearsAtCurrentCompanyIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated years-of-experience filter IDs.",
+            "name": "yearsOfExperienceIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated seniority-level IDs.",
+            "name": "seniorityLevelIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated job-function IDs.",
+            "name": "functionIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Filter to profiles that recently changed jobs.",
+            "name": "recentlyChangedJobs",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Filter to profiles that posted on LinkedIn.",
+            "name": "postedOnLinkedin",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Comma-separated profile languages.",
+            "name": "profileLanguages",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated current-company headcount ranges.",
+            "name": "companyHeadcount",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated current-company headquarters locations.",
+            "name": "companyHeadquarterLocations",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated locations to exclude; maximum 70.",
+            "name": "excludeLocations",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated geography IDs to exclude; maximum 70.",
+            "name": "excludeGeoIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated current companies to exclude; maximum 50.",
+            "name": "excludeCurrentCompanies",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated past companies to exclude; maximum 50.",
+            "name": "excludePastCompanies",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated schools to exclude; maximum 50.",
+            "name": "excludeSchools",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated current job titles to exclude; maximum 70.",
+            "name": "excludeCurrentJobTitles",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated past job titles to exclude; maximum 70.",
+            "name": "excludePastJobTitles",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated industry IDs to exclude; maximum 70.",
+            "name": "excludeIndustryIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated seniority-level IDs to exclude; maximum 20.",
+            "name": "excludeSeniorityLevelIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated function IDs to exclude; maximum 30.",
+            "name": "excludeFunctionIds",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated company headquarters locations to exclude; maximum 70.",
+            "name": "excludeCompanyHeadquarterLocations",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Sales Navigator search URL whose filters should be reproduced.",
+            "name": "salesNavUrl",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Result page, from 1 through 100.",
+            "name": "page",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "description": "Search session identifier to preserve across later pages.",
+            "name": "sessionId",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Searches LinkedIn profiles with Sales Navigator-style filters. Use currentCompanies for company employee discovery and preserve sessionId across pages. Known provider behavior: currentCompanies is matched by company name even when a LinkedIn company ID or URL is provided, so similarly named companies can appear. Verify each result's currentPositions.companyId against the intended company ID.",
+          "properties": {
+            "companyHeadcount": {
+              "description": "Comma-separated current-company headcount ranges.",
+              "type": "string"
+            },
+            "companyHeadquarterLocations": {
+              "description": "Comma-separated current-company headquarters locations.",
+              "type": "string"
+            },
+            "currentCompanies": {
+              "description": "Comma-separated current company names, LinkedIn company URLs, or identifiers; maximum 50. HarvestAPI matches this filter by company name even when an ID or URL is provided, so verify returned currentPositions.companyId values.",
+              "type": "string"
+            },
+            "currentJobTitles": {
+              "description": "Comma-separated current job-title filters.",
+              "type": "string"
+            },
+            "excludeCompanyHeadquarterLocations": {
+              "description": "Comma-separated company headquarters locations to exclude; maximum 70.",
+              "type": "string"
+            },
+            "excludeCurrentCompanies": {
+              "description": "Comma-separated current companies to exclude; maximum 50.",
+              "type": "string"
+            },
+            "excludeCurrentJobTitles": {
+              "description": "Comma-separated current job titles to exclude; maximum 70.",
+              "type": "string"
+            },
+            "excludeFunctionIds": {
+              "description": "Comma-separated function IDs to exclude; maximum 30.",
+              "type": "string"
+            },
+            "excludeGeoIds": {
+              "description": "Comma-separated geography IDs to exclude; maximum 70.",
+              "type": "string"
+            },
+            "excludeIndustryIds": {
+              "description": "Comma-separated industry IDs to exclude; maximum 70.",
+              "type": "string"
+            },
+            "excludeLocations": {
+              "description": "Comma-separated locations to exclude; maximum 70.",
+              "type": "string"
+            },
+            "excludePastCompanies": {
+              "description": "Comma-separated past companies to exclude; maximum 50.",
+              "type": "string"
+            },
+            "excludePastJobTitles": {
+              "description": "Comma-separated past job titles to exclude; maximum 70.",
+              "type": "string"
+            },
+            "excludeSchools": {
+              "description": "Comma-separated schools to exclude; maximum 50.",
+              "type": "string"
+            },
+            "excludeSeniorityLevelIds": {
+              "description": "Comma-separated seniority-level IDs to exclude; maximum 20.",
+              "type": "string"
+            },
+            "firstNames": {
+              "description": "Comma-separated first names.",
+              "type": "string"
+            },
+            "functionIds": {
+              "description": "Comma-separated job-function IDs.",
+              "type": "string"
+            },
+            "geoIds": {
+              "description": "Comma-separated LinkedIn geography IDs.",
+              "type": "string"
+            },
+            "industryIds": {
+              "description": "Comma-separated LinkedIn industry IDs.",
+              "type": "string"
+            },
+            "lastNames": {
+              "description": "Comma-separated last names.",
+              "type": "string"
+            },
+            "locations": {
+              "description": "Comma-separated location filters.",
+              "type": "string"
+            },
+            "page": {
+              "default": 1,
+              "description": "Result page, from 1 through 100.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "pastCompanies": {
+              "description": "Comma-separated past company filters.",
+              "type": "string"
+            },
+            "pastJobTitles": {
+              "description": "Comma-separated past job-title filters.",
+              "type": "string"
+            },
+            "postedOnLinkedin": {
+              "description": "Filter to profiles that posted on LinkedIn.",
+              "type": "boolean"
+            },
+            "profileLanguages": {
+              "description": "Comma-separated profile languages.",
+              "type": "string"
+            },
+            "recentlyChangedJobs": {
+              "description": "Filter to profiles that recently changed jobs.",
+              "type": "boolean"
+            },
+            "salesNavUrl": {
+              "description": "Sales Navigator search URL whose filters should be reproduced.",
+              "format": "uri",
+              "type": "string"
+            },
+            "schools": {
+              "description": "Comma-separated school filters.",
+              "type": "string"
+            },
+            "search": {
+              "description": "Free-text profile search.",
+              "type": "string"
+            },
+            "seniorityLevelIds": {
+              "description": "Comma-separated seniority-level IDs.",
+              "type": "string"
+            },
+            "sessionId": {
+              "description": "Search session identifier to preserve across later pages.",
+              "type": "string"
+            },
+            "yearsAtCurrentCompanyIds": {
+              "description": "Comma-separated years-at-current-company filter IDs.",
+              "type": "string"
+            },
+            "yearsOfExperienceIds": {
+              "description": "Comma-separated years-of-experience filter IDs.",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.7 Deepline credits / $0.07 per page",
+        "unit": "page",
+        "creditsPerUnit": 0.7,
+        "usdPerUnit": 0.07,
+        "currency": "USD",
+        "summary": null,
+        "details": [
+          "Pricing is per requested page, not per returned result. Estimate cost from the number of pages requested.",
+          "Final settlement can differ when the completed request reports a different usage amount.",
+          "Otherwise, Deepline charges the expected rate shown above."
+        ]
+      },
+      "callable": true
+    },
+    "zerobounce_validate": {
+      "toolId": "zerobounce_validate",
+      "provider": "zerobounce",
+      "description": "Final email deliverability gate before outbound sends with detailed status and sub_status. | Validate one email address with optional signup IP context using ZeroBounce real-time validation.",
+      "inputSchema": {
+        "description": "Validate one email address with optional signup IP context using ZeroBounce real-time validation.",
+        "fields": [
+          {
+            "description": "Email address to validate.",
+            "name": "email",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Optional signup IP address used by ZeroBounce for IP enrichment.",
+            "name": "ip_address",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Validate one email address with optional signup IP context using ZeroBounce real-time validation.",
+          "properties": {
+            "email": {
+              "description": "Email address to validate.",
+              "type": "string"
+            },
+            "ip_address": {
+              "description": "Optional signup IP address used by ZeroBounce for IP enrichment.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "email"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.28 Deepline credits / $0.028 per result",
+        "unit": "result",
+        "creditsPerUnit": 0.28,
+        "usdPerUnit": 0.028,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "bounceban_verify_single": {
+      "toolId": "bounceban_verify_single",
+      "provider": "bounceban",
+      "description": "Verify one email address before sending. Read the verdict from `result` (deliverable / risky / undeliverable) plus `score` (0-100). `status` is the API call outcome and is \"success\" even when the address is undeliverable.",
+      "inputSchema": {
+        "fields": [
+          {
+            "description": "The email that needs to get verified.",
+            "name": "email",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "(Optional) Setting the verification mode for the verification job. Default mode is `regular`. > `regular`: The default option for email verification. It does not assume that the domain of the email owner's current company website matches the domain of the email being verified. > `deepverify`: DeepVerify operates on the assumption that the domain of the email owner's current company website matches the domain of the email being verified. This assumption can improve the success rate of verifying accept-all emails. However, it is crucial to obtain the domain for the email owner's current company website from a reliable source, such as the email owner's LinkedIn profile or another trustworthy sales prospecting database. Learn more: [https://support.bounceban.com/article/what-is-deepverify](https://support.bounceban.com/article/what-is-deepverify)",
+            "name": "mode",
+            "required": false,
+            "type": "\"regular\" | \"deepverify\""
+          },
+          {
+            "description": "(Optional) A webhook target URL specified to receive verification result event in real-time through an HTTP POST request. In case of a failed webhook event delivery, the system will attempt to resend the event up to two additional times within a short interval. For those verifying a substantial volume of emails, it's crucial to ensure that your webhook server is equipped to manage the incoming traffic. Services such as ngrok have been known to encounter issues when dealing with a significant number of events due to inherent limitations. We suggest exploring alternative testing services like TypedWebhook Tools [https://typedwebhook.tools/](https://typedwebhook.tools/) for a more robust solution. Please note that we are not affiliated with this service. > The webhook event will also include the `event-type: single.email_verification_finished` header so you can differentiate between different events. > Please note that the webhook event payload will be in JSON format. ``` { \"id\": \"502abcde\", \"status\": \"success\", \"email\": \"dev@bounceban.com\", \"result\": \"deliverable\", \"score\": 99, \"is_disposable\": false, \"is_accept_all\": false, \"is_role\": true, \"is_free\": false, \"mx_records\": [ \"alt1.aspmx.l.google.com\", \"alt2.aspmx.l.google.com\", \"alt3.aspmx.l.google.com\", \"alt4.aspmx.l.google.com\", \"aspmx.l.google.com\" ], \"smtp_provider\": \"Google\", \"verify_at\": \"2022-11-16T07:21:24.943Z\", \"credits_consumed\": 1.000, \"credits_remaining\": 375214.000 } ```",
+            "name": "url",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "(Optional) Defaults to `0`. When set to `1`, BounceBan performs only basic SMTP verification. This may leave catch-all emails or those protected by ESGs (Email Security Gateways) unverified. For these addresses, the API will return `result: 'unknown'`, `score: -1`, and the credit cost is 0.",
+            "name": "disable_catchall_verify",
+            "required": false,
+            "type": "\"0\" | \"1\""
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "disable_catchall_verify": {
+              "description": "(Optional) Defaults to `0`. When set to `1`, BounceBan performs only basic SMTP verification. This may leave catch-all emails or those protected by ESGs (Email Security Gateways) unverified. For these addresses, the API will return `result: 'unknown'`, `score: -1`, and the credit cost is 0.",
+              "enum": [
+                "0",
+                "1"
+              ],
+              "type": "string"
+            },
+            "email": {
+              "description": "The email that needs to get verified.",
+              "type": "string"
+            },
+            "mode": {
+              "description": "(Optional) Setting the verification mode for the verification job. Default mode is `regular`. > `regular`: The default option for email verification. It does not assume that the domain of the email owner's current company website matches the domain of the email being verified. > `deepverify`: DeepVerify operates on the assumption that the domain of the email owner's current company website matches the domain of the email being verified. This assumption can improve the success rate of verifying accept-all emails. However, it is crucial to obtain the domain for the email owner's current company website from a reliable source, such as the email owner's LinkedIn profile or another trustworthy sales prospecting database. Learn more: [https://support.bounceban.com/article/what-is-deepverify](https://support.bounceban.com/article/what-is-deepverify)",
+              "enum": [
+                "regular",
+                "deepverify"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "description": "(Optional) A webhook target URL specified to receive verification result event in real-time through an HTTP POST request. In case of a failed webhook event delivery, the system will attempt to resend the event up to two additional times within a short interval. For those verifying a substantial volume of emails, it's crucial to ensure that your webhook server is equipped to manage the incoming traffic. Services such as ngrok have been known to encounter issues when dealing with a significant number of events due to inherent limitations. We suggest exploring alternative testing services like TypedWebhook Tools [https://typedwebhook.tools/](https://typedwebhook.tools/) for a more robust solution. Please note that we are not affiliated with this service. > The webhook event will also include the `event-type: single.email_verification_finished` header so you can differentiate between different events. > Please note that the webhook event payload will be in JSON format. ``` { \"id\": \"502abcde\", \"status\": \"success\", \"email\": \"dev@bounceban.com\", \"result\": \"deliverable\", \"score\": 99, \"is_disposable\": false, \"is_accept_all\": false, \"is_role\": true, \"is_free\": false, \"mx_records\": [ \"alt1.aspmx.l.google.com\", \"alt2.aspmx.l.google.com\", \"alt3.aspmx.l.google.com\", \"alt4.aspmx.l.google.com\", \"aspmx.l.google.com\" ], \"smtp_provider\": \"Google\", \"verify_at\": \"2022-11-16T07:21:24.943Z\", \"credits_consumed\": 1.000, \"credits_remaining\": 375214.000 } ```",
+              "type": "string"
+            }
+          },
+          "required": [
+            "email"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.06 Deepline credits / $0.006 per result",
+        "unit": "result",
+        "creditsPerUnit": 0.06,
+        "usdPerUnit": 0.006,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "bounceban_get_single_status": {
+      "toolId": "bounceban_get_single_status",
+      "provider": "bounceban",
+      "description": "Inspect BounceBan account credits and rate limits. | Get the verification result for single email verification. Requests to this endpoint don\u2019t cost verification credits. The result will be available for 90 days after verification.",
+      "inputSchema": {
+        "description": "Get the verification result for single email verification. Requests to this endpoint don\u2019t cost verification credits. The result will be available for 90 days after verification.",
+        "fields": [
+          {
+            "description": "The unique id returned by every successful request to the [/v1/verify/single](#tag/Single-verification/paths/~1v1~1verify~1single/get) endpoint. > Please consider implementing rate limiting for polling requests to avoid excessive traffic. We recommend capping polling to no more than 10 requests for the same verification `id` within a 5-minute period. After 5 minutes, polling should stop if no results are available, and a new verification request should be initiated instead. > For a more efficient approach, we highly recommend using a webhook event to listen for verification results. You can set this up by providing a callback URL via the `url` parameter in your [/verify/single](#tag/Single-verification/paths/~1v1~1verify~1single/get) API request, allowing results to be sent to your system without the need for repeated polling.",
+            "name": "id",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Get the verification result for single email verification. Requests to this endpoint don\u2019t cost verification credits. The result will be available for 90 days after verification.",
+          "properties": {
+            "id": {
+              "description": "The unique id returned by every successful request to the [/v1/verify/single](#tag/Single-verification/paths/~1v1~1verify~1single/get) endpoint. > Please consider implementing rate limiting for polling requests to avoid excessive traffic. We recommend capping polling to no more than 10 requests for the same verification `id` within a 5-minute period. After 5 minutes, polling should stop if no results are available, and a new verification request should be initiated instead. > For a more efficient approach, we highly recommend using a webhook event to listen for verification results. You can set this up by providing a callback URL via the `url` parameter in your [/verify/single](#tag/Single-verification/paths/~1v1~1verify~1single/get) API request, allowing results to be sent to your system without the need for repeated polling.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Free",
+        "unit": "call",
+        "creditsPerUnit": 0,
+        "usdPerUnit": 0,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "harvestapi_get_job": {
+      "toolId": "harvestapi_get_job",
+      "provider": "harvestapi",
+      "description": "Retrieve one LinkedIn job by job ID or URL. | Get the LinkedIn job details by job ID or URL.",
+      "inputSchema": {
+        "description": "Get the LinkedIn job details by job ID or URL.",
+        "fields": [
+          {
+            "description": "ID of the LinkedIn job (optional)",
+            "name": "jobId",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "URL of the LinkedIn job (optional)",
+            "name": "url",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "required": [
+                    "jobId"
+                  ]
+                },
+                {
+                  "required": [
+                    "url"
+                  ]
+                }
+              ]
+            }
+          ],
+          "description": "Get the LinkedIn job details by job ID or URL.",
+          "properties": {
+            "jobId": {
+              "description": "ID of the LinkedIn job (optional)",
+              "minLength": 1,
+              "type": "string"
+            },
+            "url": {
+              "description": "URL of the LinkedIn job (optional)",
+              "format": "uri",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.01 Deepline credits / $0.001 per call",
+        "unit": "call",
+        "creditsPerUnit": 0.01,
+        "usdPerUnit": 0.001,
+        "currency": "USD",
+        "summary": null,
+        "details": [
+          "Final settlement can differ when the completed request reports a different usage amount.",
+          "Otherwise, Deepline charges the expected rate shown above."
+        ]
+      },
+      "callable": true
+    },
+    "harvestapi_get_post": {
+      "toolId": "harvestapi_get_post",
+      "provider": "harvestapi",
+      "description": "Retrieve one LinkedIn post by URL. | Get LinkedIn post details by post URL.",
+      "inputSchema": {
+        "description": "Get LinkedIn post details by post URL.",
+        "fields": [
+          {
+            "description": "URL of the LinkedIn post (required)",
+            "name": "url",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "required": [
+                    "url"
+                  ]
+                }
+              ]
+            }
+          ],
+          "description": "Get LinkedIn post details by post URL.",
+          "properties": {
+            "url": {
+              "description": "URL of the LinkedIn post (required)",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.03 Deepline credits / $0.003 per call",
+        "unit": "call",
+        "creditsPerUnit": 0.03,
+        "usdPerUnit": 0.003,
+        "currency": "USD",
+        "summary": null,
+        "details": [
+          "Final settlement can differ when the completed request reports a different usage amount.",
+          "Otherwise, Deepline charges the expected rate shown above."
+        ]
+      },
+      "callable": true
+    },
+    "hunter_discover": {
+      "toolId": "hunter_discover",
+      "provider": "hunter",
+      "description": "Create broad, high-recall account lists with natural-language ICP filters before spending credits. | Discover companies matching ICP criteria. This call is free in Hunter.",
+      "inputSchema": {
+        "description": "Discover companies matching ICP criteria. This call is free in Hunter.",
+        "fields": [
+          {
+            "description": "Natural-language company search query. Prefer this for broad ICP discovery.",
+            "name": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "organization",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "name": "similar_to",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "name": "headquarters_location",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "description": "Filter with optional include/exclude arrays.",
+            "name": "industry",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "description": "Accepted values include 1-10, 11-50, 51-200, 201-500, 501-1000, 1001-5000, 5001-10000, 10001+.",
+            "name": "headcount",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "description": "Filter with optional include/exclude arrays.",
+            "name": "company_type",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "name": "keywords",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "name": "technology",
+            "required": false,
+            "type": "object"
+          },
+          {
+            "description": "Max domains returned (default 100). Changing this requires a Hunter Premium plan.",
+            "name": "limit",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "description": "Number of domains to skip for pagination. Non-zero offsets require a Hunter Premium plan.",
+            "name": "offset",
+            "required": false,
+            "type": "integer"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Discover companies matching ICP criteria. This call is free in Hunter.",
+          "properties": {
+            "company_type": {
+              "additionalProperties": false,
+              "description": "Filter with optional include/exclude arrays.",
+              "properties": {
+                "exclude": {
+                  "items": {
+                    "enum": [
+                      "educational",
+                      "educational institution",
+                      "government agency",
+                      "non profit",
+                      "partnership",
+                      "privately held",
+                      "public company",
+                      "self employed",
+                      "self owned",
+                      "sole proprietorship"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "include": {
+                  "items": {
+                    "enum": [
+                      "educational",
+                      "educational institution",
+                      "government agency",
+                      "non profit",
+                      "partnership",
+                      "privately held",
+                      "public company",
+                      "self employed",
+                      "self owned",
+                      "sole proprietorship"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "headcount": {
+              "description": "Accepted values include 1-10, 11-50, 51-200, 201-500, 501-1000, 1001-5000, 5001-10000, 10001+.",
+              "items": {
+                "enum": [
+                  "1-10",
+                  "11-50",
+                  "51-200",
+                  "201-500",
+                  "501-1000",
+                  "1001-5000",
+                  "5001-10000",
+                  "10001+"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "headquarters_location": {
+              "additionalProperties": false,
+              "properties": {
+                "exclude": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "business_region": {
+                        "description": "Business region (AMER, EMEA, APAC, LATAM).",
+                        "enum": [
+                          "AMER",
+                          "EMEA",
+                          "APAC",
+                          "LATAM"
+                        ],
+                        "type": "string"
+                      },
+                      "city": {
+                        "description": "City name (for example San Francisco).",
+                        "type": "string"
+                      },
+                      "continent": {
+                        "description": "Continent name (for example Europe, North America).",
+                        "enum": [
+                          "Europe",
+                          "Asia",
+                          "North America",
+                          "Africa",
+                          "Antarctica",
+                          "South America",
+                          "Oceania"
+                        ],
+                        "type": "string"
+                      },
+                      "country": {
+                        "description": "ISO 3166-1 alpha-2 country code (for example US).",
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "US state code (for example CA). Requires country=US.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "include": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "business_region": {
+                        "description": "Business region (AMER, EMEA, APAC, LATAM).",
+                        "enum": [
+                          "AMER",
+                          "EMEA",
+                          "APAC",
+                          "LATAM"
+                        ],
+                        "type": "string"
+                      },
+                      "city": {
+                        "description": "City name (for example San Francisco).",
+                        "type": "string"
+                      },
+                      "continent": {
+                        "description": "Continent name (for example Europe, North America).",
+                        "enum": [
+                          "Europe",
+                          "Asia",
+                          "North America",
+                          "Africa",
+                          "Antarctica",
+                          "South America",
+                          "Oceania"
+                        ],
+                        "type": "string"
+                      },
+                      "country": {
+                        "description": "ISO 3166-1 alpha-2 country code (for example US).",
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "US state code (for example CA). Requires country=US.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "industry": {
+              "additionalProperties": false,
+              "description": "Filter with optional include/exclude arrays.",
+              "properties": {
+                "exclude": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "include": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "keywords": {
+              "additionalProperties": false,
+              "properties": {
+                "exclude": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "include": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "match": {
+                  "enum": [
+                    "all",
+                    "any"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "limit": {
+              "description": "Max domains returned (default 100). Changing this requires a Hunter Premium plan.",
+              "type": "integer"
+            },
+            "offset": {
+              "description": "Number of domains to skip for pagination. Non-zero offsets require a Hunter Premium plan.",
+              "type": "integer"
+            },
+            "organization": {
+              "additionalProperties": false,
+              "properties": {
+                "domain": {
+                  "description": "Exact domains to include.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "name": {
+                  "description": "Company names to include.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "query": {
+              "description": "Natural-language company search query. Prefer this for broad ICP discovery.",
+              "type": "string"
+            },
+            "similar_to": {
+              "additionalProperties": false,
+              "properties": {
+                "domain": {
+                  "description": "Reference domain for similar companies.",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Reference company name for similar companies.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "technology": {
+              "additionalProperties": false,
+              "properties": {
+                "exclude": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "include": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "match": {
+                  "enum": [
+                    "all",
+                    "any"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "Free",
+        "unit": "call",
+        "creditsPerUnit": 0,
+        "usdPerUnit": 0,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "predictleads_company_financing_events": {
+      "toolId": "predictleads_company_financing_events",
+      "provider": "predictleads",
+      "description": "Returns a list of company's Financing Events. | Returns a list of company's Financing Events.",
+      "inputSchema": {
+        "description": "Returns a list of company's Financing Events.",
+        "fields": [
+          {
+            "description": "Company's ID or domain.",
+            "name": "company_id_or_domain",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Only return `FinancingEvents` first seen after given date (ISO 8601).",
+            "name": "first_seen_at_from",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Only return `FinancingEvents` first seen before given date (ISO 8601).",
+            "name": "first_seen_at_until",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number of shown items. **NOTE**: If the parameter is not provided, the meta property `count` will be omitted from response for performance reasons.",
+            "name": "page",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "default": 100,
+            "description": "Limit the number of shown items per page.",
+            "name": "limit",
+            "required": false,
+            "type": "integer"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Returns a list of company's Financing Events.",
+          "properties": {
+            "company_id_or_domain": {
+              "description": "Company's ID or domain.",
+              "type": "string"
+            },
+            "first_seen_at_from": {
+              "description": "Only return `FinancingEvents` first seen after given date (ISO 8601).",
+              "format": "date",
+              "type": "string"
+            },
+            "first_seen_at_until": {
+              "description": "Only return `FinancingEvents` first seen before given date (ISO 8601).",
+              "format": "date",
+              "type": "string"
+            },
+            "limit": {
+              "default": 100,
+              "description": "Limit the number of shown items per page.",
+              "maximum": 1000,
+              "type": "integer"
+            },
+            "page": {
+              "default": 1,
+              "description": "Page number of shown items. **NOTE**: If the parameter is not provided, the meta property `count` will be omitted from response for performance reasons.",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "company_id_or_domain"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.56 Deepline credits / $0.056 per call",
+        "unit": "call",
+        "creditsPerUnit": 0.56,
+        "usdPerUnit": 0.056,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "predictleads_company_job_openings": {
+      "toolId": "predictleads_company_job_openings",
+      "provider": "predictleads",
+      "description": "Returns a list of company's Job Openings. | Returns a list of company's Job Openings.",
+      "inputSchema": {
+        "description": "Returns a list of company's Job Openings.",
+        "fields": [
+          {
+            "description": "Company's ID or domain.",
+            "name": "company_id_or_domain",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Set to true if you'd like to receive JobOpenings that are not closed, have last_seen_at more recent than 5 days and were found in the last year.",
+            "name": "active_only",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Similar to `active_only`, but without considering `last_seen_at` timestamp.",
+            "name": "not_closed",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Only return `JobOpenings` first seen after given date (ISO 8601).",
+            "name": "first_seen_at_from",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Only return `JobOpenings` first seen before given date (ISO 8601).",
+            "name": "first_seen_at_until",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Only return `JobOpenings` last seen after given date (ISO 8601).",
+            "name": "last_seen_at_from",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Only return `JobOpenings` last seen before given date (ISO 8601).",
+            "name": "last_seen_at_until",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Only return JobOpenings that have description.",
+            "name": "with_description_only",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Only return JobOpenings that have location.",
+            "name": "with_location_only",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "description": "Comma-separated (,) `JobOpening` categories.",
+            "name": "categories",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "default": 1,
+            "description": "Page number of shown items. **NOTE**: If the parameter is not provided, the meta property `count` will be omitted from response for performance reasons.",
+            "name": "page",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "default": 100,
+            "description": "Limit the number of shown items per page.",
+            "name": "limit",
+            "required": false,
+            "type": "integer"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Returns a list of company's Job Openings.",
+          "properties": {
+            "active_only": {
+              "description": "Set to true if you'd like to receive JobOpenings that are not closed, have last_seen_at more recent than 5 days and were found in the last year.",
+              "type": "boolean"
+            },
+            "categories": {
+              "description": "Comma-separated (,) `JobOpening` categories.",
+              "items": {
+                "enum": [
+                  "administration",
+                  "consulting",
+                  "data_analysis",
+                  "design",
+                  "directors",
+                  "education",
+                  "engineering",
+                  "finance",
+                  "healthcare_services",
+                  "human_resources",
+                  "information_technology",
+                  "internship",
+                  "legal",
+                  "management",
+                  "marketing",
+                  "military_and_protective_services",
+                  "operations",
+                  "purchasing",
+                  "product_management",
+                  "quality_assurance",
+                  "real_estate",
+                  "research",
+                  "sales",
+                  "software_development",
+                  "support",
+                  "manual_work",
+                  "food"
+                ]
+              },
+              "type": "array"
+            },
+            "company_id_or_domain": {
+              "description": "Company's ID or domain.",
+              "type": "string"
+            },
+            "first_seen_at_from": {
+              "description": "Only return `JobOpenings` first seen after given date (ISO 8601).",
+              "format": "date",
+              "type": "string"
+            },
+            "first_seen_at_until": {
+              "description": "Only return `JobOpenings` first seen before given date (ISO 8601).",
+              "format": "date",
+              "type": "string"
+            },
+            "last_seen_at_from": {
+              "description": "Only return `JobOpenings` last seen after given date (ISO 8601).",
+              "format": "date",
+              "type": "string"
+            },
+            "last_seen_at_until": {
+              "description": "Only return `JobOpenings` last seen before given date (ISO 8601).",
+              "format": "date",
+              "type": "string"
+            },
+            "limit": {
+              "default": 100,
+              "description": "Limit the number of shown items per page.",
+              "maximum": 1000,
+              "type": "integer"
+            },
+            "not_closed": {
+              "description": "Similar to `active_only`, but without considering `last_seen_at` timestamp.",
+              "type": "boolean"
+            },
+            "page": {
+              "default": 1,
+              "description": "Page number of shown items. **NOTE**: If the parameter is not provided, the meta property `count` will be omitted from response for performance reasons.",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "with_description_only": {
+              "description": "Only return JobOpenings that have description.",
+              "type": "boolean"
+            },
+            "with_location_only": {
+              "description": "Only return JobOpenings that have location.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "company_id_or_domain"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.56 Deepline credits / $0.056 per call",
+        "unit": "call",
+        "creditsPerUnit": 0.56,
+        "usdPerUnit": 0.056,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "predictleads_company_news_events": {
+      "toolId": "predictleads_company_news_events",
+      "provider": "predictleads",
+      "description": "Returns a list of company's News Events. | Returns a list of company's News Events.",
+      "inputSchema": {
+        "description": "Returns a list of company's News Events.",
+        "fields": [
+          {
+            "description": "Company's ID or domain.",
+            "name": "company_id_or_domain",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Only return `NewsEvents` found after given date (ISO 8601).",
+            "name": "found_at_from",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Only return `NewsEvents` found before given date (ISO 8601).",
+            "name": "found_at_until",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Comma-separated (,) `NewsEvent` categories.",
+            "name": "categories",
+            "required": false,
+            "type": "array"
+          },
+          {
+            "default": 1,
+            "description": "Page number of shown items. **NOTE**: If the parameter is not provided, the meta property `count` will be omitted from response for performance reasons.",
+            "name": "page",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "default": 100,
+            "description": "Limit the number of shown items per page.",
+            "name": "limit",
+            "required": false,
+            "type": "integer"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Returns a list of company's News Events.",
+          "properties": {
+            "categories": {
+              "description": "Comma-separated (,) `NewsEvent` categories.",
+              "items": {
+                "anyOf": [
+                  {
+                    "const": "acquires",
+                    "description": "Company acquired another company. **Group**: `acquisition` **Optional `attributes`:** `amount`, `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "merges_with",
+                    "description": "Company merges with another company. **Group**: `acquisition` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "sells_assets_to",
+                    "description": "Company sells assets (like properties or warehouses) to other company. **Group**: `acquisition` **Optional `attributes`:** `amount`, `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "loses_client",
+                    "description": "Company loses a client. **Group**: `contract` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "signs_new_client",
+                    "description": "Company signs new client. **Group**: `contract` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "declares_bankruptcy",
+                    "description": "Organization declares bankruptcy. **Group**: `corporate_challenges` **Present `attributes`:** `bankruptcy` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "files_suit_against",
+                    "description": "Company files suit against other company. **Group**: `corporate_challenges` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "has_issues_with",
+                    "description": "Company has vulnerability problems. **Group**: `corporate_challenges` **Present `attributes`:** `vulnerability` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "closes_offices_in",
+                    "description": "Company closes existing offices. **Group**: `cost_cutting` **Present `attributes`:** `location` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "decreases_headcount_by",
+                    "description": "Company lays off employees. **Group**: `cost_cutting` **Present `attributes`:** `headcount` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "attends_event",
+                    "description": "Company attends an event. **Group**: `expansion` **Present `attributes`:** `event` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "expands_facilities",
+                    "description": "Company opens new or expands existing facilities like warehouses, data centers, manufacturing plants etc. **Group**: `expansion` **Present `attributes`:** `location` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "expands_offices_in",
+                    "description": "Company expands existing offices. **Group**: `expansion` **Present `attributes`:** `location` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "expands_offices_to",
+                    "description": "Company opens new offices in another town, state, country or continent. **Group**: `expansion` **Present `attributes`:** `location` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "increases_headcount_by",
+                    "description": "Company offers new job vacancies. **Group**: `expansion` **Present `attributes`:** `headcount` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "opens_new_location",
+                    "description": "Company opens new service location like hotels, restaurants, bars, hospitals etc. **Group**: `expansion` **Present `attributes`:** `location` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "goes_public",
+                    "description": "Company issues shares to the public for the first time. **Group**: `investment` **Present `attributes`:** `financing_type` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "has_earnings",
+                    "description": "Earnings were reported for a company. **Group**: `investment` **Present `attributes`:** `amount` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "has_revenue",
+                    "description": "Revenue was reported for a company. **Group**: `investment` **Present `attributes`:** `amount` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "has_valuation",
+                    "description": "Valuation was reported for a company. **Group**: `investment` **Present `attributes`:** `amount` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "invests_into",
+                    "description": "Company invests into other company. **Group**: `investment` **Optional `attributes`:** `amount`, `financing_type`, `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "invests_into_assets",
+                    "description": "Company buys assets (like properties or warehouses) from other company. **Group**: `investment` **Present `attributes`:** `assets` **Optional `attributes`:** `amount`, `location`, `effective_date` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "receives_financing",
+                    "description": "Company receives financing like venture funding, loan, grant etc. **Group**: `investment` **Present `attributes`:** `amount` **Optional `attributes`:** `financing_type`, `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "hires",
+                    "description": "Company hired new executive or senior personnel. **Group**: `leadership` **Present `attributes`:** `contact` **Optional `attributes`:** `job_title`, `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "leaves",
+                    "description": "Executive or senior personnel left the company. **Group**: `leadership` **Present `attributes`:** `contact` **Optional `attributes`:** `job_title`, `effective_date`, `location` **Present `relationships`:** `company2`"
+                  },
+                  {
+                    "const": "promotes",
+                    "description": "Company promoted existing executive or senior personnel. **Group**: `leadership` **Present `attributes`:** `contact` **Optional `attributes`:** `job_title`, `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "retires_from",
+                    "description": "Executive or senior personnel retire from the company. **Group**: `leadership` **Present `attributes`:** `contact` **Optional `attributes`:** `job_title`, `effective_date`, `location` **Present `relationships`:** `company2`"
+                  },
+                  {
+                    "const": "integrates_with",
+                    "description": "Company integrates with other company. **Group**: `new_offering` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "is_developing",
+                    "description": "Company is developing a new offering. **Group**: `new_offering` **Present `attributes`:** `product` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "launches",
+                    "description": "Company launches new offering. **Group**: `new_offering` **Present `attributes`:** `product` **Optional `attributes`:** `event`, `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "ends_partnership_with",
+                    "description": "Company ends partnership with other company. **Group**: `partnership` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "partners_with",
+                    "description": "Company partners with another company. **Group**: `partnership` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "receives_award",
+                    "description": "Company or person at the company receives an award. **Group**: `recognition` **Present `attributes`:** `award` **Optional `attributes`:** `contact`, `event`, `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "recognized_as",
+                    "description": "Company or person at the company receives recognition. **Group**: `recognition` **Present `attributes`:** `recognition` **Optional `attributes`:** `contact`, `event`, `effective_date`, `location` **Present `relationships`:** `company1`"
+                  },
+                  {
+                    "const": "identified_as_competitor_of",
+                    "description": "New or existing competitor was identified. **Group**: `relational` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "spins_off_company",
+                    "description": "Company spins off another company. **Group**: `relational` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`, `company2`"
+                  },
+                  {
+                    "const": "spins_off_division",
+                    "description": "Company spins off a division. **Group**: `relational` **Present `attributes`:** `division` **Optional `attributes`:** `effective_date`, `location` **Present `relationships`:** `company1`"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "company_id_or_domain": {
+              "description": "Company's ID or domain.",
+              "type": "string"
+            },
+            "found_at_from": {
+              "description": "Only return `NewsEvents` found after given date (ISO 8601).",
+              "format": "date",
+              "type": "string"
+            },
+            "found_at_until": {
+              "description": "Only return `NewsEvents` found before given date (ISO 8601).",
+              "format": "date",
+              "type": "string"
+            },
+            "limit": {
+              "default": 100,
+              "description": "Limit the number of shown items per page.",
+              "maximum": 1000,
+              "type": "integer"
+            },
+            "page": {
+              "default": 1,
+              "description": "Page number of shown items. **NOTE**: If the parameter is not provided, the meta property `count` will be omitted from response for performance reasons.",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "company_id_or_domain"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.56 Deepline credits / $0.056 per call",
+        "unit": "call",
+        "creditsPerUnit": 0.56,
+        "usdPerUnit": 0.056,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    },
+    "twitterapi_tweets_by_ids": {
+      "toolId": "twitterapi_tweets_by_ids",
+      "provider": "twitterapi",
+      "description": "Hydrate multiple tweets from a list of tweet IDs. | Get tweets by IDs.",
+      "inputSchema": {
+        "description": "Get tweets by IDs.",
+        "fields": [
+          {
+            "description": "Comma-separated tweet IDs.",
+            "name": "tweet_ids",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "jsonSchema": {
+          "additionalProperties": false,
+          "description": "Get tweets by IDs.",
+          "properties": {
+            "tweet_ids": {
+              "description": "Comma-separated tweet IDs.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "tweet_ids"
+          ],
+          "type": "object"
+        }
+      },
+      "pricing": {
+        "displayText": "0.01 Deepline credits / $0.001 per result",
+        "unit": "result",
+        "creditsPerUnit": 0.01,
+        "usdPerUnit": 0.001,
+        "currency": "USD",
+        "summary": null,
+        "details": []
+      },
+      "callable": true
+    }
+  }
+}
