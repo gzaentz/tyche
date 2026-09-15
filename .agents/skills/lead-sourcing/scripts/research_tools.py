@@ -927,17 +927,19 @@ class ResearchTools:
         if blocker:
             return self._blocked_result(blocker)
         progress = self._overview()
+        document = self._document()
+        attempted = {r["route_id"] for r in document.get("routes", [])}
+        pending_sources = [{"ref": r["route_id"], "target": r.get("scope"), "reason": r.get("reason")}
+                           for r in document["stop_audit"].get("route_frontier", [])
+                           if r["route_id"] in attempted and r.get("state") in {"untried", "continuable"}]
         if progress["stop"] in {"continue", "repair_state"}:
             return {"status": "needs_research", "delivery_allowed": False, "progress": progress,
-                    "next": "Resolve the listed gaps using lookup/review. Prefer affordable completion_candidates; no export has run. Do not invent rejected companies or repeat unchanged finalization."}
-        document = self._document()
+                    "pending_sources": pending_sources,
+                    "next": "Review pending_sources from saved receipts with inspect/review; no repeated lookup is needed to save a source decision. Resolve other research gaps using lookup/review. Prefer affordable completion_candidates; no export has run. Do not invent rejected companies or repeat unchanged finalization."}
         _, preflight = runner.delivery_preflight(self.path, document, check_review=False)
         if preflight["errors"]:
-            attempted = {r["route_id"] for r in document.get("routes", [])}
             return {"status": "needs_repair", "delivery_allowed": False, "errors": preflight["errors"],
-                    "pending_sources": [{"ref": r["route_id"], "target": r.get("scope"), "reason": r.get("reason")}
-                        for r in document["stop_audit"].get("route_frontier", [])
-                        if r["route_id"] in attempted and r.get("state") in {"untried", "continuable"}],
+                    "pending_sources": pending_sources,
                     "next": "Resolve these mechanical gaps with review/inspect before final evidence review. No approval or export has occurred."}
         expected = runner.review_fingerprint(document)
         approval = document.get("final_review", {})

@@ -426,6 +426,26 @@ class ResearchToolTests(unittest.TestCase):
         exported.assert_not_called()
         self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
 
+    def test_incomplete_finish_exposes_saved_discovery_reviews_without_more_spending(self):
+        self.start()
+        lookup = self.lookup(check(target="discovery", phase="account_discovery",
+            tool="fixture-search", inputs={"query": "companies"}))["lookups"][0]
+        before = budget.ledger_path(self.path).read_bytes()
+        calls = len(self.provider.requests)
+        with patch("research_tools.subprocess.run") as exported:
+            result = self.tools.finish()
+        self.assertEqual(result["status"], "needs_research")
+        self.assertFalse(result["delivery_allowed"])
+        self.assertEqual(result["progress"]["review_due"]["count"], 0)
+        self.assertEqual([s["ref"] for s in result["pending_sources"]], [lookup["route"]])
+        self.assertEqual(result["pending_sources"][0]["target"], "discovery")
+        self.tools.review(sources=[{"ref": lookup["route"], "state": "exhausted",
+            "reason": "Fixture results reviewed; no further page or qualifying evidence."}])
+        self.assertNotIn(lookup["route"], [s["ref"] for s in self.tools.finish().get("pending_sources", [])])
+        self.assertEqual(len(self.provider.requests), calls)
+        self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
+        exported.assert_not_called()
+
     def test_native_fallback_reuses_both_receipts_and_exposes_no_repeat_decision(self):
         self.start()
         self.selected_contact()
