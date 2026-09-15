@@ -1069,6 +1069,23 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(self.tools.inspect(ref=page["results"][2]["ref"])["facts"], rows[12])
         self.assertEqual(len(self.provider.requests), calls)
 
+    def test_inspect_own_tool_reads_authoritative_schema_without_provider_or_state_changes(self):
+        before = self.tools.call("tyche_inspect", {"tool": "tyche_review"})
+        self.assertEqual(before["tool"]["toolId"], "tyche_review")
+        self.assertEqual(before["tool"]["inputSchema"], research_tools.contract_view(research_tools.TOOLS["tyche_review"][1], "inputSchema"))
+        self.assertFalse(self.path.exists())
+        self.start()
+        saved = self.path.read_bytes()
+        calls = len(self.provider.requests)
+        block = self.path.parent / "operational-status.json"
+        block.write_text('{"status":"blocked"}')
+        result = self.tools.call("tyche_inspect", {"tool": "tyche_review", "refresh": True,
+            "field": "inputSchema.properties.companies.items.properties.qualification_checks.items.properties.status"})
+        self.assertEqual(result["tool"]["enum"], ["pass", "fail", "unknown"])
+        self.assertEqual(len(self.provider.requests), calls)
+        self.assertEqual(self.path.read_bytes(), saved)
+        self.assertTrue(block.exists())
+
     def test_tool_view_omits_sdk_help_but_preserves_cached_native_contract(self):
         self.start()
         def annotated(request, capture):

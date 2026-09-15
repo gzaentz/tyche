@@ -880,14 +880,18 @@ class ResearchTools:
             raise ValueError("Inspect one company, result, capability query, tool or recovery reference at a time")
         if refresh and not tool:
             raise ValueError("refresh applies only to a selected tool description")
-        if not self.path.exists():
+        if not self.path.exists() and tool not in TOOLS:
             status = self.path.parent / "operational-status.json"
             if status.exists():
                 return budget.read_object(status)
             return {"status": "not_started", "next": "Use tyche_start with the interpreted request"}
         if tool:
-            contract = self._description(tool, refresh=refresh)
-            self._clear_operational_status()
+            if tool in TOOLS:
+                description, schema = TOOLS[tool]
+                contract = {"toolId": tool, "description": description, "inputSchema": schema}
+            else:
+                contract = self._description(tool, refresh=refresh)
+                self._clear_operational_status()
             if not field:
                 return {"tool": self._description_view(contract)}
             value = self._field(contract, field)

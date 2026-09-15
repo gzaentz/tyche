@@ -748,7 +748,7 @@ def _is_linkedin_post_url(value: Any) -> bool:
 
 
 def _structured_execute_envelope(value: Any) -> Optional[Tuple[str, Dict[str, Any]]]:
-    """Select a complete JSON:API or Harvest envelope for execute only."""
+    """Select a complete structured provider result for execute only."""
 
     if isinstance(value, str):
         try:
@@ -757,6 +757,8 @@ def _structured_execute_envelope(value: Any) -> Optional[Tuple[str, Dict[str, An
             return None
     if not isinstance(value, dict):
         return None
+    if _is_email_finder_result(value) or _is_email_finder_result(value.get("output")):
+        return "email_finder", value
     data = value.get("data")
     resources = data if isinstance(data, list) else [data]
     if (
@@ -1002,6 +1004,15 @@ def _structured_status(envelope: Dict[str, Any]) -> Optional[str]:
     if isinstance(status, str) and normalized in {"success", "succeeded", "complete", "completed"}:
         return "ok"
     return None
+
+
+def _is_email_finder_result(value: Any) -> bool:
+    """Recognize a bare found address without inferring deliverability."""
+    return (
+        isinstance(value, dict) and set(value) == {"email"}
+        and isinstance(value["email"], str)
+        and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value["email"]) is not None
+    )
 
 
 def _records(value: Any) -> List[Any]:
@@ -1573,11 +1584,14 @@ def _execute_output(
     metadata: Dict[str, Any] = _execution_metadata(parsed)
     if structured:
         kind, envelope = structured
-        records = (
-            _normalize_jsonapi(envelope, tool, entity_type)
-            if kind == "jsonapi"
-            else _normalize_harvest(envelope, tool, entity_type)
-        )[:limit]
+        if kind == "email_finder":
+            records = [normalize_evidence(envelope.get("output", envelope), "deepline", tool, entity_type)][:limit]
+        else:
+            records = (
+                _normalize_jsonapi(envelope, tool, entity_type)
+                if kind == "jsonapi"
+                else _normalize_harvest(envelope, tool, entity_type)
+            )[:limit]
         metadata.update(_structured_metadata(kind, envelope))
     else:
         records = _records(parsed)[:limit]
