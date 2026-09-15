@@ -1,6 +1,7 @@
 """Run-bound research tools. Existing helpers own dispatch, persistence and gates."""
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -308,13 +309,18 @@ class ResearchTools:
                 prepared.append(("zerobounce_validate", "verification-tool.json", {"email": "pricing@example.invalid"}))
             prepared += [("harvestapi_get_company", "company-tool.json", {}),
                          ("harvestapi_get_profile", "profile-tool.json", {"main": "true"})]
-            receipts = []
-            for tool, filename, inputs in prepared:
-                response, unit = self._startup_price(tool, filename, inputs, options["started_at"])
-                options["started_at"] = original or response.get("started_at", options["started_at"])
-                if tool == "zerobounce_validate" and "verification_reserve_credits" not in options:
-                    options["verification_reserve_credits"] = float(Decimal(str(unit)) * request["target_count"])
-                receipts.append((tool, response))
+            # These free prerequisites are independent and save to distinct files.
+            # Await all of them before creating a ledger or allowing paid research.
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                pending = [(tool, pool.submit(self._startup_price, tool, filename, inputs, options["started_at"]))
+                           for tool, filename, inputs in prepared]
+                receipts = []
+                for tool, future in pending:
+                    response, unit = future.result()
+                    options["started_at"] = original or response.get("started_at", options["started_at"])
+                    if tool == "zerobounce_validate" and "verification_reserve_credits" not in options:
+                        options["verification_reserve_credits"] = float(Decimal(str(unit)) * request["target_count"])
+                    receipts.append((tool, response))
             runner.start_run(self.path, {"request": request, **options})
             for tool, response in receipts:
                 def replay(_request, capture):
@@ -947,6 +953,9 @@ class ResearchTools:
             except ValueError as exc:
                 raise ValueError(f"input.field: {exc} Derived fields: requirements, costs, pending_sources.") from exc
         return {"request": self._document()["request"], "requirements": request_requirements(self._document()["request"]),
+                "cached_descriptions": sorted({r["tool"] for r in self._document().get("routes", [])
+                    if r.get("operation") == "describe" and r.get("provider_status") == "ok" and r.get("tool")}),
+                "tool_guidance": "Mandatory verification prerequisites are checked. Choose research for the next evidence gap; do not inventory future phases first. Reuse cached descriptions with inspect(tool=...) when needed; no catalog search is needed for these IDs.",
                 "request_review": "Compare original_text with these interpreted must-haves and preferences before paid research. Every explicit non-signal must-have belongs in icp.required_attributes; each needs its own evidence check. Only the user can change the criteria.", **self._overview()}
 
     def _company_review(self, row, sources, receipts=None):

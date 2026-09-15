@@ -5,14 +5,14 @@ description: Source evidence-backed companies with buying signals and requested-
 
 # TYCHE Lead Sourcing
 
-LLM: research and qualification. Tools: bookkeeping and validation.
+LLM researches/qualifies; tools handle bookkeeping/validation.
 No CRM writes or outreach.
 
 ## Setup
 
 Read [workflow rules](references/workflow-rules.md), the [input contract](references/output-contract.md#input-contract)
 and [lifecycle invariants](references/output-contract.md#lifecycle-invariants).
-Interpret once: separate must-haves/preferences and buyer roles/hiring signals.
+Separate must-haves/preferences and buyer roles/hiring signals once.
 Preserve offering and seller/target perspective in `request.product_service`.
 Mark signals `required`/`preferred`; put non-signal must-haves in `icp.required_attributes`.
 Compare criteria with launcher-saved `original_text` before paid research;
@@ -21,8 +21,8 @@ Call `tyche_start(request=..., max_usd=...)` within authorization.
 Code supplies time, ledger and verification reserve. Catalog prices override
 [stored planning rates](references/provider-pricing.md); receipts supply charges.
 Defaults: one contact/company; USD 0.50/requested lead.
-Only users change criteria. Never import another run or guess prices.
-The launcher supplies credentials and runtime paths.
+Only users change criteria. Never import runs or guess prices.
+The launcher supplies credentials/runtime paths.
 
 Use [native tools](references/adapter-io.md#native-tools); no shell bookkeeping
 or implementation-code reads. Resume saved work with `tyche_inspect()`.
@@ -31,13 +31,14 @@ or implementation-code reads. Resume saved work with `tyche_inspect()`.
 
 1. **Choose ready work.** Prefer affordable, unblocked `completion_candidates` before discovery.
    Read [tools.md](references/tools.md#choose-by-evidence-gap) once; match tools to evidence gaps.
-   Find capabilities with `tyche_inspect(query=...)`; learn each selected tool once
-   with `tool=...`. Use `field` for omitted details. Code checks the full saved contract and price
+   Choose tools for the next evidence gap, not every future phase. Reuse
+   `cached_descriptions`; find others with `tyche_inspect(query=...)`. Learn each
+   selected `tool` once; use `field` for details. Code checks the full saved contract and price
    before dispatch; refresh descriptions only after schema/price/access changes.
    Pilot unproven operations/filters before batching; preserve native limits.
 2. **Check up to three companies concurrently.** Send `tyche_lookup` 1–3 independent
    `checks` across phases: target, phase, purpose, tool and native inputs.
-   Do not wait to fill batches.
+   Do not wait for full batches.
    Review requested fit criteria and dated signals before buyers;
    distinguish announced, conditional, planned and completed activity. Resolve
    company LinkedIn URLs from sources before enrichment; never invent slugs.
@@ -59,13 +60,12 @@ or implementation-code reads. Resume saved work with `tyche_inspect()`.
    After two comparable attempts per company/phase without verified progress,
    revisit the matching guide row/live catalog and change strategy before
    repeating searches or claiming shortfall. Choose useful alternatives.
-   Reopen evidence for gaps/contradictions;
-   independent profile/email checks remain eligible.
+   Reopen evidence for gaps/contradictions; independent profile/email checks remain eligible.
 
 Use `tyche_inspect(ref=..., field=...)` for detail, `target=...` for state,
 or `recover=...` to record a saved normalized receipt without redispatch.
 Missing responses require reconciliation; never repeat an uncertain paid call.
-Never read the worker's live launcher log.
+Never read your live launcher log.
 
 Continue affordable work; respect user pauses.
 On `operationally_blocked`, save judgments and report its status file. Stop
@@ -89,7 +89,7 @@ only for eligible failures or catch-all/unknown. Never override a hard negative.
 Call `tyche_finish()` for gaps or final review. Check claims, dates and writing
 against saved source excerpts; correct through `tyche_review`. Use
 `inspect(target=..., field="evidence_review")` during research for the same view.
-Return the current `review_ref` with commentary to validate/export.
+Return current `review_ref` and commentary to validate/export.
 Never force completion.
 Inspect the preview. Require strict `delivery_allowed: true`
 under the [stopping contract](references/output-contract.md#stopping-check).

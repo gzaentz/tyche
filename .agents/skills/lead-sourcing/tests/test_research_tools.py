@@ -516,6 +516,25 @@ class ResearchToolTests(unittest.TestCase):
         self.start()
         self.assertEqual(len(self.provider.requests), 3)
 
+    def test_free_startup_prerequisites_overlap_and_expose_reusable_descriptions(self):
+        self.request["contact_fields"] = ["email"]
+        ready = threading.Barrier(3)
+        def concurrent_catalog(request, capture):
+            self.assertEqual(request["operation"], "describe")
+            ready.wait(timeout=3)
+            return self.provider(request, capture)
+        self.tools.execute = concurrent_catalog
+        result = self.start()
+        expected = ["harvestapi_get_company", "harvestapi_get_profile", "zerobounce_validate"]
+        self.assertEqual(result["cached_descriptions"], expected)
+        self.assertFalse(budget.load_ledger(self.path)["calls"])
+        self.assertEqual(float(budget.load_ledger(self.path)["verification_reserve_credits"]), 1)
+        self.tools.execute = lambda *args: self.fail("Saved contracts must not be requested again")
+        for tool in expected:
+            self.tools.inspect(tool=tool)
+        self.assertEqual(self.start()["cached_descriptions"], expected)
+        self.assertFalse(budget.load_ledger(self.path)["calls"])
+
     def test_explicit_verification_reserve_keeps_prerequisite_check(self):
         self.request["contact_fields"] = ["email"]
         self.start(verification_reserve_credits=.4)
