@@ -1073,6 +1073,80 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(len([r for r in self.provider.requests if r["operation"] == "describe"]), 3)
         self.assertEqual(len(self.provider.requests), calls + 1)
 
+    def test_long_contract_help_is_compact_and_saved_detail_is_losslessly_pageable(self):
+        self.start()
+        description = "Allowed category guidance. " * 1200
+        enum = [f"category-{i}" for i in range(60)]
+        full = {}
+        def described(request, capture):
+            body, code = self.provider(request, capture)
+            if request["operation"] == "describe":
+                contract = body["results"][0]
+                contract["inputSchema"]["fields"][0]["description"] = description
+                contract["inputSchema"]["jsonSchema"].update(required=["url"], properties={
+                    "url": {"type": "string", "description": description},
+                    "category": {"type": "string", "enum": enum},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 1}})
+                full.update(copy.deepcopy(contract))
+            return body, code
+        self.tools.execute = described
+        view = self.tools.inspect(tool="harvestapi_get_company", refresh=True)["tool"]
+        self.assertLess(len(json.dumps(view)), len(json.dumps(full)) // 10)
+        schema = view["inputSchema"]["jsonSchema"]
+        self.assertEqual(schema["required"], ["url"])
+        self.assertEqual(schema["properties"]["limit"], full["inputSchema"]["jsonSchema"]["properties"]["limit"])
+        field = schema["properties"]["category"]["enum"]["detail_field"]
+        self.assertEqual(self.tools.inspect(tool="harvestapi_get_company", field=field, offset=20)["tool"], enum[20:30])
+        calls = len(self.provider.requests)
+        restored, offset = "", 0
+        while offset is not None:
+            page = self.tools.inspect(tool="harvestapi_get_company", field="inputSchema.fields.0.description", offset=offset)
+            restored += page["tool"]
+            offset = page["next_offset"]
+        self.assertEqual(restored, description)
+        self.assertEqual(self.tools._description("harvestapi_get_company"), full)
+        with self.assertRaisesRegex(ValueError, "input.checks\\[0\\].inputs.*missing required fields: url"):
+            self.lookup(check(inputs={"category": "category-50"}))
+        self.assertEqual(len(self.provider.requests), calls)
+        self.assertFalse(budget.load_ledger(self.path)["calls"])
+        self.lookup()
+        self.assertEqual(len(self.provider.requests), calls + 1)
+
+    def test_reference_corrections_include_exact_input_path_and_saved_choices(self):
+        self.start()
+        ref = self.lookup()["lookups"][0]["results"][0]["ref"]
+        row = {"target": "example.test", "decision": "hold_account", "reason": "Review fit",
+               "account_fit": {"ref": "mistyped:0"}}
+        before = self.path.read_bytes(), budget.ledger_path(self.path).read_bytes(), len(self.provider.requests)
+        for bad in ("mistyped:0", ref.rsplit(":", 1)[0] + ":999"):
+            row["account_fit"]["ref"] = bad
+            with self.assertRaises(ValueError) as error:
+                self.tools.call("tyche_review", {"companies": [row]})
+            self.assertIn("input.companies[0].account_fit.ref", str(error.exception))
+            self.assertIn(ref, str(error.exception))
+            self.assertIn("example.test", str(error.exception))
+            self.assertEqual((self.path.read_bytes(), budget.ledger_path(self.path).read_bytes(), len(self.provider.requests)), before)
+        row["account_fit"]["ref"] = ref
+        self.tools.call("tyche_review", {"companies": [row]})
+        self.assertEqual(len(self.provider.requests), before[2])
+
+    def test_input_corrections_show_valid_fields_and_leave_paid_work_untouched(self):
+        self.start()
+        before = self.path.read_bytes(), len(self.provider.requests)
+        with self.assertRaisesRegex(ValueError, r"input.companies\[0\].*input.sources"):
+            self.tools.call("tyche_review", {"companies": [{"target": "example.test", "decision": "hold_account",
+                "reason": "Needs evidence", "sources": []}]})
+        with self.assertRaisesRegex(ValueError, r"input.limit exceeds its maximum of 10"):
+            self.tools.call("tyche_inspect", {"limit": 50})
+        with self.assertRaisesRegex(ValueError, r"input.checks has 4 items; allowed count: 1–3"):
+            self.lookup(*[check() for _ in range(4)])
+        with self.assertRaisesRegex(ValueError, r"input.checks\[0\].inputs.*wrong.*allowed fields: \['url'\]"):
+            self.lookup(check(inputs={"url": "https://example.test", "wrong": "value"}))
+        with self.assertRaisesRegex(ValueError, r"input.field.*stop_audit.route_frontier"):
+            self.tools.call("tyche_inspect", {"field": "route_frontier"})
+        self.assertEqual((self.path.read_bytes(), len(self.provider.requests)), before)
+        self.assertFalse(budget.load_ledger(self.path)["calls"])
+
     def test_catalog_pages_show_usable_tools_and_keep_original_evidence_indices(self):
         self.start()
         rows = [{"toolId": "monitor", "callable": False, "deployCommand": "monitor setup"}] * 10

@@ -32,9 +32,11 @@ or implementation-code reads. Resume saved work with `tyche_inspect()`.
 1. **Choose ready work.** Prefer affordable, unblocked `completion_candidates` before discovery.
    Read [tools.md](references/tools.md#choose-by-evidence-gap) once before tool selection;
    match sources to requested evidence.
-   Inspect capabilities with `tyche_inspect(query=...)`; schemas with `tool=...`.
-   Reuse receipts/descriptions; refresh descriptions after
-   schema/price/access changes. Pilot unproven operations/filters before
+   Find capabilities with `tyche_inspect(query=...)`; learn each selected tool once
+   with `tool=...`. Its compact description includes inputs, constraints and pricing;
+   use `field` for omitted detail only when needed. Code checks the full saved
+   contract and price before dispatch. Reuse descriptions; refresh only after
+   evidence of schema/price/access changes. Pilot unproven operations/filters before
    batching; preserve native limits.
 2. **Check up to three companies concurrently.** Send `tyche_lookup` 1–3 independent
    `checks` across phases: target, phase, purpose, tool and native inputs.

@@ -10,6 +10,8 @@ not as an upfront bundle.
 
 The main workflow is the research loop in [SKILL.md](../SKILL.md). This reference
 preserves the detailed qualification, spending, receipt, and completion rules.
+Native tools implement the receipt, ID and budget mechanics below; supply research
+choices and judgments rather than rebuilding those records.
 Command paths below are relative to the skill directory, not this reference.
 
 ## Operating rules
@@ -24,16 +26,18 @@ Command paths below are relative to the skill directory, not this reference.
   Keep each company's account, buyer and email steps in order; contact lookup
   requires passing account evidence for that company.
 - Discover live Deepline capabilities with `search`, inspect a chosen tool with
-  `describe`, and confirm its live input and price before every `execute`.
-  Never invent or pin a Deepline tool ID. Optional provider hypotheses such as
+  `tyche_inspect(tool=...)` once, and reuse its saved description. Native lookup
+  code checks inputs, availability and pricing before dispatch. Read omitted
+  detail with `field` only when needed; refresh after a confirmed contract or
+  access change. Never invent a Deepline tool ID. Optional hypotheses such as
   PredictLeads events, HarvestAPI LinkedIn posts, TheirStack jobs/projects, or
   DiscoLike niche discovery are choices to test, not a mandatory fanout.
 - Start with available no-cost company research; paid scraping is not free.
   Pilot company-discovery routes with at most 10 returned rows and one paid call.
   Once an account passes, buy only 1-3 relevant contacts for that missing company
   using native company/title filters and result limits. Do not buy a broad
-  people batch to fill a few known company gaps. Price and protect the remaining
-  email-verification work before expanding discovery or buying backups.
+  people batch to fill a few known company gaps. Code prices and protects the
+  remaining email-verification work before further paid discovery or backups.
   Inspect rows, evidence, duplicates, misses, provider status, and cost before
   expanding. No automatic retry; a timeout or other uncertain paid outcome is
   unresolved and needs a different route.
@@ -53,16 +57,16 @@ Command paths below are relative to the skill directory, not this reference.
   explicit empty array opts out, and an explicit phone-only array overrides
   the email default. Retrieve contact data only after the identity/current-role
   gate. Never fabricate a value or infer a current role from model memory.
-- Before storing any email, discover and describe a current ZeroBounce email
-  validation capability through Deepline, then validate the exact address.
-  Do not pin its Deepline tool ID. Only an explicit, trimmed, case-insensitive
+- Before storing any email, validate the exact address through the available
+  ZeroBounce capability. Reuse its saved description and an existing successful
+  receipt for that address. Only an explicit, trimmed, case-insensitive
   ZeroBounce status of `valid` passes this gate. Reject `invalid`,
   `do_not_mail`, `spamtrap`, and `abuse` with `email_invalid`; retain all other
   statuses as `email_validation_unresolved`, except catch-all/unknown or a
   recorded [service failure](deepline-adapter.md#bounceban-fallback) may
-  receive one budgeted BounceBan check through Deepline. Discover and describe
-  it first; accept only API success plus result deliverable. Preserve both
-  receipts using `email_validation.fallback`. Never override a hard rejection
+  receive one budgeted BounceBan check through Deepline. Inspect its description
+  on first use and reuse it; accept only API success plus result deliverable.
+  Preserve both receipts using `email_validation.fallback`. Never override a hard rejection
   or chain fallbacks. A missing status, missing receipt,
   `no_results`, or failed or uncertain provider call cannot pass by itself.
   Charge each validation execution against the Deepline credit and shared dollar

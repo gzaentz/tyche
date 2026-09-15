@@ -65,9 +65,10 @@ to catalog categories: useful public-data reads can be labeled `admin`, while
 an `automation` result can be a paid research job. Inspect the actual contract
 and side effects; neither category grants execution permission.
 
-For each selected tool, call `describe` before its first `execute` in the run and record
-its live input schema, connection state, and price. Prefer a title-roster tool
-for nuanced roles. If that is unavailable, use broad function and seniority with
+Learn each selected tool once with `tyche_inspect(tool=...)`. Native tools save
+and reuse its description, then check its inputs, connection and price before
+dispatch. Refresh only after evidence that the saved contract or access changed.
+Prefer a title-roster tool for nuanced roles. If that is unavailable, use broad function and seniority with
 the full user-approved title family. Ignore non-callable or monitor-only search
 hits for this one-shot workflow; do not deploy monitors. Do not use a CEO as an
 automatic fallback.
@@ -212,11 +213,11 @@ rejection may retain a non-positive ZeroBounce verdict for the normal gate.
 ### Deepline ZeroBounce email gate
 
 When the effective contact fields include email, first find and verify the
-person and current role. Then search the live Deepline catalog for a ZeroBounce
-single-address validation capability. Select only a result whose current
-description identifies ZeroBounce email validation, and call `describe` to
-confirm its input, output, connection, and price. The catalog tool ID is runtime
-data; do not copy a fixed ID into this skill.
+person and current role. Use the saved ZeroBounce single-address validation
+capability prepared at startup. Inspect its inputs once if needed; reuse its
+description and successful same-address receipts. Search the live catalog only
+if that capability is unavailable or has changed. Native tools check the saved
+contract and price before dispatch; the catalog tool ID remains runtime data.
 
 ```bash
 python3 .agents/skills/lead-sourcing/scripts/deepline.py --input '{"operation":"search","query":"ZeroBounce validate one known email address"}'

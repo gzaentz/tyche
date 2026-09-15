@@ -262,7 +262,9 @@ def check_tool_contract(receipt, request):
     if missing:
         raise ValueError("provider payload missing required fields: " + ", ".join(sorted(missing)))
     if native.get("additionalProperties") is False and set(payload) - set(native.get("properties", {})):
-        raise ValueError("provider payload contains fields absent from the saved input schema")
+        allowed = sorted(native.get("properties", {}))
+        unknown = sorted(set(payload) - set(allowed))
+        raise ValueError(f"provider payload contains fields absent from the saved input schema: {unknown}; allowed fields: {allowed}")
     for field in fields:
         name, kind = field.get("name"), field.get("type")
         if name not in payload:

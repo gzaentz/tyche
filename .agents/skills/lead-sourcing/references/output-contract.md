@@ -9,14 +9,15 @@ ledger alongside these deliverables; they do not change the result schema.
 ## Read by phase
 
 This file stays the single normative contract. Do not load it all upfront:
-locate the relevant heading and read its section. Schemas are unchanged;
-inspect the definitions needed for the record being written, then validate the
-complete artifact. All applicable semantic rules still apply.
+locate the relevant heading and read its section. Native tools own receipt
+construction, stored-schema validation and export. Consult raw result-schema
+definitions only for a specific unresolved tool error or compatibility work.
+All applicable semantic rules still apply.
 
 | When | Sections |
 |---|---|
 | Before discovery | [Lifecycle invariants](#lifecycle-invariants), [Input contract](#input-contract), [Timing](#timing). |
-| Before the first route receipt | [Semantic checks](#semantic-checks), [Accepted-lead sources](#accepted-lead-sources), relevant [result schema](#resultsjson-schema) fields. |
+| Before selecting qualification evidence | [Semantic checks](#semantic-checks), [Accepted-lead sources](#accepted-lead-sources). |
 | Before accepting and describing a company | [Client writing and taxonomy](#client-writing-and-taxonomy-version-12). |
 | Before export and final delivery | [Workbook](#leadsxlsx-contract), [Report minimum contents](#reportmd-minimum-contents), [Final-response checklist](#final-response-checklist); finish [Timing](#timing). |
 

@@ -53,7 +53,10 @@ Lookup returns a route and result references such as `lookup-abc:0`. Inspect a
 route to see its response status/results, or select a result and `field` for
 more detail. Page a saved route with `offset`/`limit` and its returned `next_offset`;
 long text also returns `next_offset`. `tyche_inspect(tool=...)` returns cached
-native inputs/pricing and output field names. Catalog searches show usable tool
+native inputs, constraints/pricing and output field names. Long help and enum
+lists have explicit detail paths; select those with `field` and page with
+`offset`/`limit`. Code validates against the complete saved contract. Learn a
+selected tool once and reuse its description. Catalog searches show usable tool
 summaries first; explicitly non-callable entries stay in the saved receipt. Use
 short provider or capability terms when a search has no callable matches.
 Use `field` for a specific nested
@@ -548,9 +551,11 @@ text and yield a response error, not candidates.
 file processing, not provider success or billing. A local input failure has
 `error_stage: request`; an unrecognized response has `error_stage: response`.
 An explicit remote schema error may have `error_stage: provider`. Do not assume
-every schema error means the request payload was wrong. Before a paid execute,
-compare required fields, types, native limits and cost inputs with the freshly
-discovered descriptor; the adapter does not implement every provider's schema.
+every schema error means the request payload was wrong. Native lookup checks
+the saved contract and cost before dispatch. Use its exact field errors to
+correct inputs; inspect only the missing constraint. Refresh a descriptor when
+there is evidence it changed. The adapter does not implement every provider's
+schema, so provider-specific response errors may still need investigation.
 
 A failed final save returns a nonzero exit code and `receipt_error` while
 preserving the normalized stdout and any previously saved raw response. Check

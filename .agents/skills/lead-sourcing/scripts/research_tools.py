@@ -58,6 +58,14 @@ class OperationalBlock(ValueError):
     """A saved provider/setup failure, distinct from correctable research inputs."""
 
 
+class ReferenceError(ValueError):
+    """A saved selection needs correction; never guess a replacement."""
+
+    def __init__(self, reference, reason):
+        self.reference = reference
+        super().__init__(f"Invalid saved reference {reference!r}: {reason}")
+
+
 TOOLS = {
     "tyche_start": ("Interpret the ICP once; initialize the bound run before other tools. Save each buying signal with importance required or preferred. Preserve supplied product_service as {description, perspective: seller or target}. Supply contact_role_groups or requested_roles; with groups, omit the duplicate requested_roles list and code derives their union. Set max_usd to the approved dollar cap; code supplies default provider credits. Explicit provider caps remain binding. Repeating the same request resumes without resetting spending. Email verification reserve is calculated automatically; omit verification_reserve_credits for ordinary runs.",
         obj({"request": {**OBJECT, "description": "Required: target_count; icp with non-signal must-haves in required_attributes and optional company_types/industries/geographies/exclusions; buying_signals [{kind, importance: required|preferred, query, max_age_days?}]; requested_roles or contact_role_groups {primary, secondary}; time_window {max_age_days}. Optional: product_service {description, perspective: seller|target}, contact_fields, contacts_per_company, signal_match_mode any|all. The launcher supplies original_text; compare it with the interpretation before paid research."}, "max_usd": {"type": "number", "minimum": 0},
@@ -77,8 +85,9 @@ TOOLS = {
 }
 
 
-def validate(value, schema, path="input"):
+def validate(value, schema, path="input", root=None):
     """Validate the small shared tool schemas; provider contracts remain native."""
+    root = schema if root is None else root
     kinds = {"object": isinstance(value, dict), "array": isinstance(value, list),
              "string": isinstance(value, str), "integer": type(value) is int,
              "number": type(value) in (int, float), "boolean": type(value) is bool}
@@ -89,17 +98,21 @@ def validate(value, schema, path="input"):
     if isinstance(value, dict):
         fields = schema.get("properties", {})
         if schema.get("additionalProperties") is False:
-            research_input.object_fields(value, set(fields), path)
+            unknown = sorted(value.keys() - fields.keys())
+            if unknown:
+                locations = ["input." + k for k in unknown if path != "input" and k in root.get("properties", {})]
+                raise ValueError(f"{path} has unknown fields: {unknown}; allowed fields: {sorted(fields)}."
+                                 + (f" Top-level fields belong at: {locations}." if locations else ""))
         missing = set(schema.get("required", [])) - value.keys()
         if missing:
             raise ValueError(f"{path} missing fields: {', '.join(sorted(missing))}")
         for key in fields.keys() & value.keys():
-            validate(value[key], fields[key], path + "." + key)
+            validate(value[key], fields[key], path + "." + key, root)
     if isinstance(value, list):
         if len(value) < schema.get("minItems", 0) or len(value) > schema.get("maxItems", float("inf")):
-            raise ValueError(f"{path} has an invalid number of items")
+            raise ValueError(f"{path} has {len(value)} items; allowed count: {schema.get('minItems', 0)}–{schema.get('maxItems', 'unbounded')}")
         for index, item in enumerate(value):
-            validate(item, schema.get("items", {}), f"{path}[{index}]")
+            validate(item, schema.get("items", {}), f"{path}[{index}]", root)
     if isinstance(value, str) and len(value.strip()) < schema.get("minLength", 0):
         raise ValueError(f"{path} must not be empty")
     if type(value) in (int, float):
@@ -126,6 +139,27 @@ def compact(value, depth=0):
     return value
 
 
+def contract_view(value, path=""):
+    """Presentation only. Keep input names/constraints; abbreviate long help/lists."""
+    if isinstance(value, dict):
+        return {k: contract_view(v, f"{path}.{k}" if path else k) for k, v in value.items()}
+    if isinstance(value, list):
+        if path.rsplit(".", 1)[-1] in {"enum", "examples"} and len(value) > 20:
+            return {"preview": value[:20], "total": len(value), "detail_field": path}
+        return [contract_view(v, f"{path}.{i}") for i, v in enumerate(value)]
+    if isinstance(value, str) and path.rsplit(".", 1)[-1] in {"description", "title"} and len(value) > 400:
+        return value[:400] + f"… [full text: inspect field={path}]"
+    return value
+
+
+def reference_paths(value, reference, path="input"):
+    if isinstance(value, dict):
+        return [p for k, v in value.items() for p in reference_paths(v, reference, f"{path}.{k}")]
+    if isinstance(value, list):
+        return [p for i, v in enumerate(value) for p in reference_paths(v, reference, f"{path}[{i}]")]
+    return [path] if value == reference else []
+
+
 class ResearchTools:
     def __init__(self, run_file, *, execute=None, readonly=False, environment=None):
         if Path(run_file).is_symlink():
@@ -149,6 +183,16 @@ class ResearchTools:
             return getattr(self, name.removeprefix("tyche_"))(**arguments)
         except OperationalBlock as exc:
             return self._blocked_result(exc)
+        except ReferenceError as exc:
+            raise self._reference_correction(exc, arguments) from exc
+
+    def _reference_correction(self, error, arguments):
+        target = arguments.get("target") or next((c.get("target") for c in arguments.get("companies", [])
+            if reference_paths(c, error.reference)), None)
+        paths = reference_paths(arguments, error.reference)
+        return ValueError(f"{', '.join(paths) or 'input.ref'}: {error}. "
+                          f"Saved choices: {json.dumps(self._reference_choices(error.reference, target))}. "
+                          "Choose the source that supports the claim; no replacement was selected.")
 
     def _execute(self, request, capture):
         with self._dispatch_slots:
@@ -322,7 +366,7 @@ class ResearchTools:
         if blocker:
             return self._blocked_result(blocker)
         specs = []
-        for original in checks:
+        for index, original in enumerate(checks):
             item = copy.deepcopy(original)
             provider = item.get("provider", "deepline")
             if provider == "deepline":
@@ -352,7 +396,10 @@ class ResearchTools:
                         item["inputs"].setdefault(key, fields[key])
                     for key in fields.keys() - allowed:
                         item["inputs"].pop(key, None)
-                research_input.check_tool_contract({"results": [contract]}, request)
+                try:
+                    research_input.check_tool_contract({"results": [contract]}, request)
+                except ValueError as exc:
+                    raise ValueError(f"input.checks[{index}].inputs ({item['tool']}): {exc}. No paid call was made.") from exc
                 try:
                     cost = self._price(contract, item["inputs"], item.get("max_cost_credits"))
                 except ValueError as exc:
@@ -418,8 +465,21 @@ class ResearchTools:
 
     @staticmethod
     def _field(value, field):
+        prefix = []
         for key in field.split("."):
-            value = value[int(key)] if isinstance(value, list) else value[key]
+            try:
+                selected = value[int(key)] if isinstance(value, list) else value[key]
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                if isinstance(value, dict):
+                    available = [".".join(prefix + [k]) for k in value]
+                    matches = [".".join(prefix + [k, key]) for k, v in value.items() if isinstance(v, dict) and key in v]
+                else:
+                    available = f"indices 0–{len(value) - 1}" if isinstance(value, list) and value else []
+                    matches = []
+                raise ValueError(f"Unknown field {field!r} at {'.'.join(prefix + [key])!r}; available fields: {available}."
+                                 + (f" Matching nested fields: {matches}." if matches else "")) from exc
+            value = selected
+            prefix.append(key)
         return value
 
     @staticmethod
@@ -428,29 +488,51 @@ class ResearchTools:
         # native inputs and pricing, not duplicate SDK/getter implementation help.
         keys = ("toolId", "id", "description", "inputSchema", "pricing", "connected", "callable",
                 "disabled", "disabledReason", "asyncGetAction", "asyncFlow", "defaultExecutionMode")
-        view = {k: contract[k] for k in keys if k in contract}
+        view = {k: contract_view(contract[k], k) for k in keys if k in contract}
         if contract.get("toolId", contract.get("id")) == "harvestapi_get_profile":
             view["stored_planning_prices"] = provider_pricing.PROFILE_PRICES
         output = contract.get("outputSchema")
-        view["output_fields"] = output.get("fields", []) if isinstance(output, dict) else []
+        view["output_fields"] = [{k: f[k] for k in ("name", "type") if k in f}
+                                 for f in output.get("fields", [])] if isinstance(output, dict) else []
+        view["detail_note"] = ("Reuse this description. Long help/enum previews are abbreviated; inspect(tool=..., field=...) "
+            "reads the saved detail with offset/limit. Execution checks the full saved contract and price; refresh only after a contract/access change.")
         return view
+
+    def _reference_choices(self, reference, target=None):
+        routes = [r for r in self._document().get("routes", []) if r.get("operation") not in {"describe", "search"}
+                  or r.get("provider") != "deepline"]
+        matching = [r for r in routes if r["route_id"] == reference.split(":")[0]]
+        routes = matching or [r for r in routes if target is None or r.get("scope") == target][-4:]
+        choices = []
+        for route in routes:
+            try:
+                saved = runner.read_receipt(self.path, route["route_id"])["result"]
+            except (OSError, ValueError):
+                continue
+            rows = saved.get("results", [])
+            if saved.get("receipt_status") != "complete" or saved.get("status") not in {"ok", "partial", "no_results"}:
+                continue
+            choices.append({"route": route["route_id"], "target": route.get("scope"), "tool": route.get("tool"),
+                            "result_refs": [f"{route['route_id']}:{i}" for i, row in enumerate(rows) if isinstance(row, dict)][:10],
+                            "result_count": len(rows)})
+        return choices
 
     def _receipt(self, reference):
         rid = reference.split(":")[0]
         try:
             return runner.read_receipt(self.path, rid)
         except FileNotFoundError as exc:
-            choices = [{"ref": r["route_id"], "target": r.get("scope"), "tool": r.get("tool")}
-                       for r in self._document().get("routes", [])[-8:]]
-            raise ValueError("Unknown saved result reference. Use inspect(target=...) for that company's sources; "
-                             "recent references: " + json.dumps(choices)) from exc
+            raise ReferenceError(reference, "Unknown saved result reference") from exc
 
     def _resolve(self, reference):
         match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9._-]{0,95}):(\d+)", reference)
         if not match:
-            raise ValueError("Select a result reference returned by lookup or inspect")
+            raise ReferenceError(reference, "Select a result reference returned by lookup or inspect: route-id:index")
         rid, index = match[1], int(match[2])
-        saved = self._receipt(rid)["result"]
+        try:
+            saved = self._receipt(rid)["result"]
+        except ReferenceError as exc:
+            raise ReferenceError(reference, "Unknown saved result reference") from exc
         if saved.get("receipt_status") != "complete" or saved.get("status") not in {"ok", "no_results", "partial"}:
             raise ValueError("Selected response is incomplete; recover its receipt first")
         body = saved
@@ -458,7 +540,7 @@ class ResearchTools:
             body, _ = deepline.normalize_response(saved["attempt"]["request"], saved["provider_response"])
         rows = body.get("results", [])
         if index >= len(rows) or not isinstance(rows[index], dict):
-            raise ValueError("Selected result index does not exist")
+            raise ReferenceError(reference, "Selected result index does not exist")
         source = {k: saved[k] for k in ("provider", "operation", "tool") if k in saved}
         source["route_id"] = rid
         return copy.deepcopy(rows[index]), source, saved
@@ -605,7 +687,8 @@ class ResearchTools:
                 return self._review(companies, web, sources, aliases)
             except ValueError as exc:
                 if aliases:
-                    raise ValueError(f"{exc}. Web observations were saved as {json.dumps(aliases)}; reuse these references when correcting the judgment.") from exc
+                    message = f"{exc}. Web observations were saved as {json.dumps(aliases)}; reuse these references when correcting the judgment."
+                    raise (ReferenceError(exc.reference, message) if isinstance(exc, ReferenceError) else ValueError(message)) from exc
                 raise
 
     def _review(self, companies, web, sources, aliases):
@@ -774,7 +857,13 @@ class ResearchTools:
         candidates.sort(key=lambda c: (-int(bool(c["saved_valid_emails"])), -int(c["profile_verified"])))
         return candidates[:3]
 
-    def inspect(self, target=None, ref=None, field=None, tool=None, query=None, recover=None, offset=0, limit=10, refresh=False):
+    def inspect(self, **options):
+        try:
+            return self._inspect(**options)
+        except ReferenceError as exc:
+            raise self._reference_correction(exc, options) from exc
+
+    def _inspect(self, target=None, ref=None, field=None, tool=None, query=None, recover=None, offset=0, limit=10, refresh=False):
         if sum(v is not None for v in (target, ref, tool, query, recover)) > 1:
             raise ValueError("Inspect one company, result, capability query, tool or recovery reference at a time")
         if refresh and not tool:
@@ -787,7 +876,16 @@ class ResearchTools:
         if tool:
             contract = self._description(tool, refresh=refresh)
             self._clear_operational_status()
-            return {"tool": compact(self._field(contract, field)) if field else self._description_view(contract)}
+            if not field:
+                return {"tool": self._description_view(contract)}
+            value = self._field(contract, field)
+            if isinstance(value, str):
+                return {"tool": value[offset:offset + 1800], "total_characters": len(value),
+                        "next_offset": offset + 1800 if offset + 1800 < len(value) else None}
+            if isinstance(value, list):
+                return {"tool": [contract_view(v, f"{field}.{i}") for i, v in enumerate(value[offset:offset + limit], offset)],
+                        "total": len(value), "next_offset": offset + limit if offset + limit < len(value) else None}
+            return {"tool": contract_view(value, field)}
         if query:
             result = runner.run_lookup(self.path, {"request": {"operation": "search", "query": query}}, execute=self._execute)
             return self._lookup_view(result, offset, limit)
@@ -846,8 +944,8 @@ class ResearchTools:
                         "next_offset": offset + limit if offset + limit < len(pending) else None}
             try:
                 return {"value": compact(self._field(self._document(), field))}
-            except (KeyError, IndexError, TypeError) as exc:
-                raise ValueError("Unknown run field; available fields: " + str([*self._document(), "requirements", "costs"])) from exc
+            except ValueError as exc:
+                raise ValueError(f"input.field: {exc} Derived fields: requirements, costs, pending_sources.") from exc
         return {"request": self._document()["request"], "requirements": request_requirements(self._document()["request"]),
                 "request_review": "Compare original_text with these interpreted must-haves and preferences before paid research. Every explicit non-signal must-have belongs in icp.required_attributes; each needs its own evidence check. Only the user can change the criteria.", **self._overview()}
 
