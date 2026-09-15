@@ -32,7 +32,10 @@ Command paths below are relative to the skill directory, not this reference.
   access change. Never invent a Deepline tool ID. Optional hypotheses such as
   PredictLeads events, HarvestAPI LinkedIn posts, TheirStack jobs/projects, or
   DiscoLike niche discovery are choices to test, not a mandatory fanout.
-- Start with available no-cost company research; paid scraping is not free.
+- Choose economical research routes within the budget. Suitable native lookups
+  save provider responses automatically; prefer them when this avoids manual
+  source transfer. Built-in web remains available for useful gaps; record its
+  observed source objects, not serialized tool transcripts. Paid scraping is not free.
   Pilot company-discovery routes with at most 10 returned rows and one paid call.
   Once an account passes, buy only 1-3 relevant contacts for that missing company
   using native company/title filters and result limits. Do not buy a broad

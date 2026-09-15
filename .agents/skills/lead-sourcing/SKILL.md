@@ -55,7 +55,7 @@ or implementation-code reads. Resume saved work with `tyche_inspect()`.
    decisions and selected evidence `ref` values. Reviewed single-result company,
    profile and email-verdict lookups close automatically. Review other used sources
    in `sources`, with their reason and continuation/exhaustion decision. For built-in
-   web tools, include the actual observed response in `web` in the same call.
+   web tools, include observed source objects in `web.response.results`.
    Check `review_due`.
    After two comparable attempts per company/phase without verified progress,
    revisit the matching guide row/live catalog and change strategy before

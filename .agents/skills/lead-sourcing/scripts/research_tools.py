@@ -52,7 +52,9 @@ COMPANY = obj({"target": STRING, "decision": {"enum": ["hold_account", "qualify_
     "primary_contact": OBJECT, "backup_contacts": {"type": "array", "items": OBJECT}}, ("target", "decision", "reason"))
 WEB = obj({"target": STRING, "purpose": STRING, "query": STRING,
     "operation": {"enum": ["search_query", "open", "find", "click"]},
-    "response": OBJECT}, ("target", "purpose", "query", "response"))
+    "response": obj({"status": STRING, "operation": STRING, "error": {},
+        "results": {"type": "array", "items": {**OBJECT, "description": "One observed source: url, text excerpt, and date/date_basis when supplied. Do not paste a serialized tool transcript."}}},
+        ("status", "results"))}, ("target", "purpose", "query", "response"))
 SOURCE = obj({"ref": REFERENCE, "state": {"enum": ["exhausted", "continuable", "blocked"]},
     "reason": STRING, "continuations": {"type": "array", "items": REFERENCE}}, ("ref", "state", "reason"))
 class OperationalBlock(ValueError):
@@ -102,8 +104,11 @@ def validate(value, schema, path="input", root=None):
             unknown = sorted(value.keys() - fields.keys())
             if unknown:
                 locations = ["input." + k for k in unknown if path != "input" and k in root.get("properties", {})]
+                nested = [f"{path}.{parent}.{key}" for key in unknown for parent, child in fields.items()
+                          if key in child.get("properties", {})]
                 raise ValueError(f"{path} has unknown fields: {unknown}; allowed fields: {sorted(fields)}."
-                                 + (f" Top-level fields belong at: {locations}." if locations else ""))
+                                 + (f" Top-level fields belong at: {locations}." if locations else "")
+                                 + (f" Nested fields belong at: {nested}." if nested else ""))
         missing = set(schema.get("required", [])) - value.keys()
         if missing:
             raise ValueError(f"{path} missing fields: {', '.join(sorted(missing))}")
@@ -685,6 +690,7 @@ class ResearchTools:
         return rid
 
     def review(self, companies=(), web=(), sources=()):
+        validate(list(web), {"type": "array", "items": WEB}, "input.web")
         # Expansion of partial contact updates and the existing atomic save
         # share one lock; concurrent reviews cannot overwrite newer fields.
         with self._review_lock:

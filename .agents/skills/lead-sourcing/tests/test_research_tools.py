@@ -1166,6 +1166,28 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual((self.path.read_bytes(), len(self.provider.requests)), before)
         self.assertFalse(budget.load_ledger(self.path)["calls"])
 
+    def test_web_observation_shape_errors_are_precise_and_do_not_save_partial_work(self):
+        self.start()
+        before = self.path.read_bytes()
+        receipts = sorted(self.path.parent.joinpath("receipts").iterdir())
+        observation = {"target": "example.test", "purpose": "Review source", "query": "source query",
+                       "status": "ok", "results": [{"url": "https://example.test/news", "text": "Observed source"}]}
+        with self.assertRaisesRegex(ValueError, r"input.web\[0\].response.results"):
+            self.tools.call("tyche_review", {"web": [observation]})
+        observation["response"] = {"status": observation.pop("status"), "results": observation.pop("results")}
+        for bad_results, expected in (("Pasted tool transcript", r"input.web\[0\].response.results requires array"),
+                                      (["Pasted source"], r"input.web\[0\].response.results\[0\] requires object")):
+            observation["response"]["results"] = bad_results
+            with self.assertRaisesRegex(ValueError, expected):
+                self.tools.review(web=[observation])
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(sorted(self.path.parent.joinpath("receipts").iterdir()), receipts)
+        self.assertFalse(budget.load_ledger(self.path)["calls"])
+        observation["response"]["results"] = [{"url": "https://example.test/news", "text": "Observed source"}]
+        result = self.tools.review(web=[observation])
+        self.assertIn("web:0", result["web_references"])
+        self.assertEqual(self.tools.inspect(ref=result["web_references"]["web:0"] + ":0")["facts"]["text"], "Observed source")
+
     def test_catalog_pages_show_usable_tools_and_keep_original_evidence_indices(self):
         self.start()
         rows = [{"toolId": "monitor", "callable": False, "deployCommand": "monitor setup"}] * 10
