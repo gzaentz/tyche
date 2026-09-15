@@ -252,8 +252,8 @@ function matrixFor(rows, columns = XLSX_COLUMNS, literalText = false) {
   ];
 }
 
-export function sourcesFor(document) {
-  validateOutput(document);
+export function sourcesFor(document, resultsPath) {
+  validateOutput(document, resultsPath);
   const rows = [];
   for (const row of document.accepted) {
     const company = object(row.company);
@@ -262,7 +262,11 @@ export function sourcesFor(document) {
       const url = item.evidence_url ?? item.url;
       const date = item.evidence_date ?? item.date;
       const basis = item.evidence_date_basis ?? item.date_basis;
-      const excerpt = item.evidence_text ?? item.text;
+      let excerpt = item.evidence_text ?? item.text;
+      if (!url && Number.isInteger(item.source?.result_index)) {
+        const source = item.source;
+        excerpt += `\nProvider: ${source.provider} / ${source.tool}\nSaved receipt: ${source.route_id}:${source.result_index}`;
+      }
       const observed = basis === "observed_current" ? date : text(document.retrieved_at).slice(0, 10);
       rows.push({
         Company: text(company.canonical_name), Domain: text(company.domain), Field: field,
@@ -320,7 +324,7 @@ export async function exportXlsx(document, destination, options = {}) {
   const rows = rowsFor(document, options.resultsPath);
   const clientOutput = isClientOutput(document);
   const columns = clientOutput ? CLIENT_XLSX_COLUMNS : XLSX_COLUMNS;
-  const sourceRows = clientOutput ? sourcesFor(document) : [];
+  const sourceRows = clientOutput ? sourcesFor(document, options.resultsPath) : [];
   const lastColumn = clientOutput ? "S" : "R";
   const { Workbook, SpreadsheetFile, FileBlob } = await loadArtifactTool(options.nodeModules);
   const workbook = Workbook.create();

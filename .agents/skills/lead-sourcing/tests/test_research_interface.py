@@ -298,18 +298,18 @@ class LookupTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(), before)
             self.assertEqual(guard.ledger_path(self.path).read_bytes(), ledger)
 
-    def test_review_reminder_is_derived_and_does_not_block_new_research(self):
+    def test_review_reminder_omits_automatically_closed_no_result_routes(self):
         self.describe()
         result = runner.run_lookup(self.path, lookup(), execute=self.fixture.paid_response)
-        self.assertEqual(result["review_due"], {"count": 1, "scopes": ["builder.example"]})
+        self.assertEqual(result["review_due"], {"count": 0, "scopes": [], "sources": []})
         result = runner.run_lookup(self.path, lookup("other.example", query="other"), execute=self.fixture.paid_response)
-        self.assertEqual(result["review_due"]["count"], 2)
+        self.assertEqual(result["review_due"]["count"], 0)
         doc = json.loads(self.path.read_text())
         self.assertEqual(doc["unresolved"], [])  # Code did not invent a qualification judgment.
         builder_route = next(r["route_id"] for r in doc["routes"] if r.get("scope") == "builder.example")
         result = runner.save_review(self.path, {"companies": [{"state": "unresolved", "row": company("builder.example")}],
             "routes": [{"route_id": builder_route, "reason": "Reviewed; the dated signal remains unknown"}]})
-        self.assertEqual(result["review_due"], {"count": 1, "scopes": ["other.example"]})
+        self.assertEqual(result["review_due"], {"count": 0, "scopes": [], "sources": []})
 
     def test_missing_description_and_unknown_price_never_dispatch(self):
         with self.assertRaisesRegex(ValueError, "Describe"):

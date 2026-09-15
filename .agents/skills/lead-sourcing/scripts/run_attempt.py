@@ -16,6 +16,7 @@ from email_receipts import check_fallback, validator_for_tool, verification_fini
 from email_receipts import email_work
 from linkedin_receipts import contact_verification_errors, email_identity_fields
 from provider_output import ResponseFile, load_json
+from source_receipts import read_receipt, request_fingerprint as _fingerprint
 from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
 from validate_run import (BLOCKING_PROVIDER_STATUSES, DETERMINATE_PROVIDER_STATUSES, _company_key,
                           calculate_cost_summary, calculate_review_counts, evaluate_stop, excluded_company,
@@ -100,7 +101,7 @@ def refresh(document):
     return document
 
 
-def _contact_gate(document, action):
+def _contact_gate(document, action, run_file=None):
     # Catalog reads describe available tools; they do not look up contacts.
     if action.get("provider") == "deepline" and action.get("operation") in {"search", "describe"}:
         return
@@ -112,7 +113,7 @@ def _contact_gate(document, action):
     for state in ("accepted", "unresolved"):
         scoped[state] = [r for r in document.get(state, [])
                          if isinstance(r, dict) and _company_key(r) == action["scope"]]
-    problems = qualification_errors(scoped)
+    problems = qualification_errors(scoped, run_file=run_file)
     if problems:
         raise ValueError("; ".join(problems))
     rows = [r for r in document.get("accepted", []) + document.get("unresolved", [])
@@ -129,23 +130,25 @@ def _contact_gate(document, action):
     raise ValueError("contact lookup requires passing account evidence; unknown stays unresolved")
 
 
+def pending_source_reviews(document):
+    """Attempted sources still open in the existing frontier, including discovery."""
+    attempted = {r["route_id"] for r in document.get("routes", [])}
+    return [{"ref": r["route_id"], "target": r.get("scope"), "reason": r.get("reason")}
+            for r in document.get("stop_audit", {}).get("route_frontier", [])
+            if r["route_id"] in attempted and r.get("state") in {"untried", "continuable"}]
+
+
 def review_reminder(document):
-    """An advisory derived from existing records, not another research gate."""
-    saved = {_company_key(row) for state in ("accepted", "unresolved", "rejected")
-             for row in document.get(state, []) if isinstance(row, dict)}
-    open_ids = {r.get("route_id") for r in document.get("stop_audit", {}).get("route_frontier", [])
-                if isinstance(r, dict) and r.get("state") == "continuable"}
-    scopes = sorted({r["scope"] for r in document.get("routes", [])
-                     if isinstance(r, dict) and r.get("scope") not in (None, "discovery") and r.get("entity_type") != "tool_catalog"
-                     and r.get("provider_status") in DETERMINATE_PROVIDER_STATUSES
-                     and (r["scope"] not in saved or r.get("route_id") in open_ids)})
-    return {"count": len(scopes), "scopes": scopes[:3]}
+    """Compact advice from the same pending sources used at finalization."""
+    pending = pending_source_reviews(document)
+    scopes = list(dict.fromkeys(r["target"] for r in pending))
+    return {"count": len(pending), "scopes": scopes[:3], "sources": pending[:3]}
 
 
 def _email_gate(run_file, document, action, request):
     if not email_work(action, request):
         return
-    _contact_gate(document, dict(action, phase="contact_discovery"))
+    _contact_gate(document, dict(action, phase="contact_discovery"), run_file)
     rows = [r for state in ("accepted", "unresolved") for r in document.get(state, [])
             if _company_key(r) == action["scope"]]
     contacts = [(r.get("company", r.get("candidate", {})), c) for r in rows
@@ -288,7 +291,7 @@ def save_review(run_file, review):
         scoped = dict(document)
         for state in ("accepted", "unresolved", "rejected"):
             scoped[state] = [r for r in document.get(state, []) if _company_key(r) in changed]
-        problems = accepted_errors(scoped, run_file=run_file, fill_missing=True) + qualification_errors(scoped)
+        problems = accepted_errors(scoped, run_file=run_file, fill_missing=True) + qualification_errors(scoped, run_file=run_file)
         if problems:
             raise ValueError("; ".join(problems))
 
@@ -360,15 +363,6 @@ def save_review(run_file, review):
 
     mutate(run_file, update)
     return result
-
-
-def _fingerprint(provider, request):
-    ignored = {"spend", "timeout_seconds", "entity_type", "output_file", "target_company_linkedin_url"}
-    if provider == "deepline":
-        ignored.update({"limit", "input", "name", "op", "q"})
-    payload = {k: v for k, v in request.items() if k not in ignored}
-    encoded = json.dumps([provider, payload], sort_keys=True, ensure_ascii=True, allow_nan=False)
-    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def _validate_spec(spec, label="input", *, plan_only=False):
@@ -443,7 +437,7 @@ def _prepare(run_file, validated):
 
     def plan(document):
         refresh(document)
-        _contact_gate(document, action)
+        _contact_gate(document, action, run_file)
         _email_gate(run_file, document, action, request)
         if provider == "deepline" and operation == "execute" and request.get("tool") == "harvestapi_get_profile":
             for row in document.get("accepted", []) + document.get("unresolved", []):
@@ -699,26 +693,6 @@ def cli_output(result):
             body["display_note"] = "Compact LinkedIn facts; omitted fields and full provider data remain in receipt_file."
         output["result"] = body
     return output
-
-
-def read_receipt(run_file, route_id):
-    """Read saved evidence through the same display projection used at dispatch."""
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", route_id):
-        raise ValueError("invalid route ID")
-    run_file = Path(run_file).resolve(strict=True)
-    path = run_file.parent / "receipts" / (route_id + ".json")
-    body = budget_guard.read_object(path)
-    if body.get("run_fingerprint") != budget_guard.run_fingerprint(run_file):
-        raise ValueError("saved response belongs to another run or lacks run identity; preserve it and reconcile its origin")
-    document = budget_guard.read_object(run_file)
-    routes = document.get("routes", []) + document.get("stop_audit", {}).get("route_frontier", [])
-    if not any(isinstance(route, dict) and route.get("route_id") == route_id for route in routes):
-        raise ValueError("saved response has no planned route in this run")
-    for route in routes:
-        if isinstance(route, dict) and route.get("route_id") == route_id:
-            if any(route.get(key) != body.get(key) for key in ("request_fingerprint", "provider")):
-                raise ValueError("saved response does not match this route's request/provider; preserve it and reconcile its origin")
-    return {"route_id": route_id, "receipt_file": str(path), "result": body}
 
 
 def _public_web_observation(body, response):

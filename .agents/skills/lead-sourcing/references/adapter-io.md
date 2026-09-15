@@ -72,6 +72,11 @@ Example review inputs, with references selected from actual results:
  "sources":[{"ref":"lookup-source","state":"exhausted","reason":"Reviewed the complete product page"}]}
 ```
 
+Progress's `review_due` and finalization's `pending_sources` come from the same
+open saved lookups, including discovery. Use `tyche_inspect(field="pending_sources")`
+with `offset`/`limit` to page them. Review the existing receipts; do not repeat a
+lookup just to record a decision. Closed aliases do not create review reminders.
+
 Evidence refs expand into saved source/URL/date/text. Usually use `{"ref":"..."}`
 and put the qualification judgment in its `claim`, without copying source fields
 again. Inspect `requirements` and select an `attribute:N` or `signal:N` as a check's
@@ -80,7 +85,10 @@ or semantic matching service is used. For a new check, omit `criterion`, `signal
 and `importance`. Put multiple supporting sources
 in that check's evidence array. Unknown kinds or conflicting importance are
 input errors, not new requirements. Aviato funding refs retain the supplied announcement date and round name;
-they do not decide which funding stage is current. Compatible `sources` decisions
+they do not decide which funding stage is current. For a requested company attribute,
+a funding ref can use its verified, company-bound receipt without a public URL.
+Keep the captured date/text unchanged and explain the stage judgment in `claim`.
+Signals still require a source URL. Compatible `sources` decisions
 for different results in one lookup are combined into its existing route review;
 conflicting states require one explicit decision for that lookup.
 Supply reviewed `text`, `date` and `date_basis` only when interpreting an event, distinguishing announcement

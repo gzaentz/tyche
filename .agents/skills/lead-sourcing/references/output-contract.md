@@ -403,7 +403,8 @@ top-level result list or hide rejected/unresolved rows in a count.
         "provider": {"type": "string", "minLength": 1},
         "operation": {"type": "string", "minLength": 1},
         "tool": {"type": "string", "minLength": 1},
-        "route_id": {"type": "string", "minLength": 1}
+        "route_id": {"type": "string", "minLength": 1},
+        "result_index": {"type": "integer", "minimum": 0, "description": "Helper-supplied index of a verified structured funding record when no public source URL exists."}
       }
     },
     "account_fit": {
@@ -424,7 +425,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "additionalProperties": false,
       "required": ["url", "date", "date_basis", "text", "source"],
       "properties": {
-        "url": {"$ref": "#/$defs/url"},
+        "url": {"anyOf": [{"$ref": "#/$defs/url"}, {"type": "null"}], "description": "Null only for a receipt-verified structured company attribute; signals still require HTTP/HTTPS source URLs."},
         "date": {"$ref": "#/$defs/date"},
         "date_basis": {"enum": ["published", "posted", "updated", "observed_current"]},
         "text": {"type": "string", "minLength": 1},
@@ -1327,6 +1328,13 @@ publicly published email is sourced to that page, not to ZeroBounce. Preserve
 both validation tools when fallback was used. Mark missing attribution unknown;
 do not invent it or make another paid call solely to label it.
 
+For a non-signal check of a requested company attribute, a saved Aviato funding
+result may have `url: null`. Its helper-supplied `source.result_index` selects the
+raw receipt record. Validation requires a successful receipt bound to this run
+and company, with the original funding stage, announcement date and text. Put
+interpretation in `claim`; code does not decide whether the stage satisfies the
+request. This exception does not apply to account-fit, contact or signal evidence.
+
 Summarize the number of accepted companies first discovered by each channel/tool
 and accepted emails supplied by each finder or public source, plus validation
 counts. Assign one original discovery source and one selected email source per
@@ -1456,6 +1464,8 @@ leave `Evidence Date` blank and put the original evidence date in `Observed On`.
 Otherwise use the run's retrieval date for `Observed On`. Export dates as typed
 Excel dates. A classification note gets an `Industry` source row with blank URL
 and dates; it explains the selected pair and does not replace source evidence.
+Receipt-backed funding attributes leave `Source URL` blank and include the
+provider, tool and saved result reference in `Evidence Text`.
 The `Signals` cell uses one block per signal/source, labels observation dates
 `Observed on` and other evidence dates `Source date`, and omits missing values.
 It does not infer event dates. Store all reviewed signals in the existing

@@ -39,7 +39,7 @@ class FixtureProvider:
         self.requests.append(copy.deepcopy(request))
         tool = request.get("tool", "fixture-search")
         if request["operation"] != "execute":
-            key = "email" if tool in {"zerobounce_validate", "bounceban_verify_single"} else "url" if tool.startswith("harvestapi") else "query"
+            key = "email" if tool in {"zerobounce_validate", "bounceban_verify_single"} else "url" if tool.startswith("harvestapi") else "website" if tool == "aviato_get_company_funding_rounds" else "query"
             fields = ["first_name", "last_name", "domain"] if tool in {"fixture_email_finder", "hunter_email_finder"} else [key]
             return {"provider": "deepline", "operation": request["operation"], "status": "ok", "results": [{
                 "toolId": tool, "callable": True, "connected": True,
@@ -86,6 +86,14 @@ class ResearchToolTests(unittest.TestCase):
         return [{"criterion": "partnership", "signal": "PARTNERSHIP", "status": "pass",
                  "claim": "Fixture partnership reviewed", "evidence": [{"ref": ref,
                      "text": "Fixture company announced the requested partnership."}]}]
+
+    def saved_funding(self, target="example.test"):
+        rows = [{"id": "round-c", "name": "Series C - ExamplePay", "stage": "Series C",
+                 "announcedOn": "2024-11-28T00:00:00.000Z", "moneyRaised": 45000000}]
+        self.provider.raw = {"toolResponse": {"rawV2": {"fundingRounds": rows}},
+                             "output_preview": {"kind": "list", "rowCount": len(rows), "preview": rows}}
+        return self.lookup(check(target, tool="aviato_get_company_funding_rounds",
+            inputs={"website": "https://" + target}))["lookups"][0]["results"][0]["ref"]
 
     def selected_contact(self, target="example.test", first="Ada", last="Example"):
         """A reviewed account and current person, all from local provider fixtures."""
@@ -436,15 +444,33 @@ class ResearchToolTests(unittest.TestCase):
             result = self.tools.finish()
         self.assertEqual(result["status"], "needs_research")
         self.assertFalse(result["delivery_allowed"])
-        self.assertEqual(result["progress"]["review_due"]["count"], 0)
+        self.assertEqual(result["progress"]["review_due"]["count"], 1)
+        self.assertEqual(result["progress"]["review_due"]["sources"], result["pending_sources"])
+        self.assertEqual(self.tools.inspect(field="pending_sources")["items"], result["pending_sources"])
         self.assertEqual([s["ref"] for s in result["pending_sources"]], [lookup["route"]])
         self.assertEqual(result["pending_sources"][0]["target"], "discovery")
         self.tools.review(sources=[{"ref": lookup["route"], "state": "exhausted",
             "reason": "Fixture results reviewed; no further page or qualifying evidence."}])
         self.assertNotIn(lookup["route"], [s["ref"] for s in self.tools.finish().get("pending_sources", [])])
+        self.assertEqual(self.tools.inspect()["review_due"]["count"], 0)
         self.assertEqual(len(self.provider.requests), calls)
         self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
         exported.assert_not_called()
+
+    def test_source_reminders_ignore_closed_aliases_and_page_all_open_sources(self):
+        self.start()
+        first = self.lookup(check(target="old-alias"))["lookups"][0]["route"]
+        self.tools.review(sources=[{"ref": first, "state": "exhausted", "reason": "Wrong identity; source reviewed"}])
+        for i in range(4):
+            self.lookup(check(target="discovery", phase="account_discovery", approach=f"source family {i}",
+                              tool="fixture-search", inputs={"query": str(i)}))
+        progress = self.tools.inspect()["review_due"]
+        self.assertEqual((progress["count"], progress["scopes"]), (4, ["discovery"]))
+        self.assertEqual(len(progress["sources"]), 3)
+        a = self.tools.inspect(field="pending_sources", limit=2)
+        b = self.tools.inspect(field="pending_sources", offset=a["next_offset"], limit=2)
+        self.assertIsNone(b["next_offset"])
+        self.assertEqual(a["items"] + b["items"], self.tools.finish()["pending_sources"])
 
     def test_native_fallback_reuses_both_receipts_and_exposes_no_repeat_decision(self):
         self.start()
@@ -753,12 +779,89 @@ class ResearchToolTests(unittest.TestCase):
             {"name": "Undated round - ExamplePay"}]
         self.provider.raw = {"toolResponse": {"rawV2": {"fundingRounds": rows}},
                              "output_preview": {"kind": "list", "rowCount": len(rows), "preview": rows}}
-        results = self.lookup(check(tool="aviato_get_company_funding_rounds", inputs={"query": "example.test"}))["lookups"][0]["results"]
+        results = self.lookup(check(tool="aviato_get_company_funding_rounds", inputs={"website": "https://example.test"}))["lookups"][0]["results"]
         evidence = self.tools._evidence({"ref": results[0]["ref"]})
         self.assertEqual((evidence["date"], evidence["date_basis"], evidence["text"]),
                          ("2024-11-28", "published", "Series B - ExamplePay"))
         with self.assertRaisesRegex(ValueError, "no publication/event date"):
             self.tools._evidence({"ref": results[1]["ref"]})
+
+    def test_url_free_funding_reuses_raw_receipt_for_company_review(self):
+        self.request["icp"]["required_attributes"] = ["Funding stage is Series C or later"]
+        self.start()
+        company_ref = self.lookup()["lookups"][0]["results"][0]["ref"]
+        funding_ref = self.saved_funding()
+        before = budget.ledger_path(self.path).read_bytes()
+        calls = len(self.provider.requests)
+        self.tools.review(companies=[{"target": "example.test", "decision": "qualify_account", "reason": "Reviewed stage and fit",
+            "company": {"ref": company_ref}, "account_fit": {"ref": company_ref},
+            "qualification_checks": self.qualifying_signal(company_ref) + [{"requirement_ref": "attribute:0", "status": "pass",
+                "claim": "Funding history records Series C; this is a stage check, not a recent event", "evidence": [{"ref": funding_ref}]}]}])
+        saved = json.loads(self.path.read_text())
+        evidence = saved["unresolved"][0]["qualification_checks"][-1]["evidence"][0]
+        self.assertIsNone(evidence["url"])
+        self.assertEqual(evidence["source"]["result_index"], 0)
+        self.assertFalse(runner.qualification_errors(saved, run_file=self.path))
+        self.assertTrue(runner.qualification_errors(saved))  # No receipt access cannot pass.
+        packet = self.tools.inspect(target="example.test", field="evidence_review")
+        self.assertEqual(packet["sources"][funding_ref]["record"]["id"], "round-c")
+        self.assertEqual(packet["sources"][funding_ref]["date"], "2024-11-28")
+        self.assertEqual(len(self.provider.requests), calls)
+        self.assertEqual(budget.ledger_path(self.path).read_bytes(), before)
+
+    def test_url_free_funding_rejects_wrong_identity_tampering_and_signal_use(self):
+        from source_receipts import funding_record
+        from validate_run import qualification_evidence_error, source_evidence_error
+        self.request["icp"]["required_attributes"] = ["Funding stage is Series C or later"]
+        self.start()
+        ref = self.saved_funding()
+        evidence = self.tools._evidence({"ref": ref})
+        document = json.loads(self.path.read_text())
+        company = {"domain": "example.test"}
+        check_value = {"criterion": self.request["icp"]["required_attributes"][0]}
+        receipt_path = self.path.parent / "receipts" / (ref.split(":")[0] + ".json")
+        receipt_bytes = receipt_path.read_bytes()
+        original = json.loads(receipt_bytes)
+        for label, replacement in (("foreign run", {"run_fingerprint": "other"}),
+                ("wrong request", {"request_fingerprint": "other"}),
+                ("incomplete", {"receipt_status": "pending"}),
+                ("unknown outcome", {"status": "error"}),
+                ("pending", {"pending_verification": {"id": "pending"}}),
+                ("missing raw", {"provider_response": None})):
+            with self.subTest(label=label):
+                receipt_path.write_text(json.dumps({**original, **replacement}))
+                with self.assertRaises(ValueError):
+                    funding_record(self.path, document, company, evidence)
+        receipt_path.write_bytes(receipt_bytes)
+        for field, value in (("date", "2026-01-01"), ("text", "Different claim"), ("date_basis", "observed_current")):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                funding_record(self.path, document, company, {**evidence, field: value})
+        for field, value in (("result_index", 3), ("result_index", True), ("tool", "web_search")):
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                funding_record(self.path, document, company, {**evidence, "source": {**evidence["source"], field: value}})
+        with self.assertRaisesRegex(ValueError, "identify this company"):
+            funding_record(self.path, document, {"domain": "other.test"}, evidence)
+        altered = copy.deepcopy(original)
+        altered["attempt"]["request"]["payload"]["website"] = "https://other.test"
+        receipt_path.write_text(json.dumps(altered))
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            funding_record(self.path, document, {"domain": "other.test"}, evidence)
+        altered = copy.deepcopy(original)
+        altered["results"][0]["stage"] = "Invented Series D"
+        receipt_path.write_text(json.dumps(altered))
+        self.assertEqual(funding_record(self.path, document, company, evidence)["stage"], "Series C")
+        altered["provider_response"]["body"]["toolResponse"]["rawV2"]["fundingRounds"][0]["website"] = "https://other.test"
+        altered["provider_response"]["body"]["output_preview"]["preview"][0]["website"] = "https://other.test"
+        receipt_path.write_text(json.dumps(altered))
+        with self.assertRaisesRegex(ValueError, "different company"):
+            funding_record(self.path, document, company, evidence)
+        receipt_path.write_bytes(receipt_bytes)
+        self.assertIsNone(qualification_evidence_error(evidence, "stage", document, company, check_value, self.path))
+        for disallowed in ({**check_value, "signal": "FUNDING"}, {"criterion": "unrequested stage"}):
+            self.assertIn("signals require a source URL", qualification_evidence_error(evidence, "signal", document, company, disallowed, self.path))
+        self.assertIn("HTTP/HTTPS", source_evidence_error(evidence, "account_fit"))
+        receipt_path.unlink()
+        self.assertIn("No such file", qualification_evidence_error(evidence, "stage", document, company, check_value, self.path))
 
     def test_compatible_result_reviews_merge_into_one_saved_route_decision(self):
         self.start()
@@ -1124,6 +1227,7 @@ class ResearchToolTests(unittest.TestCase):
         self.request = template["request"]
         self.request["target_count"] = 1
         self.request["buying_signals"] = [{"kind": row["signal_evidence"]["signal"], "query": "Recent warehouse integration"}]
+        self.request["icp"]["required_attributes"] = ["Funding stage is Series C or later"]
         original = self.path.parent.parent / "request.txt"
         original.write_text("Find one company matching the supplied fixture criteria; verify one current buyer.")
         self.tools.environment["TYCHE_REQUEST_FILE"] = str(original)
@@ -1133,17 +1237,21 @@ class ResearchToolTests(unittest.TestCase):
             "employeeCountRange": {"start": 201, "end": 500},
             "locations": [{"headquarter": True, "country": "United States", "geographicArea": "Ohio"}]}}
         selected = self.lookup(check("example.com", inputs={"url": company["linkedin_url"]}))["lookups"][0]["results"][0]["ref"]
+        funding_ref = self.saved_funding("example.com")
         research = {"target": "example.com", "decision": "qualify_account", "reason": "Product and recent integration verified",
             "company": {"ref": selected, **{k: company[k] for k in ("industry", "sub_industry", "description", "classification_note")}},
             "account_fit": {"ref": "web:0:0", "fit_claim": row["account_fit"]["fit_claim"]},
             "qualification_checks": [{"criterion": "recent integration", "signal": row["signal_evidence"]["signal"],
-                "status": "pass", "claim": "Recent integration verified", "evidence": [{"ref": "web:0:1"}]}],
+                "status": "pass", "claim": "Recent integration verified", "evidence": [{"ref": "web:0:1"}]},
+                {"requirement_ref": "attribute:0", "status": "pass", "claim": "Captured funding history records Series C",
+                 "evidence": [{"ref": funding_ref}]}],
             "intent_details": row["intent_details"]}
         observed = {"target": "example.com", "purpose": "Read product and project announcement", "query": "example.com project announcement",
             "response": {"status": "ok", "results": [{k: evidence[k] for k in ("evidence_url", "evidence_text", "evidence_date", "evidence_date_basis")}
                         for evidence in (row["account_fit"], row["signal_evidence"])]}}
         self.tools.call("tyche_review", {"companies": [research], "web": [observed],
-            "sources": [{"ref": "web:0", "state": "exhausted", "reason": "Both pages reviewed"}]})
+            "sources": [{"ref": "web:0", "state": "exhausted", "reason": "Both pages reviewed"},
+                        {"ref": funding_ref, "state": "exhausted", "reason": "Funding history reviewed"}]})
         self.provider.raw = {"status": "ok", "element": {"linkedinUrl": person["linkedin_url"], "firstName": "Ada", "lastName": "Example",
             "currentPosition": [{"companyName": company["canonical_name"], "title": person["current_title"], "companyLinkedinUrl": company["linkedin_url"]}],
             "location": {"linkedinText": "Columbus, Ohio, United States", "parsed": {"city": "Columbus", "state": "Ohio", "countryFull": "United States"}}}}
@@ -1196,7 +1304,7 @@ class ResearchToolTests(unittest.TestCase):
         corrected = json.loads(self.path.read_text())["unresolved"][0]
         self.assertEqual(corrected["primary_contact"], saved["accepted"][0]["primary_contact"])
         self.assertEqual(len([r for r in self.provider.requests if r.get("tool") == "zerobounce_validate" and r.get("operation") == "execute"]), 1)
-        revised_signal["evidence"] = corrected["qualification_checks"][-1]["evidence"]
+        revised_signal["evidence"] = next(c["evidence"] for c in corrected["qualification_checks"] if c.get("signal"))
         self.tools.review(companies=[{"target": "example.com", "decision": "accept", "reason": "Final writing and source meaning reviewed",
             "qualification_checks": [revised_signal],
             "intent_details": row["intent_details"] + " Its manufacturing business depends on coordinated fulfillment."}])
@@ -1224,6 +1332,11 @@ class ResearchToolTests(unittest.TestCase):
         self.assertIn("Accepted 1 of 1", report)
         self.assertIn("Standard API equivalent", report)
         self.assertTrue(Path(result["preview"]).is_file())
+        import zipfile
+        with zipfile.ZipFile(result["export"]["path"]) as workbook:
+            xml = "\n".join(workbook.read(name).decode() for name in workbook.namelist() if name.endswith(".xml"))
+        self.assertIn("Saved receipt: " + funding_ref, xml)
+        self.assertIn("aviato_get_company_funding_rounds", xml)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from email_receipts import FAILURES as EMAIL_FALLBACK_FAILURES, email_receipt_errors
 from linkedin_receipts import _linkedin_url, employee_range_bounds, linkedin_receipt_errors
+from source_receipts import funding_record
 
 
 ACTIONABLE_FRONTIER_STATES = {"untried", "continuable"}
@@ -235,7 +236,7 @@ def signal_age_errors(request: dict, row: dict, path: str) -> list[str]:
     return errors
 
 
-def qualification_errors(document: dict) -> list[str]:
+def qualification_errors(document: dict, *, run_file=None) -> list[str]:
     if errors := signal_request_errors(document.get("request", {})):
         return errors
     errors = []
@@ -281,7 +282,8 @@ def qualification_errors(document: dict) -> list[str]:
                 if document.get("schema_version") == "1.2":
                     for check in required:
                         for item in (check.get("evidence") if isinstance(check.get("evidence"), list) else []):
-                            if error := source_evidence_error(item, path + ".qualification_checks." + str(check.get("criterion"))):
+                            if error := qualification_evidence_error(item, path + ".qualification_checks." + str(check.get("criterion")),
+                                                                     document, company, check, run_file):
                                 errors.append(error)
                 if excluded_company(document.get("request", {}), row):
                     errors.append(f"{path}: excluded company cannot pass the account gate")
@@ -1369,7 +1371,7 @@ def linkedin_field_errors(document: dict) -> list[str]:
     return errors
 
 
-def source_evidence_error(item, path):
+def source_evidence_error(item, path, *, receipt_verified=False):
     item = item if isinstance(item, dict) else {}
     url, date, basis, excerpt = (item.get(a, item.get(b)) for a, b in (
         ("evidence_url", "url"), ("evidence_date", "date"),
@@ -1380,7 +1382,7 @@ def source_evidence_error(item, path):
     except ValueError:
         date_valid = False
     missing = []
-    if not isinstance(url, str) or re.fullmatch(r"https?://[^\s]+", url) is None:
+    if not (receipt_verified and url is None) and (not isinstance(url, str) or re.fullmatch(r"https?://[^\s]+", url) is None):
         missing.append("url (HTTP/HTTPS source)")
     if not date_valid:
         missing.append("date (YYYY-MM-DD)")
@@ -1397,7 +1399,20 @@ def source_evidence_error(item, path):
     return None
 
 
-def source_evidence_errors(document):
+def qualification_evidence_error(item, path, document, company, check, run_file):
+    if isinstance(item, dict) and item.get("url") is None and isinstance(item.get("source"), dict) and "result_index" in item["source"]:
+        attributes = {_identity(a) for a in document["request"].get("icp", {}).get("required_attributes", [])}
+        if check.get("signal") or _identity(check.get("criterion")) not in attributes:
+            return f"{path}: structured receipts are only supported for non-signal company attributes; signals require a source URL"
+        try:
+            funding_record(run_file, document, company, item)
+        except (OSError, ValueError, TypeError, KeyError, IndexError) as exc:
+            return f"{path}: {exc}"
+        return source_evidence_error(item, path, receipt_verified=True)
+    return source_evidence_error(item, path)
+
+
+def source_evidence_errors(document, *, run_file=None):
     """The evidence shape consumed by the client workbook and source review."""
     errors = []
     if document.get("schema_version") != "1.2":
@@ -1429,7 +1444,10 @@ def source_evidence_errors(document):
                 if not isinstance(items, list):
                     errors.append(f"accepted[{index}].qualification_checks.evidence must be an array")
                     continue
-                evidence += [("qualification_checks." + str(check.get("criterion")), e) for e in items]
+                for item in items:
+                    if error := qualification_evidence_error(item, f"accepted[{index}].qualification_checks." + str(check.get("criterion")),
+                                                             document, company, check, run_file):
+                        errors.append(error)
         for path, item in evidence:
             if error := source_evidence_error(item, f"accepted[{index}].{path}"):
                 errors.append(error)
@@ -1441,7 +1459,7 @@ def accepted_errors(document: dict, *, run_file=None, fill_missing=False) -> lis
     errors = (linkedin_receipt_errors(document, run_file, fill_missing=fill_missing)
               + email_receipt_errors(document, run_file, fill_missing=fill_missing)) if run_file is not None else []
     errors.extend(linkedin_field_errors(document))
-    errors.extend(source_evidence_errors(document))
+    errors.extend(source_evidence_errors(document, run_file=run_file))
     request, accepted = document.get("request", {}), document.get("accepted", [])
     if document.get("schema_version") == "1.2":
         _validate_client_output(accepted, errors)
@@ -1820,7 +1838,7 @@ def validate_run(document: Any, *, require_stop_check: bool = False, now: Option
     if not isinstance(request, dict) or not isinstance(summary, dict):
         return ["request and summary must be objects"]
     if require_stop_check or "stop_check" in document:
-        errors.extend(qualification_errors(document))
+        errors.extend(qualification_errors(document, run_file=run_file))
 
     target = request.get("target_count")
     if not isinstance(target, int) or isinstance(target, bool) or target < 1:
@@ -2148,7 +2166,8 @@ def main() -> int:
         try:
             if not isinstance(document, dict) or not isinstance(document.get("accepted"), list):
                 raise ValueError("results must contain an accepted array")
-            errors = accepted_errors(document, run_file=None if str(args.results) == "-" else args.results) + qualification_errors(document)
+            run_file = None if str(args.results) == "-" else args.results
+            errors = accepted_errors(document, run_file=run_file) + qualification_errors(document, run_file=run_file)
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             errors = [str(exc)]
         print(json.dumps({"valid": not errors, "delivery_allowed": False, "errors": errors}))
