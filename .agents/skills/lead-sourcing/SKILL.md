@@ -5,15 +5,16 @@ description: Source evidence-backed companies with buying signals and requested-
 
 # TYCHE Lead Sourcing
 
-One LLM chooses research and qualification.
-Native tools handle persistence, IDs, receipts, accounting and validation.
+The LLM chooses research and qualification; tools handle bookkeeping and validation.
 No CRM writes or outreach.
 
 ## Setup
 
 Read [workflow rules](references/workflow-rules.md), the [input contract](references/output-contract.md#input-contract)
 and [lifecycle invariants](references/output-contract.md#lifecycle-invariants).
-Interpret the request once, separating buyer roles from hiring signals.
+Interpret the request once: separate must-haves/preferences and buyer roles/hiring
+signals. Preserve product/service description and seller/target perspective in
+`request.product_service`. Mark signals `required` or `preferred`; never strengthen criteria.
 Call `tyche_start` with that `request` and any authorized `max_usd`.
 Code supplies the clock, ledger and verification reserve. Catalog prices take
 precedence over [stored planning rates](references/provider-pricing.md); receipts
@@ -21,26 +22,27 @@ supply actual charges. Defaults: one contact/company; USD 0.50/requested lead.
 Only the user can change criteria. Never import another run or guess prices.
 Credentials and runtime paths come from the launcher.
 
-Use [native examples](references/adapter-io.md#native-tools). Research needs no shell
-bookkeeping or implementation-code reads. CLI instructions are for diagnostics.
+Use [native tools](references/adapter-io.md#native-tools), without shell bookkeeping
+or implementation-code reads. CLI instructions are for diagnostics.
 Resume with `tyche_inspect()` for the saved request and pending work.
 
 ## Research loop
 
 1. **Choose ready work.** Prefer affordable `completion_candidates` before fresh discovery unless blocked. Select tools through [tools.md](references/tools.md).
    Use `tyche_inspect(query=...)` for capabilities or `tool=...` for native schemas.
-   Descriptions are cached; refresh after schema, price or access changes.
+   Refresh cached descriptions after schema, price or access changes.
    Pilot unproven operations/filter shapes before batching. Preserve native limits.
 2. **Check up to three companies concurrently.** Send `tyche_lookup` one to three
    `checks`: target, phase, purpose, tool and native inputs. Batch ready independent
    checks across phases without waiting to fill batches.
-   Review fit, current stage, acquisitions and dated signals before buyers;
+   Review requested fit criteria and dated signals before buyers;
    distinguish announced, conditional, planned and completed activity. Resolve
    company LinkedIn URLs from sources before enrichment; never invent slugs.
    Apply the [qualification policy](references/workflow-rules.md#qualification-policy).
    Required unknowns stay unresolved; evidenced mismatches reject; preferred signals
    only rank. Review each preferred signal once; retain unverified gaps as unknown.
-   Store signals in qualification checks; reuse those facts for `Intent Details`.
+   Use the saved signal `kind` in checks; code supplies importance and checks
+   dates and required `any`/`all` coverage. Reuse facts for `Intent Details`.
    Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
    Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size):
    accepted contacts need country; companies need published employee range and source.
@@ -48,18 +50,17 @@ Resume with `tyche_inspect()` for the saved request and pending work.
    decisions and selected evidence `ref` values. Explicitly review each used source
    in `sources`, with its reason and continuation/exhaustion decision. For built-in
    web tools, include the actual observed response in `web` in the same call.
-   This records observations, not browser execution.
-   Save gaps/rejections immediately and qualified leads promptly. `review_due`
-   identifies outstanding reviews. After two comparable attempts per company/phase without verified progress,
+   Save decisions promptly; `review_due` identifies outstanding reviews.
+   After two comparable attempts per company/phase without verified progress,
    change strategy. Reopen evidence for gaps/contradictions; independent
    profile/email checks remain eligible.
 
 Use `tyche_inspect(ref=..., field=...)` for detail, `target=...` for company state,
 or `recover=...` to record a saved normalized receipt without redispatch.
 Missing responses require reconciliation; never repeat an uncertain paid call.
-Never read the worker's live launcher log; it repeats history.
+Never read the worker's live launcher log.
 
-Continue useful affordable work; report checkpoints. Respect user pauses.
+Continue affordable work; respect user pauses.
 On `operationally_blocked`, save judgments and report its status file. Stop
 discovery/finalization loops; resume after repair with the same ledger. Do not
 reject companies or claim exhaustion because a service failed. Thirty minutes
@@ -83,7 +84,7 @@ claim strength, dates and writing; correct through `tyche_review`. Return the
 current `review_ref` with commentary to validate/export. Never force completion.
 Inspect the preview. Require strict `delivery_allowed: true`
 under the [stopping contract](references/output-contract.md#stopping-check).
-Report shortfalls honestly; exhausted searches do not prove an empty market.
+Report shortfalls; exhausted searches do not prove an empty market.
 
 ## Full cost
 

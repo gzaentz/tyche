@@ -23,8 +23,8 @@ def setup_request():
                 "exclusions": ["tazapay.com"]},
         "requested_roles": ["Head of Payments", "Chief Operating Officer"],
         "contact_role_groups": {"primary": ["Head of Payments"], "secondary": ["Chief Operating Officer"]},
-        "buying_signals": [{"kind": "PARTNERSHIP", "query": "Required partnership or market expansion"},
-                           {"kind": "HIRING", "query": "Preferred integrations or ops hiring", "max_age_days": 90}],
+        "buying_signals": [{"kind": "PARTNERSHIP", "importance": "required", "query": "Required partnership or market expansion"},
+                           {"kind": "HIRING", "importance": "preferred", "query": "Preferred integrations or ops hiring", "max_age_days": 90}],
         "time_window": {"max_age_days": 365}, "contact_fields": []}}
 
 
@@ -540,8 +540,8 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
         path = Path(directory.name) / "results.json"
         sample = client_document()
         request = sample["request"]
-        request["buying_signals"] = [{"kind": "PRODUCT_LAUNCH", "query": "Recent operational integration"},
-                                    {"kind": "HIRING", "query": "Preferred operations hiring", "max_age_days": 90}]
+        request["buying_signals"] = [{"kind": "PRODUCT_LAUNCH", "importance": "required", "query": "Recent operational integration"},
+                                    {"kind": "HIRING", "importance": "preferred", "query": "Preferred operations hiring", "max_age_days": 90}]
         runner.start_run(path, {"request": request, "verification_reserve_credits": 0.1})
         row = sample["accepted"][0]
         # Facts are fixtures; no live research or provider is called in this test.
@@ -612,7 +612,10 @@ class SavedWorkbookJourneyTests(unittest.TestCase):
             "linkedinUrl": size["evidence_url"], "employeeCountRange": {"start": 201, "end": 500}}, {"url": size["evidence_url"]})
         runner.save_review(path, {"companies": [{"scope": "example.com", "stage": "contact",
             "company": {"employee_range_evidence": size}, "account_fit": row["account_fit"],
-            "signal_evidence": row["signal_evidence"], "intent_details": row["intent_details"],
+            "qualification_checks": [{"criterion": "product launch", "signal": "PRODUCT_LAUNCH", "status": "pass",
+                "claim": "Recent integration verified", "evidence": [{
+                    **{key: row["signal_evidence"]["evidence_" + key] for key in ("url", "date", "date_basis", "text")},
+                    "source": row["signal_evidence"]["source"]}]}], "intent_details": row["intent_details"],
             "reason_text": "Business and signal reviewed; verifying current contact details"}],
             "routes": [{"route_id": size["source"]["route_id"], "reason": "Reviewed published LinkedIn size"}]})
 

@@ -82,11 +82,17 @@ class ResearchToolTests(unittest.TestCase):
     def lookup(self, *checks):
         return self.tools.call("tyche_lookup", {"checks": list(checks or [check()])})
 
+    def qualifying_signal(self, ref):
+        return [{"criterion": "partnership", "signal": "PARTNERSHIP", "status": "pass",
+                 "claim": "Fixture partnership reviewed", "evidence": [{"ref": ref,
+                     "text": "Fixture company announced the requested partnership."}]}]
+
     def selected_contact(self, target="example.test", first="Ada", last="Example"):
         """A reviewed account and current person, all from local provider fixtures."""
         ref = self.lookup(check(target))["lookups"][0]["results"][0]["ref"]
         self.tools.review(companies=[{"target": target, "decision": "qualify_account", "reason": "Verified fit",
-            "company": {"ref": ref}, "account_fit": {"ref": ref, "text": "Provides payments infrastructure"}}])
+            "company": {"ref": ref}, "account_fit": {"ref": ref, "text": "Provides payments infrastructure"},
+            "qualification_checks": self.qualifying_signal(ref)}])
         self.provider.raw = {"status": "ok", "element": {"linkedinUrl": "https://www.linkedin.com/in/ada-example/",
             "firstName": first, "lastName": last, "currentPosition": [{"companyName": "ExamplePay",
                 "companyLinkedinUrl": "https://www.linkedin.com/company/examplepay/", "title": "Head of Payments"}],
@@ -184,7 +190,8 @@ class ResearchToolTests(unittest.TestCase):
         self.start()
         ref = self.lookup()["lookups"][0]["results"][0]["ref"]
         self.tools.review(companies=[{"target": "example.test", "decision": "qualify_account", "reason": "Account passed",
-            "company": {"ref": ref}, "account_fit": {"ref": ref, "text": "Provides payments"}}])
+            "company": {"ref": ref}, "account_fit": {"ref": ref, "text": "Provides payments"},
+            "qualification_checks": self.qualifying_signal(ref)}])
         email = check(phase="email_validation", tool="zerobounce_validate", inputs={"email": "ada@example.test"})
         before = budget.ledger_path(self.path).read_bytes()
         with self.assertRaisesRegex(ValueError, "Email work requires verified identity"):
@@ -250,7 +257,7 @@ class ResearchToolTests(unittest.TestCase):
             "query": "https://banner.example/careers", "operation": "open", "response": {"status": "ok", "results": [
                 {"url": "https://banner.example/careers", "text": "Banner Health lists one current nursing vacancy."}]}}])
         self.assertEqual(result["progress"]["summary"]["accepted_companies"], 0)
-        with self.assertRaisesRegex(ValueError, "required evidence"):
+        with self.assertRaisesRegex(ValueError, "required signal coverage"):
             self.tools.review(companies=[{"target": "banner.example", "decision": "qualify_account", "reason": "Try to continue with the unresolved required claim"}])
         saved = json.loads(self.path.read_text())
         self.assertEqual(saved["unresolved"][0]["qualification_checks"][0]["status"], "unknown")
@@ -672,7 +679,7 @@ class ResearchToolTests(unittest.TestCase):
                 "response": {"status": "ok", "results": [{"url": "https://example.test", "text": "Observed facts"}]}}]}
         before = self.path.read_bytes()
         receipt_count = len(list((self.path.parent / "receipts").glob("*.json"))) if (self.path.parent / "receipts").exists() else 0
-        with self.assertRaisesRegex(ValueError, "missing fields: claim, importance"):
+        with self.assertRaisesRegex(ValueError, "missing fields: claim"):
             self.tools.call("tyche_review", payload)
         check = payload["companies"][0]["qualification_checks"][0]
         check.update(importance="required", claim="Product fit still needs review",
@@ -996,7 +1003,8 @@ class ResearchToolTests(unittest.TestCase):
         research = {"target": "example.com", "decision": "qualify_account", "reason": "Product and recent integration verified",
             "company": {"ref": selected, **{k: company[k] for k in ("industry", "sub_industry", "description", "classification_note")}},
             "account_fit": {"ref": "web:0:0", "fit_claim": row["account_fit"]["fit_claim"]},
-            "signal_evidence": {"ref": "web:0:1", "signal": row["signal_evidence"]["signal"]},
+            "qualification_checks": [{"criterion": "recent integration", "signal": row["signal_evidence"]["signal"],
+                "status": "pass", "claim": "Recent integration verified", "evidence": [{"ref": "web:0:1"}]}],
             "intent_details": row["intent_details"]}
         observed = {"target": "example.com", "purpose": "Read product and project announcement", "query": "example.com project announcement",
             "response": {"status": "ok", "results": [{k: evidence[k] for k in ("evidence_url", "evidence_text", "evidence_date", "evidence_date_basis")}
@@ -1029,7 +1037,7 @@ class ResearchToolTests(unittest.TestCase):
         self.assertIn("leads_ready_at", saved["stop_check"])
         packet = self.tools.finish()
         self.assertEqual(packet["status"], "review_required")
-        self.assertIn("One vacancy does not establish rapid hiring", packet["instructions"])
+        self.assertEqual(packet["request"], saved["request"])
         self.assertFalse((self.path.parent / "leads.xlsx").exists())
         revised_signal = {"criterion": "recent integration", "importance": "required", "status": "pass",
             "claim": "The integration announcement is supported", "signal": row["signal_evidence"]["signal"],

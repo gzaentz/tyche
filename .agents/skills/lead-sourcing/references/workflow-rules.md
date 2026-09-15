@@ -213,10 +213,8 @@ once during setup, using the existing research agent:
   the target business, product/service, use case and company size. Search actual
   responsibilities, not just exact titles. A CEO is not an automatic fallback.
 - Roles inside a hiring signal describe company activity, not contact limits.
-  For payments infrastructure without buyer-role instructions, operations,
-  payments or integrations leaders are sensible primary roles; product and
-  partnerships owners can be relevant alternatives. Include risk only where
-  its responsibilities fit. Do not restrict contacts to the advertised vacancies.
+  Do not restrict contacts to the advertised vacancies. Resolve ambiguous role
+  abbreviations in the context of this request; do not assume a sector's meaning.
 
 Keep `requested_roles` as the deduplicated union and record the brief rationale
 in the existing report. Search primary roles first; secondary roles are valid
@@ -319,11 +317,11 @@ that person's location. Follow the [field contract](output-contract.md#linkedin-
 Missing intent remains unknown even when size passes.
 
 The account gate requires canonical `company` and `domain`, an evidenced
-`account_fit`, and separate signal evidence. Native reviews store signals once
+`account_fit`, and any required signal evidence. Native reviews store signals once
 in `qualification_checks`; code derives `signal_evidence`. Apply the qualification policy:
 require a current observed signal only when the request requires it. Otherwise
-`signal_evidence` may contain a clearly labeled inferred use case grounded in
-sourced business facts, with unknown pain, intent and incumbent tools disclosed.
+leave unverified signals unknown and explain any inferred use case in
+`intent_details`, grounded in sourced business facts. Do not label it as an event.
 Preserve URL, date, date basis, text and source for each object's supporting
 facts. An observation date dates the business facts, never an inferred event.
 Unsupported facts, search-results pages and stale required signals cannot pass. Resolve relative dates from retrieval time
@@ -385,25 +383,26 @@ runtime dependency, browser harness, server, database, queue, CRM write,
 outreach action, required subagent, or hidden API. Do not add one to complete a
 run.
 
-### Evidence-meaning review cases
+### Evidence-meaning review
 
 Match the strength of the claim to the evidence. These cases belong to the same
 LLM source review, not a separate rule engine:
 
-- **Banner Health:** one current nursing vacancy supports a single observed
+- **Hiring:** one current vacancy supports a single observed
   opening. It does not establish rapid hiring or a surge. If rapid hiring is
   required, keep that criterion unknown until stronger evidence is found.
 - **Repeated hiring:** one posting copied by several aggregators is one
   observation. Repeated-vacancy claims need distinct, dated observations.
-- **Arizona operations:** an ambiguous aggregator location does not establish a
-  company operation in Arizona. Find employer/location evidence before passing
-  the geography criterion.
+- **Geography:** an ambiguous aggregator location does not establish a company
+  operation in the requested geography. Use evidence for the location relationship
+  the user actually requested, such as headquarters, service area or operations.
 - **Expansion:** an announced partnership, conditional approval, planned rollout
   and completed launch are different claims. Preserve the source's status.
 
 Before delivery, inspect the final packet from `tyche_finish`. Review each
 verified signal and its date, the following sentence explaining its relevance,
-and the final sentence connecting the activity to the company's product/service.
+and the final sentence connecting the activity to the request's product/service
+context. Preserve whether that offering belongs to the seller or target company.
 Keep Signals concise with facts/date/source; keep Description to two factual
 sentences. Use `tyche_review` for corrections, then request a fresh review packet.
 Return its `review_ref` only after the evidence and writing agree. Code checks

@@ -23,6 +23,9 @@ research choices, not paths, route IDs or accounting envelopes.
 At start, supply the LLM-selected `contact_role_groups` without repeating
 `requested_roles`; code saves their combined list. A request without groups still
 needs `requested_roles`. Explicit conflicting lists remain errors.
+Save each requested signal's `importance` (`required` or `preferred`) and any
+supplied `product_service` with its `description` and `perspective` (`seller`
+or `target`). These are the LLM's interpretation of the current request.
 
 New runs check the mandatory Harvest company/profile tools and price the email
 verification reserve through free catalog reads before initializing research.
@@ -58,14 +61,17 @@ Example review inputs, with references selected from actual results:
 ```json
 {"companies":[{"target":"example.com","decision":"hold_account",
   "reason":"Current funding stage still needs evidence",
-  "company":{"ref":"lookup-company:0","industry":"Financial Services","sub_industry":"Banking"},
-  "account_fit":{"ref":"lookup-source:0","fit_claim":"Provides the requested payments platform"}}],
+  "company":{"ref":"lookup-company:0","industry":"<verified taxonomy parent>","sub_industry":"<verified taxonomy child>"},
+  "account_fit":{"ref":"lookup-source:0","fit_claim":"<supported match to the requested business activity>"}}],
  "sources":[{"ref":"lookup-source","state":"exhausted","reason":"Reviewed the complete product page"}]}
 ```
 
 Evidence refs expand into saved source/URL/date/text. Usually use `{"ref":"..."}`
 and put the qualification judgment in its `claim`, without copying source fields
-again. Aviato funding refs retain the supplied announcement date and round name;
+again. A signal check uses the saved request's `kind` as `signal`; omit its
+redundant `importance` because code supplies it. Put multiple supporting sources
+in that check's evidence array. Unknown kinds or conflicting importance are
+input errors, not new requirements. Aviato funding refs retain the supplied announcement date and round name;
 they do not decide which funding stage is current. Compatible `sources` decisions
 for different results in one lookup are combined into its existing route review;
 conflicting states require one explicit decision for that lookup.
@@ -250,8 +256,8 @@ For built-in public-web tools, plan a single discovery pilot as an object:
 python3 .agents/skills/lead-sourcing/scripts/run_attempt.py \
   reports/<run-id>/results.json --lookup-file - --plan-only <<'JSON'
 {"provider":"public_web","scope":"discovery","phase":"account_discovery",
- "purpose":"Find recent payments partnerships","approach":"official-announcements",
- "request":{"operation":"search_query","query":"Singapore payments partnership announcements"}}
+ "purpose":"Find announcements matching requested signals","approach":"official-announcements",
+ "request":{"operation":"search_query","query":"<query derived from the current ICP>"}}
 JSON
 ```
 

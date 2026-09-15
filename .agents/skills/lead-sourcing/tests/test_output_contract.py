@@ -317,6 +317,12 @@ class OutputContractExtensionTests(unittest.TestCase):
         self.assertIn("rejected only because it is secondary", skill_text)
         self.assertIn('role_group: "secondary"', skill_text)
 
+    def test_saved_request_schema_preserves_signal_policy_and_offering_context(self):
+        input_schema, result_schema = load_schemas()
+        self.assertEqual(input_schema["$defs"]["signal"], result_schema["$defs"]["signal"])
+        self.assertEqual(input_schema["properties"]["product_service"],
+                         result_schema["$defs"]["request_snapshot"]["properties"]["product_service"])
+
     def test_main_skill_has_one_short_research_loop_and_links_required_rules(self):
         text = SKILL.read_text(encoding="utf-8")
         steps = re.findall(r"^\d+\. \*\*(.*?)\*\*", text, re.M)

@@ -193,6 +193,26 @@ class ClientOutputTests(unittest.TestCase):
         self.assertTrue(any(row["Field"] == "Funding" for row in payload["sources"]))
         self.assertTrue(payload["unchanged"])
 
+    def test_optional_unverified_signals_export_blank_without_inventing_intent(self):
+        document = client_document()
+        document["request"]["buying_signals"] = [{"kind": "HIRING", "importance": "preferred"}]
+        row = document["accepted"][0]
+        row.pop("signal_evidence")
+        row["qualification_checks"] = [{"criterion": "hiring", "signal": "HIRING", "importance": "preferred",
+            "status": "unknown", "claim": "Hiring is unverified", "evidence": []}]
+        row["intent_details"] = "No hiring signal was verified. Its manufacturing operations suggest a possible coordination use case; this is an inference."
+        result = self.run_rows_json(document)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["rows"][0]["Signals"], "")
+        self.assertEqual(payload["rows"][0]["Intent Details"], row["intent_details"])
+        self.assertFalse(any(r["Field"] == "Signals" for r in payload["sources"]))
+        for importance in ("required", None):
+            document["request"]["buying_signals"][0] = {"kind": "HIRING"}
+            if importance:
+                document["request"]["buying_signals"][0]["importance"] = importance
+            self.assertNotEqual(self.run_rows_json(document).returncode, 0)
+
     def test_legacy_document_keeps_legacy_row_shape_and_values(self):
         document = accepted_document(["email", "phone"])
         payload = json.loads(self.run_rows_json(document).stdout)

@@ -141,7 +141,7 @@ function reviewedSignals(row) {
   // have an independent primary signal plus additional tagged checks.
   const primary = object(row.signal_evidence);
   const sameEvent = signal => [signal.signal, signal.evidence_date, signal.evidence_date_basis, signal.evidence_url].join("|");
-  if (!primary.criterion && !signals.some(signal => sameEvent(signal) === sameEvent(primary))) signals.unshift(primary);
+  if (text(primary.signal) && !primary.criterion && !signals.some(signal => sameEvent(signal) === sameEvent(primary))) signals.unshift(primary);
   return signals;
 }
 

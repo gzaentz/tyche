@@ -26,8 +26,8 @@ complete artifact. All applicable semantic rules still apply.
    evidence gate, a contact lookup input must contain that accepted canonical
    `company` and `domain`. Do not search people for rejected or unresolved
    accounts.
-2. An accepted account has separate `account_fit` and `signal_evidence` objects
-   with independent evidence, and passes every account evidence rule. An
+2. An accepted account has `account_fit` evidence and separate `signal_evidence`
+   for verified intent, and passes every required account evidence rule. An
    accepted contact has a
    current-role/company claim and passes every contact evidence rule. These are
    separate gates.
@@ -84,6 +84,13 @@ complete artifact. All applicable semantic rules still apply.
 11. `signal_match_mode` defaults to `any`. For required intent, apply it
    across required entries in `buying_signals`; facts within a query stay
    conjunctive. Apply the [qualification policy](workflow-rules.md#qualification-policy).
+   New requests save each signal's `importance` as `required` or `preferred`
+   (default required). Keep `kind` stable within the run and use it as the
+   qualification check's `signal`; wording belongs in `claim` and evidence.
+   Code copies the saved importance and checks required `any`/`all` coverage
+   before contact work and export. Preferred signals never satisfy a required
+   alternative. A failed alternative does not reject an `any` request when
+   another passes. Existing legacy request metadata is not rewritten on resume.
    Preserve optional hypotheses in the request and mark their existing
    qualification checks preferred; do not silently promote them to must-haves.
    When none are supplied, record a preferred use-case hypothesis in
@@ -119,6 +126,15 @@ this default. No new JSON fields are required.
     "target_count": {"type": "integer", "minimum": 1},
     "max_duration_seconds": {"type": ["integer", "null"], "minimum": 1},
     "icp": {"$ref": "#/$defs/icp"},
+    "product_service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "perspective"],
+      "properties": {
+        "description": {"type": "string", "minLength": 1},
+        "perspective": {"enum": ["seller", "target"]}
+      }
+    },
     "buying_signals": {
       "type": "array",
       "minItems": 1,
@@ -187,6 +203,7 @@ this default. No new JSON fields are required.
       "required": ["kind"],
       "properties": {
         "kind": {"type": "string", "minLength": 1},
+        "importance": {"enum": ["required", "preferred"], "default": "required"},
         "query": {"type": "string", "minLength": 1},
         "min_age_days": {"type": "integer", "minimum": 0},
         "max_age_days": {"type": "integer", "minimum": 1},
@@ -521,7 +538,7 @@ top-level result list or hide rejected/unresolved rows in a count.
     "accepted_company": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["company", "account_fit", "signal_evidence", "primary_contact", "backup_contacts", "contact_candidate_count", "backup_shortfall"],
+      "required": ["company", "account_fit", "primary_contact", "backup_contacts", "contact_candidate_count", "backup_shortfall"],
       "properties": {
         "company": {"$ref": "#/$defs/company"},
         "account_fit": {"$ref": "#/$defs/account_fit"},
@@ -724,6 +741,7 @@ top-level result list or hide rejected/unresolved rows in a count.
       "required": ["kind"],
       "properties": {
         "kind": {"type": "string", "minLength": 1},
+        "importance": {"enum": ["required", "preferred"], "default": "required"},
         "query": {"type": "string", "minLength": 1},
         "min_age_days": {"type": "integer", "minimum": 0},
         "max_age_days": {"type": "integer", "minimum": 1},
@@ -781,6 +799,15 @@ top-level result list or hide rejected/unresolved rows in a count.
         "target_count": {"type": "integer", "minimum": 1},
         "max_duration_seconds": {"type": ["integer", "null"], "minimum": 1},
         "icp": {"$ref": "#/$defs/icp"},
+        "product_service": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["description", "perspective"],
+          "properties": {
+            "description": {"type": "string", "minLength": 1},
+            "perspective": {"enum": ["seller", "target"]}
+          }
+        },
         "buying_signals": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/signal"}},
         "signal_match_mode": {"enum": ["any", "all"], "default": "any"},
         "requested_roles": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
@@ -1060,11 +1087,12 @@ equal one plus the number of backups; `backup_shortfall` must equal
 account domain must be unique; `account_fit` must support ICP fit;
 when the request requires intent, `signal_evidence` must support a requested
 signal under `signal_match_mode` and its applicable bounds. When intent is
-optional, missing intent does not block qualification: the existing signal
-fields may instead explain a conditional use case grounded in sourced business
-facts, explicitly labeled `Inferred use case`, not observed buying intent.
-Keep optional signal checks preferred, document the request interpretation,
-and never use this fallback for a required signal. Evidence URLs and sources
+optional (every saved signal explicitly preferred), missing intent does not block
+qualification or export. Leave `signal_evidence` absent and `Signals` empty when
+none is verified. Describe any conditional use case in `intent_details`, grounded
+in `account_fit` evidence and explicitly identified as inference. Do not create a
+signal from a hypothesis. Legacy records retain their existing evidence contract.
+Never use this fallback for a required signal. Evidence URLs and sources
 may differ. Follow the [qualification policy](workflow-rules.md#qualification-policy)
 to corroborate the same project across sources: use the dated activity in
 `signal_evidence`, retain technical corroboration in the relevant
@@ -1468,7 +1496,10 @@ unverified optional values as empty cells rather than placeholder text.
   signal facts, supporting relevance, next distinct signal and relevance, then
   the final synthesis. Save the reviewed paragraph with the company decision;
   revisit it only when evidence changes or a specific error is found.
-  When the ICP product/service describes the target company's offering, connect
+  Preserve the supplied offering in `request.product_service.description` and
+  its `perspective` (`seller` or `target`). When it describes a seller's offering,
+  explain the supported relevance to that offering without claiming confirmed
+  purchase intent. When the ICP product/service describes the target company's offering, connect
   the signals to that offering and its operations, not an imagined external
   purchase. Focus on the company's activity, not a pitch for our product. Keep inferred
   needs conditional and material uncertainty clear; do not invent urgency,
@@ -1477,10 +1508,11 @@ unverified optional values as empty cells rather than placeholder text.
   in the paragraph. Unknown optional hiring is not affirmative hiring intent.
   A new leader is not proof of layoffs, an existing service is not unmet demand,
   and an old opening is not newly dated intent.
-- Keep `signal_evidence.signal` short and consistent within the request, such as
-  `New HR leader`, `Announced layoffs` or `Housing expansion`. Use
-  `Inferred use case` when intent is optional and only a grounded hypothesis
-  is available; disclose what is unknown in `intent_details`. Preserve detailed
+- Keep `signal_evidence.signal` equal to the saved request's signal `kind`.
+  Write precise observed facts in evidence and prose; do not rename the kind
+  and accidentally detach its required/preferred status or age bounds. Use
+  a clearly identified inference in `intent_details` when intent is optional and
+  only a grounded hypothesis is available. Do not invent a signal label. Preserve detailed
   claims in evidence and prose. Every factual clause in the narrative must be
   supported by the saved signal or qualification evidence for that company.
   Save additional supporting sources as existing qualification-check evidence;
@@ -1493,10 +1525,6 @@ unverified optional values as empty cells rather than placeholder text.
   The helpers require
   these fields and preserve the authored text; factual accuracy and natural prose
   are sourcing-agent review responsibilities, not regex or extra model-call gates.
-
-  Hypothetical example with two verified signals:
-
-  > AsterPay announced a banking partnership on 10 August 2026 to add local settlement in Malaysia. The additional settlement option could increase the importance of bank integration and reconciliation within its merchant payments platform. On 2 September 2026, it advertised integration-engineering and payments-operations roles. Those openings are consistent with work to connect payment partners and support day-to-day processing. Together, the partnership and hiring suggest AsterPay is building the technical and operational capacity to support broader payment coverage for merchants.
 
 - Use `assets/leadpoet_industry_taxonomy.json`, a versioned PP snapshot with
   pinned provenance. Select the company's business activity from evidence, not

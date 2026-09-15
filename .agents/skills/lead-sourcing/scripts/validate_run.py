@@ -72,18 +72,110 @@ def excluded_company(request: dict, row: dict) -> bool:
     return bool({_identity(n) for n in names} & ({_identity(n) for n in exclusions} - {""}))
 
 
+def signal_request_errors(request: dict) -> list[str]:
+    """Reject malformed saved policy before using it for coverage or arithmetic."""
+    if not isinstance(request, dict):
+        return ["request must be an object"]
+    if request.get("signal_match_mode", "any") not in ("any", "all"):
+        return ["request.signal_match_mode must be any or all"]
+    signals = request.get("buying_signals", [])
+    if not isinstance(signals, list):
+        return ["request.buying_signals must be an array"]
+    window = request.get("time_window", {})
+    window = window if isinstance(window, dict) else {}
+    seen, errors = set(), []
+    for index, signal in enumerate(signals):
+        path = f"request.buying_signals[{index}]"
+        if not isinstance(signal, dict) or not (key := _identity(signal.get("kind"))):
+            errors.append(f"{path} requires a non-empty kind")
+            continue
+        if key in seen:
+            errors.append(f"{path}.kind duplicates another requested signal")
+        seen.add(key)
+        if "importance" in signal and signal["importance"] not in ("required", "preferred"):
+            errors.append(f"{path}.importance must be required or preferred")
+        minimum, maximum = signal.get("min_age_days", 0), signal.get("max_age_days", window.get("max_age_days"))
+        # Only legacy requests without importance metadata may lack age bounds.
+        if (type(minimum) is not int or minimum < 0 or
+                maximum is None and ("importance" in signal or "max_age_days" in signal or "max_age_days" in window) or
+                maximum is not None and (type(maximum) is not int or maximum <= 0 or minimum > maximum)):
+            errors.append(f"{path} age bounds must be nonnegative integers with min_age_days <= max_age_days and a positive maximum")
+    return errors
+
+
+def requested_signal(request: dict, label: str) -> Optional[dict]:
+    """Resolve a saved kind, never a guessed synonym or a broader date window."""
+    if errors := signal_request_errors(request):
+        raise ValueError("; ".join(errors))
+    signals = request.get("buying_signals", [])
+    if not signals:
+        return None  # Legacy documents without normalized signal requirements.
+    matches = [s for s in signals if isinstance(s, dict) and _identity(s.get("kind")) == _identity(label)]
+    if len(matches) != 1:
+        choices = ", ".join(str(s.get("kind")) for s in signals if isinstance(s, dict))
+        raise ValueError(f"signal {label!r} must identify one saved request kind: {choices}. Keep the kind unchanged; describe the observed facts in claim/evidence.")
+    return matches[0]
+
+
+def signals_optional(request: dict) -> bool:
+    signals = request.get("buying_signals")
+    return (isinstance(signals, list) and bool(signals)
+            and all(isinstance(s, dict) and s.get("importance") == "preferred" for s in signals))
+
+
+def signal_checks(row: dict, request: dict) -> list[dict]:
+    """Read current judgments; retain the independent primary field for old runs."""
+    checks = [c for c in row.get("qualification_checks", []) if isinstance(c, dict) and c.get("signal")]
+    primary = row.get("signal_evidence", {})
+    legacy = not any("importance" in s for s in request.get("buying_signals", []))
+    if (legacy and isinstance(primary, dict) and primary.get("signal") and not primary.get("criterion")
+            and not any(_identity(c["signal"]) == _identity(primary["signal"]) for c in checks)):
+        checks.append({"signal": primary["signal"], "status": "pass", "evidence": [primary]})
+    return checks
+
+
+def signal_coverage_errors(request: dict, row: dict, path: str) -> list[str]:
+    """Check saved requirement coverage, not whether source prose proves a claim."""
+    if errors := signal_request_errors(request):
+        return errors
+    signals = request.get("buying_signals", [])
+    checks, errors, by_kind = signal_checks(row, request), [], {}
+    for check in checks:
+        try:
+            signal = requested_signal(request, check["signal"])
+        except ValueError as exc:
+            errors.append(f"{path}: {exc}")
+            continue
+        key = _identity(check["signal"])
+        if key in by_kind:
+            errors.append(f"{path}: combine evidence into one current check for signal {check['signal']!r}")
+        by_kind[key] = check
+        if signal and "importance" in signal and check.get("importance", signal["importance"]) != signal["importance"]:
+            errors.append(f"{path}: signal {signal['kind']!r} importance contradicts the saved request")
+    # Old requests did not encode required/preferred signals. Preserve their
+    # saved judgments; all-mode still requires every non-preferred alternative.
+    required = [s for s in signals if isinstance(s, dict) and
+                s.get("importance", by_kind.get(_identity(s.get("kind")), {}).get("importance", "required")) == "required"]
+    if required:
+        passed = [s for s in required if (by_kind.get(_identity(s.get("kind")), {}).get("status") == "pass"
+                                         and by_kind[_identity(s.get("kind"))].get("evidence"))]
+        mode = request.get("signal_match_mode", "any")
+        if mode == "all" and len(passed) != len(required) or mode == "any" and not passed:
+            missing = ", ".join(s["kind"] for s in required if s not in passed)
+            errors.append(f"{path}: required signal coverage ({mode}) is incomplete: {missing}; keep the account unresolved")
+    return errors
+
+
 def signal_age_errors(request: dict, row: dict, path: str) -> list[str]:
     """Check date arithmetic for reviewed signals; interpreting the event stays with the LLM."""
-    if not isinstance(request, dict):
-        return []
+    if errors := signal_request_errors(request):
+        return errors
     window = request.get("time_window", {})
     window = window if isinstance(window, dict) else {}
     try:
         as_of = datetime.strptime(window.get("as_of_date", request.get("as_of_date", "")), "%Y-%m-%d")
     except (ValueError, TypeError):
         return []  # The request contract handles an absent/malformed clock.
-    signals = request.get("buying_signals", [])
-    signals = signals if isinstance(signals, list) else []
     evidence = [(row.get("signal_evidence", {}), path + ".signal_evidence")]
     for check in row.get("qualification_checks", []):
         if isinstance(check, dict) and check.get("signal") and check.get("status") == "pass":
@@ -94,20 +186,29 @@ def signal_age_errors(request: dict, row: dict, path: str) -> list[str]:
     for item, label in evidence:
         if not isinstance(item, dict):
             continue
-        matching = [s.get("max_age_days") for s in signals if isinstance(s, dict) and _identity(s.get("kind")) == _identity(item.get("signal"))]
-        maximum = matching[0] if len(matching) == 1 and matching[0] is not None else window.get("max_age_days")
+        if not item:
+            continue
+        try:
+            signal = requested_signal(request, item.get("signal")) or {}
+        except ValueError as exc:
+            errors.append(f"{label}: {exc}")
+            continue
+        minimum = signal.get("min_age_days", 0)
+        maximum = signal.get("max_age_days", window.get("max_age_days"))
         if type(maximum) is not int or maximum < 0:
             continue
         try:
             age = (as_of - datetime.strptime(item.get("evidence_date", item.get("date", "")), "%Y-%m-%d")).days
         except (ValueError, TypeError):
             continue  # Dated-source validation reports malformed evidence.
-        if age < 0 or age > maximum:
-            errors.append(f"{label}: signal date is {age} days before {as_of.date()}, outside the requested 0–{maximum} day window; correct the date or signal judgment before contact work/delivery.")
+        if age < minimum or age > maximum:
+            errors.append(f"{label}: signal date is {age} days before {as_of.date()}, outside the requested {minimum}–{maximum} day window; correct the date or signal judgment before contact work/delivery.")
     return errors
 
 
 def qualification_errors(document: dict) -> list[str]:
+    if errors := signal_request_errors(document.get("request", {})):
+        return errors
     errors = []
     owners = set()
     for state in ("accepted", "rejected", "unresolved"):
@@ -141,8 +242,11 @@ def qualification_errors(document: dict) -> list[str]:
                         errors.append(f"{path}: company_size decision contradicts request.icp.company_size")
                     if not fits and (state == "accepted" or (state == "unresolved" and row.get("stage") == "contact")):
                         errors.append(f"{path}: employee_range is outside or only partly inside request.icp.company_size")
-            failed = [c for c in required if c.get("status") == "fail" and c.get("evidence")]
+            signal_requirements = request.get("buying_signals", [])
+            ordinary_required = [c for c in required if not signal_requirements or not c.get("signal")]
+            failed = [c for c in ordinary_required if c.get("status") == "fail" and c.get("evidence")]
             if state == "accepted" or (state == "unresolved" and row.get("stage") == "contact"):
+                errors.extend(signal_coverage_errors(request, row, path))
                 errors.extend(signal_age_errors(request, row, path))
                 if document.get("schema_version") == "1.2":
                     for check in required:
@@ -151,8 +255,15 @@ def qualification_errors(document: dict) -> list[str]:
                                 errors.append(error)
                 if excluded_company(document.get("request", {}), row):
                     errors.append(f"{path}: excluded company cannot pass the account gate")
-                if any(c.get("status") != "pass" or not c.get("evidence") for c in required):
+                if any(c.get("status") != "pass" or not c.get("evidence") for c in ordinary_required):
                     errors.append(f"{path}: missing or failed required evidence must remain account-unresolved")
+            if state == "rejected" and not failed and signal_requirements:
+                by_kind = {_identity(c["signal"]): c for c in signal_checks(row, request)}
+                requested = [s for s in signal_requirements if s.get("importance", by_kind.get(_identity(s.get("kind")), {}).get("importance", "required")) == "required"]
+                negatives = [s for s in requested if by_kind.get(_identity(s["kind"]), {}).get("status") == "fail"
+                             and by_kind[_identity(s["kind"])].get("evidence")]
+                if negatives and (request.get("signal_match_mode", "any") == "all" or len(negatives) == len(requested)):
+                    failed = negatives
             if state == "rejected" and row.get("reason_code") == "not_icp_fit" and not failed:
                 errors.append(f"{path}: not_icp_fit requires an evidenced required failure; unknown is unresolved")
             if state == "accepted":
@@ -1274,9 +1385,12 @@ def source_evidence_errors(document):
         company = row.get("company") if isinstance(row.get("company"), dict) else {}
         contact = row.get("primary_contact") if isinstance(row.get("primary_contact"), dict) else {}
         signal = row.get("signal_evidence")
-        if not isinstance(signal, dict) or not _nonempty_text(signal.get("signal")):
+        if (signal or not signals_optional(document.get("request", {}))) and (
+                not isinstance(signal, dict) or not _nonempty_text(signal.get("signal"))):
             errors.append(f"accepted[{index}].signal_evidence.signal is required")
-        evidence = [(key, row.get(key)) for key in ("account_fit", "signal_evidence")]
+        evidence = [("account_fit", row.get("account_fit"))]
+        if signal or not signals_optional(document.get("request", {})):
+            evidence.append(("signal_evidence", signal))
         evidence += [("primary_contact", contact), ("primary_contact.location_evidence", contact.get("location_evidence")),
                      ("company.employee_range_evidence", company.get("employee_range_evidence"))]
         for check in row.get("qualification_checks", []):

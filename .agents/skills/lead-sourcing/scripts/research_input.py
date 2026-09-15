@@ -41,10 +41,16 @@ def normalize_request(value, run_file, *, saved=None, started_at=None):
     """Apply mechanical defaults to new inputs; never infer roles or intent."""
     allowed = {"target_count", "icp", "buying_signals", "requested_roles", "time_window",
                "budget", "contact_fields", "contacts_per_company", "contact_role_groups",
-               "signal_match_mode", "run_id", "as_of_date", "max_duration_seconds"}
+               "signal_match_mode", "run_id", "as_of_date", "max_duration_seconds", "product_service"}
     object_fields(value, allowed, "request")
     request = copy.deepcopy(value)
     prior = saved or {}
+    if "product_service" in request:
+        offering = request["product_service"]
+        object_fields(offering, {"description", "perspective"}, "product_service")
+        text(offering.get("description"), "product_service.description")
+        if offering.get("perspective") not in {"seller", "target"}:
+            raise ValueError("product_service.perspective must be seller or target")
     target = budget_guard.count(request.get("target_count"), "target_count")
     if not target:
         raise ValueError("target_count must be positive")
@@ -77,9 +83,26 @@ def normalize_request(value, run_file, *, saved=None, started_at=None):
     object_fields(window, {"max_age_days", "as_of_date"}, "time_window")
     if not budget_guard.count(window.get("max_age_days"), "time_window.max_age_days"):
         raise ValueError("time_window.max_age_days must be positive")
+    from validate_run import _identity, signal_request_errors
+    if prior and (errors := signal_request_errors(prior)):
+        raise ValueError("Invalid saved request: " + "; ".join(errors))
+    signal_keys = set()
     for signal in request["buying_signals"]:
-        object_fields(signal, {"kind", "query", "min_age_days", "max_age_days", "source_preferences"}, "signal")
+        object_fields(signal, {"kind", "query", "min_age_days", "max_age_days", "source_preferences", "importance"}, "signal")
         text(signal.get("kind"), "signal.kind")
+        key = _identity(signal["kind"])
+        if not key or key in signal_keys:
+            raise ValueError("signal kinds must be distinct, non-empty identifiers within this request")
+        signal_keys.add(key)
+        # New runs make this distinction explicit. Resuming an older request
+        # must not rewrite its criteria or budget fingerprint.
+        previous = [s for s in prior.get("buying_signals", []) if _identity(s.get("kind")) == key]
+        if len(previous) == 1 and "importance" in previous[0]:
+            signal.setdefault("importance", previous[0]["importance"])
+        elif not prior:
+            signal.setdefault("importance", "required")
+        if "importance" in signal and signal["importance"] not in {"required", "preferred"}:
+            raise ValueError("signal.importance must be required or preferred")
         if "query" in signal:
             text(signal["query"], "signal.query")
         if "source_preferences" in signal:
@@ -256,9 +279,8 @@ def _criterion_key(value):
 
 def canonical_requested_role(value, roles):
     """Resolve spacing/case and unambiguous C-suite abbreviations in saved roles."""
-    aliases = {"ceo": "chief executive officer", "coo": "chief operating officer",
-               "cno": "chief nursing officer"}
-    # Do not expand ambiguous abbreviations such as CMO or invent buyer roles.
+    aliases = {"ceo": "chief executive officer", "coo": "chief operating officer"}
+    # Sector-dependent abbreviations need an explicit choice from saved roles.
     def key(role):
         return " ".join(role.casefold().split()) if isinstance(role, str) else ""
     exact = [r for r in roles if key(r) == key(value)]
@@ -303,6 +325,16 @@ def company_update(document, item):
             key = _criterion_key(check.get("criterion"))
             if key in seen:
                 raise ValueError(f"duplicate criterion update: {key}")
+            check = copy.deepcopy(check)
+            if check.get("signal"):
+                from validate_run import requested_signal
+                signal = requested_signal(document["request"], check["signal"])
+                if signal:
+                    check["signal"] = signal["kind"]
+                    if "importance" in signal:
+                        if check.get("importance", signal["importance"]) != signal["importance"]:
+                            raise ValueError("signal importance must match the saved request")
+                        check["importance"] = signal["importance"]
             if check.get("importance") not in {"required", "preferred"} or check.get("status") not in {"pass", "fail", "unknown"}:
                 raise ValueError("each criterion needs one explicit importance and status")
             text(check.get("claim"), "claim")
