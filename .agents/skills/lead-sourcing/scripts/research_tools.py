@@ -1100,7 +1100,7 @@ class ResearchTools:
             (self.path.parent / "research-commentary.md").write_text(commentary + "\n", encoding="utf-8")
         exporter = Path(__file__).with_name("export_xlsx.mjs")
         node = self.environment.get("TYCHE_WORKSPACE_NODE", "node")
-        result = subprocess.run([node, str(exporter), str(self.path)], capture_output=True, text=True, timeout=180, env=self.environment)
+        result = subprocess.run([node, str(exporter), str(self.path)], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180, env=self.environment)
         if result.returncode:
             return {"status": "needs_repair", "delivery_allowed": False,
                     "errors": [(result.stderr or result.stdout)[-9000:]], "progress": self._overview(),
@@ -1109,7 +1109,7 @@ class ResearchTools:
         # research prose or changing the validated results/workbook.
         report = subprocess.run([self.environment.get("TYCHE_WORKSPACE_PYTHON", "python3"),
             str(Path(__file__).resolve().parents[4] / "scripts/run_costs.py"), str(self.path)],
-            capture_output=True, text=True, timeout=30, env=self.environment)
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30, env=self.environment)
         if report.returncode:
             raise ValueError("Workbook saved; report needs repair: " + report.stderr[-2000:])
         return {"export": json.loads(result.stdout.strip().splitlines()[-1]), "progress": self._overview(),

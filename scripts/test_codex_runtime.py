@@ -97,7 +97,8 @@ class WorkspaceRuntimeTests(unittest.TestCase):
             self.assertIn('required = true', config)
 
     def test_smoke_requires_successful_native_call_even_when_model_exits_zero(self):
-        event = {'type':'item.completed', 'item':{'type':'mcp_tool_call', 'server':'tyche', 'tool':'tyche_inspect', 'status':'completed'}}
+        event = {'type':'item.completed', 'item':{'type':'mcp_tool_call', 'server':'tyche', 'tool':'tyche_inspect', 'status':'completed',
+            'result': {'content': [{'type': 'text', 'text': '{"status":"not_started"}'}]}}}
         for status in ('completed', 'failed'):
             event['item']['status'] = status
             output = SimpleNamespace(returncode=0, stdout=(json.dumps(event)+'\n') * 2, stderr='')
@@ -105,6 +106,16 @@ class WorkspaceRuntimeTests(unittest.TestCase):
                 if status == 'completed': self.assertEqual(smoke(['fixture'], {}), 0)
                 else:
                     with self.assertRaisesRegex(RuntimeError, 'smoke test failed'): smoke(['fixture'], {})
+
+    def test_smoke_rejects_completed_calls_with_unhealthy_or_missing_payloads(self):
+        for payload in ({'status': 'operationally_blocked'}, {'status': 'recovery_required'}, None, [], 'invalid'):
+            event = {'type': 'item.completed', 'item': {'type': 'mcp_tool_call', 'server': 'tyche',
+                'tool': 'tyche_inspect', 'status': 'completed',
+                'result': {'content': [{'type': 'text', 'text': json.dumps(payload)}]}}}
+            output = SimpleNamespace(returncode=0, stdout=(json.dumps(event)+'\n') * 2, stderr='')
+            with self.subTest(payload=payload), patch('codex_tyche.subprocess.run', return_value=output), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError, 'smoke test failed'):
+                    smoke(['fixture'], {})
 
 
 if __name__=='__main__':unittest.main()

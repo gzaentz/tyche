@@ -9,6 +9,7 @@ import argparse
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -242,6 +243,10 @@ def main():
     args = parser.parse_args()
     session = ResearchTools(args.run_file, readonly=args.read_only) if args.worker else SandboxedTools(args.run_file, args.read_only)
     serve(session)
+    if args.worker:
+        # A clean exit can still interrupt the relay; retain its cause without
+        # logging requests, credentials, or research data.
+        print(f"TYCHE worker input ended; stdin_blocking={os.get_blocking(sys.stdin.fileno())}", file=sys.stderr)
 
 
 if __name__ == "__main__":

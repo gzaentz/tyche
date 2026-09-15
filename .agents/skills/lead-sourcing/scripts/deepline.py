@@ -1506,6 +1506,7 @@ def _invoke(command: Sequence[str], timeout_seconds: float) -> Tuple[int, str, s
     try:
         completed = subprocess.run(
             list(command),
+            stdin=subprocess.DEVNULL,  # Provider CLI must not own the MCP control pipe.
             capture_output=True,
             text=True,
             encoding="utf-8",

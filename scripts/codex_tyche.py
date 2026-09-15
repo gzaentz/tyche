@@ -241,6 +241,15 @@ def smoke(command, env):
     if (completed.returncode or len(calls) != 2 or any(call.get('tool') != 'tyche_inspect'
             or call.get('status') != 'completed' for call in calls)):
         raise RuntimeError('Read-only native tool smoke test failed; no sourcing run was started.')
+    for call in calls:
+        try:
+            result = call['result']
+            payload = json.loads(result['content'][0]['text'])
+            healthy = not call.get('error') and not result.get('isError') and payload.get('status') == 'not_started'
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+            healthy = False
+        if not healthy:
+            raise RuntimeError('Read-only native tool smoke test failed; no sourcing run was started.')
     return 0
 
 
