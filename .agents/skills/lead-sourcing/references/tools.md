@@ -59,9 +59,6 @@ pain, layoffs or other request-specific activity missing from the table.
   `tyche_inspect(tool=...)` supplies cached inputs, access and pricing.
 - Start with sources suited to the missing fact. Reuse successful receipts.
   Inspect saved raw detail when summaries omit fields; do not pay again for it.
-- When a required fact stays unresolved, revisit its row and the live catalog
-  before repeating similar searches or claiming exhaustion. Change evidence
-  type/source family when useful; trying every provider is not required.
 - Preserve source identity, dates and claim strength. No results means unknown,
   not failed fit. Catalog metadata and generated summaries are not evidence.
 

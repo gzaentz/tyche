@@ -28,9 +28,9 @@ promote unknown envelopes or missing fields into evidence.
 
 IDs below are dated search hints. Rediscover and describe before execution;
 use the returned tool ID through the [native tools](adapter-io.md#native-tools).
-Input hints highlight useful fields, not a complete payload schema;
-`anyOf` constraints, exact enums,
-native page sizes, options, and cost bounds come from the live description.
+Input hints highlight useful fields, not a complete payload schema; `anyOf`
+constraints, exact enums, native page sizes, options, and cost bounds come
+from the live description.
 Prices are intentionally not copied into routing advice. A headline `Free`
 may mean BYOK pass-through; provider quotas/charges still apply. Usage-based
 pricing or a base-page price is not a conservative bound for an entire job.
