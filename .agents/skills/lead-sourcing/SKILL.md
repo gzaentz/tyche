@@ -30,10 +30,14 @@ Resume with `tyche_inspect()` for the saved request and pending work.
 
 ## Research loop
 
-1. **Choose ready work.** Prefer affordable `completion_candidates` before fresh discovery unless blocked. Select tools through [tools.md](references/tools.md).
+1. **Choose ready work.** Prefer affordable `completion_candidates` before fresh discovery unless blocked.
+   Match missing evidence to the [signal, source and company/contact guide](references/tools.md#choose-by-evidence-gap).
    Use `tyche_inspect(query=...)` for capabilities or `tool=...` for native schemas.
    Refresh descriptions after schema/price/access changes. Pilot unproven
    operations/filters before batching; preserve native limits.
+   Revisit the relevant guide row and live catalog for unresolved required facts
+   before repeating similar searches or claiming a shortfall; choose useful
+   alternatives rather than executing every listed provider.
 2. **Check up to three companies concurrently.** Send `tyche_lookup` one to three
    `checks`: target, phase, purpose, tool and native inputs. Batch ready independent
    checks across phases without waiting to fill batches.
