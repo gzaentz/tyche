@@ -21,7 +21,7 @@ from record_route import AUDIT_IDENTITY, IDENTITY, mutate, record
 from validate_run import (BLOCKING_PROVIDER_STATUSES, DETERMINATE_PROVIDER_STATUSES, _company_key,
                           calculate_cost_summary, calculate_review_counts, evaluate_stop, excluded_company,
                           progress_snapshot, qualification_errors, _reviewed_company_scopes, accepted_errors,
-                          validate_run)
+                          validate_run, stalled_approaches, _research_key)
 
 ATTEMPT_STATUSES = DETERMINATE_PROVIDER_STATUSES | BLOCKING_PROVIDER_STATUSES
 
@@ -143,6 +143,39 @@ def review_reminder(document):
     pending = pending_source_reviews(document)
     scopes = list(dict.fromkeys(r["target"] for r in pending))
     return {"count": len(pending), "scopes": scopes[:3], "sources": pending[:3]}
+
+
+def strategy_reminder(document):
+    """Advisory history only; reuse saved reviews and the existing progress check."""
+    if len(document.get("accepted", [])) >= document["request"]["target_count"]:
+        return {"count": 0, "items": []}
+    reviewed = {r["route_id"] for r in document.get("stop_audit", {}).get("route_frontier", [])
+                if r.get("state") == "exhausted" and r.get("reason")}
+    terminal = {_company_key(r) for state in ("accepted", "rejected") for r in document.get(state, [])}
+    groups = {}
+    for route in document.get("routes", []):
+        key = _research_key(route)
+        if (key is not None and key[0] not in terminal and route.get("entity_type") != "tool_catalog"
+                and route.get("provider_status") in {"ok", "no_results"}):
+            groups.setdefault(key, []).append(route)
+    items = []
+    for (scope, phase), routes in groups.items():
+        pair = routes[-2:]
+        if (len(pair) != 2 or any(r["route_id"] not in reviewed for r in pair)
+                or not stalled_approaches(document, pair[-1])):
+            continue
+        items.append({"target": scope, "phase": phase,
+                      "sources": [r["route_id"] for r in pair],
+                      "tools": list(dict.fromkeys(r.get("tool") or r.get("provider") for r in pair))})
+    result = {"count": len(items), "items": items}
+    if items:
+        result["next"] = (
+            "Two reviewed attempts added no saved milestone in these company/phases. "
+            "Check the remaining evidence gap and reuse saved results. If the same gap persists, "
+            "consult tools.md and choose another tool, source or research method. Correct a known "
+            "input error when useful; keyword/page changes alone may repeat the same method. "
+            "This is advice, not a block or proof of exhaustion; independent verification stays eligible.")
+    return result
 
 
 def _email_gate(run_file, document, action, request):

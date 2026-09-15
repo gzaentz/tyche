@@ -485,6 +485,77 @@ class ResearchToolTests(unittest.TestCase):
         self.assertIsNone(b["next_offset"])
         self.assertEqual(a["items"] + b["items"], self.tools.finish()["pending_sources"])
 
+    def test_strategy_feedback_requires_review_and_allows_another_method(self):
+        self.start()
+        lookups = [self.lookup(check(tool="fixture-search", inputs={"query": f"variant {i}"},
+            approach=f"search wording {i}"))["lookups"][0] for i in range(2)]
+        self.assertEqual(self.tools.inspect()["strategy_review"]["count"], 0)
+        result = self.tools.review(sources=[{"ref": r["route"], "state": "exhausted",
+            "reason": "Read the results; they do not resolve the requested fact."} for r in lookups])
+        feedback = result["progress"]["strategy_review"]
+        self.assertEqual(feedback["count"], 1)
+        self.assertEqual(feedback["items"][0]["sources"], [r["route"] for r in lookups])
+        self.assertEqual(feedback["items"][0]["tools"], ["fixture-search"])
+        before = self.path.read_bytes(), budget.ledger_path(self.path).read_bytes(), len(self.provider.requests)
+        self.assertEqual(self.tools.inspect(field="strategy_review")["value"], feedback)
+        self.assertEqual(before, (self.path.read_bytes(), budget.ledger_path(self.path).read_bytes(), len(self.provider.requests)))
+        # Advisory feedback does not add a dispatch veto or change the ledger.
+        self.lookup(check(tool="other-search", inputs={"query": "different evidence source"}, approach="different source"))
+
+    def test_strategy_feedback_clears_when_review_adds_evidence(self):
+        self.start()
+        lookups = [self.lookup(check(inputs={"url": f"https://example.test/source-{i}"},
+            approach=f"company lookup {i}"))["lookups"][0] for i in range(2)]
+        self.tools.review(sources=[{"ref": r["route"], "state": "exhausted", "reason": "Reviewed source"}
+                                   for r in lookups])
+        self.assertEqual(self.tools.inspect()["strategy_review"]["count"], 1)
+        ref = lookups[0]["results"][0]["ref"]
+        self.tools.review(companies=[{"target": "example.test", "decision": "qualify_account", "reason": "Fit verified",
+            "company": {"ref": ref}, "account_fit": {"ref": ref, "text": "Provides payments infrastructure"},
+            "qualification_checks": self.qualifying_signal(ref)}])
+        self.assertEqual(self.tools.inspect()["strategy_review"]["count"], 0)
+
+    def test_strategy_feedback_stays_scoped_and_ignores_pending_or_failed_work(self):
+        document = {"request": {"target_count": 5}, "accepted": [], "unresolved": [], "rejected": [],
+                    "routes": [], "stop_audit": {"route_frontier": []}}
+        def attempt(scope, phase, *, status="no_results", reviewed=True, catalog=False):
+            rid = str(len(document["routes"]))
+            document["routes"].append(dict(route_id=rid, scope=scope, phase=phase, tool="fixture-search",
+                entity_type="tool_catalog" if catalog else "research", provider_status=status,
+                approach="query " + rid, progress_before=[]))
+            document["stop_audit"]["route_frontier"].append(dict(route_id=rid,
+                state="exhausted" if reviewed else "continuable", reason="Reviewed response"))
+        attempt("one.test", "account_verification")
+        attempt("two.test", "account_verification")
+        attempt("one.test", "account_discovery")
+        attempt("one.test", "account_verification", catalog=True)
+        attempt("one.test", "account_verification", status="timeout")
+        self.assertEqual(runner.strategy_reminder(document)["count"], 0)
+        attempt("one.test", "account_verification")
+        self.assertEqual(runner.strategy_reminder(document)["count"], 1)
+        attempt("one.test", "account_verification", reviewed=False)
+        self.assertEqual(runner.strategy_reminder(document)["count"], 0)
+        for phase in ("contact_verification", "email_validation"):
+            attempt("two.test", phase)
+            attempt("two.test", phase)
+        self.assertEqual(runner.strategy_reminder(document)["count"], 0)
+
+    def test_strategy_feedback_covers_discovery_and_contacts_without_extra_state(self):
+        for scope, phase in (("discovery", "account_discovery"), ("one.test", "contact_discovery")):
+            with self.subTest(phase=phase):
+                document = {"request": {"target_count": 5}, "accepted": [], "unresolved": [], "rejected": [],
+                    "routes": [dict(route_id=str(i), scope=scope, phase=phase, tool=f"tool-{i}",
+                        approach=f"method {i}", progress_before=[], provider_status="no_results") for i in range(2)],
+                    "stop_audit": {"route_frontier": [dict(route_id=str(i), state="exhausted", reason="No fit") for i in range(2)]}}
+                original = copy.deepcopy(document)
+                feedback = runner.strategy_reminder(document)
+                self.assertEqual(feedback["count"], 1)
+                self.assertEqual(feedback["items"][0]["target"], scope)
+                self.assertEqual(document, original)
+                if scope != "discovery":
+                    document["rejected"] = [{"company": {"domain": scope}}]
+                    self.assertEqual(runner.strategy_reminder(document)["count"], 0)
+
     def test_native_fallback_reuses_both_receipts_and_exposes_no_repeat_decision(self):
         self.start()
         self.selected_contact()
