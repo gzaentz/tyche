@@ -27,9 +27,10 @@ to normalize through the local wrapper. Inspect saved raw responses and do not
 promote unknown envelopes or missing fields into evidence.
 
 IDs below are dated search hints. Rediscover and describe before execution;
-use the returned tool ID through `scripts/deepline.py`. Input hints highlight
-useful fields, not a complete payload schema; `anyOf` constraints, exact enums,
-native page sizes, options, and cost bounds come from the live description.
+use the returned tool ID through the [native tools](adapter-io.md#native-tools).
+Input hints highlight useful fields, not a complete payload schema; `anyOf`
+constraints, exact enums, native page sizes, options, and cost bounds come
+from the live description.
 Prices are intentionally not copied into routing advice. A headline `Free`
 may mean BYOK pass-through; provider quotas/charges still apply. Usage-based
 pricing or a base-page price is not a conservative bound for an entire job.
@@ -44,6 +45,8 @@ pricing or a base-page price is not a conservative bound for an entire job.
 | D Crustdata `crustdata_v3_company_search` | `filters`, `fields`, `limit`, `sorts`, `cursor` | Indexed industry, country, size, funding, growth, investor, competitor and function-size discovery. Use catalog autocomplete for exact field values. |
 | D Prospeo `prospeo_search_company` | `company_industry`, `company_keywords`, `company_headcount_range`, location, technology, `page` | Independent structured account universe; confirm actual ICP evidence and native page size. |
 | D Forager `forager_organization_search` | `description`, `keywords`, `locations`, `employees_start/end`, job/funding filters, `page` | Alternate organization discovery with footprint and job-event criteria; page price is not a per-row price. |
+| D Aviato `aviato_company_search` | Described `dsl` with `offset`, `limit` and native filter objects | Company discovery through a structured query language; inspect the actual filter contract rather than translating another provider's syntax. |
+| D Deepline `free_simple_company_search` | Bounded read-only `sql` over the described company corpus | Exact-domain recovery or candidate discovery. Corpus size buckets and update dates are not current LinkedIn size or event evidence. Prefer selective predicates; verify identity and inspect raw fields when normalized output omits them. |
 | D Aviato `aviato_generate_map` | Company `id`, or `name` plus `website` | Similar-company market map. It starts generation; preserve the returned job and discover recovery before further work. |
 | D Openmart `openmart_search_businesses` | `query`, `location`, `tags`, `ownership_type`, `open_date_after`, `limit` | Physical-store discovery, including opening and quality filters. One location is not necessarily one company. |
 | D Openmart `openmart_search_brands` | `search_param`, `pagination` | Brand/company-level rows when store-level duplicates dominate. Still resolve legal operator and franchise boundaries. |
@@ -78,13 +81,22 @@ pricing or a base-page price is not a conservative bound for an entire job.
 | D HarvestAPI `harvestapi_search_jobs` | `search`, `companyId`, `location`, `postedLimit`, `page` | LinkedIn hiring discovery; retrieve exact job detail when list data is insufficient. |
 | D PredictLeads `predictleads_discover_job_openings` | `onet_codes`, `location`, `limit`, `page` | Occupation-based discovery when title keywords miss industry-specific language. |
 | D PredictLeads `predictleads_discover_news_events` | `categories`, `company_location`, `limit`, `page` | Expansion, partnerships, acquisitions and other event categories; inspect source event and all company relationships. |
+| D Aviato `aviato_get_company_funding_rounds` | Company `website`/LinkedIn URL/ID, required `perPage` and zero-based `page` | Structured funding history: round stage, announcement date and investors. Do not impose an event-recency window on stage unless requested. Preserve the provider receipt; a round may lack an article URL, so retrieve supporting source evidence if the output contract requires it. |
 | D PredictLeads `predictleads_discover_financing_events` | `financing_types_normalized`, `company_location`, `limit` | Funding-event-first discovery. Deal identity, event date, and recipient must be verified. |
+| D PredictLeads `predictleads_company_financing_events` | `company_id_or_domain`, `page`, `limit` | Known-company financing history with linked sources. Distinguish an explicit stage from generic equity, debt, refinancing and planned fundraising. |
+| C Leadmagic `leadmagic_company_funding` | Discover/describe exact company identifiers | Detailed funding and financial profiles; an alternative when a specific funding gap remains. |
 | D PredictLeads `predictleads_company_connections` | `company_id_or_domain`, `categories`, first-seen range | Relationship evidence for a known company; a customer, partner, investor, and supplier are different roles. |
 | D PredictLeads `predictleads_discover_portfolio_company_connections` | First/last-seen ranges, `limit`, `page` | VC/accelerator portfolio discovery. Portfolio appearance is not a newly closed funding round. |
 | D PredictLeads `predictleads_startup_platform_posts` | `post_types`, `published_at_from/until`, `limit` | Launch/hiring posts on startup platforms. Verify current product and operating entity. |
 | D SEC EDGAR `sec_edgar_list_filings` | `ticker` or `cik`, `forms`, `filed_from/to`, `limit` | Filing discovery for financial, ownership, leadership, and material-event research. Inspect filing index/document, not just submission metadata. |
 | D DataForSEO `dataforseo_serp_google_events_live_advanced` | `keyword`, location, `date_range`, bounded depth | Public events/exhibitions as a discovery route; English-only per current descriptor. Event participation is not purchase intent. |
-| C Other event routes | `aviato_get_company_funding_rounds`, `leadmagic_jobs_finder`, `openwebninja_jsearch_search`, `forager_job_search` | Alternative capital/job coverage after a materially relevant gap. |
+| C Other hiring routes | `leadmagic_jobs_finder`, `openwebninja_jsearch_search`, `forager_job_search` | Alternative job coverage after a materially relevant gap. |
+
+Selected rows were refreshed on 2026-09-15: Aviato funding/company search,
+PredictLeads company financing, the Deepline company corpus and Limadata web
+tools were described and used by the sourcing worker; Leadmagic funding was
+catalog-listed. This does not establish coverage for every ICP or guarantee
+complete normalized output.
 
 ## Advertising, public statements, and reviews
 
@@ -143,6 +155,8 @@ private traits from social activity or turn anonymous community authors into lea
 | D DataForSEO `dataforseo_serp_google_dataset_search_live_advanced` | `keyword`, format/topic/freshness fields, bounded depth | Discover exact public datasets for specialized industries. Read license, geographic scope, publisher, and actual artifact before using rows. |
 | D DataForSEO `dataforseo_app_data_apple_app_listings_search_live` | App `title`, `description`, `categories`, `limit` | Mobile-software publisher discovery. Resolve app publisher to the canonical company; ratings/download proxies are not buying intent. |
 | D Serper `serper_google_search` | `query`, `gl`, `hl`, `location`, `tbs`, `num` | Public web source discovery across industries and local languages. Read exact sources, not snippets alone. |
+| D Limadata `limadata_search_web` | `query`, optional `page` | Organic search titles, URLs and snippets for source discovery. Snippets may omit dates, qualifications or the actual event status. |
+| D Limadata `limadata_research_search` | `query`, optional `output_type` | Research answer with ranked source results. Verify underlying sources; the generated answer is not independent evidence. |
 | D Firecrawl `firecrawl_map` | `url`, `search`, `limit`, sitemap options | Locate product, team, legal, job, or news URLs without blindly crawling all content. Its price metadata mixes a per-call headline with per-discovered-page settlement; bound requested pages. |
 | D Firecrawl `firecrawl_scrape` | `url`, formats, `waitFor`, bounded read-only actions | Exact-page rendered content and supported document parsing. Option/PDF-page costs matter; do not disable TLS verification or perform form submissions. |
 | D Exa `exa_contents` | `urls`/`ids`, text, `livecrawl`, cache-age options | Alternative extraction of known pages. Cached/summary text is not necessarily current or a direct quote. |

@@ -21,22 +21,24 @@ Call `tyche_start` with that `request` and any authorized `max_usd`.
 Code supplies time, ledger and verification reserve. Catalog prices override
 [stored planning rates](references/provider-pricing.md); receipts supply charges.
 Defaults: one contact/company; USD 0.50/requested lead.
-Only the user can change criteria. Never import another run or guess prices.
-Credentials and runtime paths come from the launcher.
+Only the user changes criteria. Never import another run or guess prices.
+The launcher supplies credentials and runtime paths.
 
-Use [native tools](references/adapter-io.md#native-tools), without shell bookkeeping
-or implementation-code reads.
-Resume with `tyche_inspect()` for the saved request and pending work.
+Use [native tools](references/adapter-io.md#native-tools); no shell bookkeeping
+or implementation-code reads. Resume saved work with `tyche_inspect()`.
 
 ## Research loop
 
-1. **Choose ready work.** Prefer affordable `completion_candidates` before fresh discovery unless blocked. Select tools through [tools.md](references/tools.md).
-   Use `tyche_inspect(query=...)` for capabilities or `tool=...` for native schemas.
-   Refresh descriptions after schema/price/access changes. Pilot unproven
-   operations/filters before batching; preserve native limits.
-2. **Check up to three companies concurrently.** Send `tyche_lookup` one to three
-   `checks`: target, phase, purpose, tool and native inputs. Batch ready independent
-   checks across phases without waiting to fill batches.
+1. **Choose ready work.** Prefer affordable, unblocked `completion_candidates` before discovery.
+   Read [tools.md](references/tools.md#choose-by-evidence-gap) once before tool selection;
+   match sources to requested evidence.
+   Inspect capabilities with `tyche_inspect(query=...)`; schemas with `tool=...`.
+   Reuse receipts/descriptions; refresh descriptions after
+   schema/price/access changes. Pilot unproven operations/filters before
+   batching; preserve native limits.
+2. **Check up to three companies concurrently.** Send `tyche_lookup` 1–3 independent
+   `checks` across phases: target, phase, purpose, tool and native inputs.
+   Do not wait to fill batches.
    Review requested fit criteria and dated signals before buyers;
    distinguish announced, conditional, planned and completed activity. Resolve
    company LinkedIn URLs from sources before enrichment; never invent slugs.
@@ -47,17 +49,19 @@ Resume with `tyche_inspect()` for the saved request and pending work.
    code supplies labels/importance and checks dates and coverage.
    Reuse facts for `Intent Details`.
    Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
-   Use [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size):
-   accepted contacts need country; companies need published employee range and source.
+   [HarvestAPI LinkedIn fields](references/output-contract.md#linkedin-location-and-company-size):
+   accepted contacts require country; companies require published employee range/source.
 3. **Save decisions as made.** Call `tyche_review` with changed facts, checks,
    decisions and selected evidence `ref` values. Reviewed single-result company,
    profile and email-verdict lookups close automatically. Review other used sources
    in `sources`, with their reason and continuation/exhaustion decision. For built-in
    web tools, include the actual observed response in `web` in the same call.
-   `review_due` identifies outstanding reviews.
+   `review_due` lists reviews due.
    After two comparable attempts per company/phase without verified progress,
-   change strategy. Reopen evidence for gaps/contradictions; independent
-   profile/email checks remain eligible.
+   revisit the matching guide row/live catalog and change strategy before
+   repeating searches or claiming shortfall. Choose useful alternatives.
+   Reopen evidence for gaps/contradictions;
+   independent profile/email checks remain eligible.
 
 Use `tyche_inspect(ref=..., field=...)` for detail, `target=...` for company state,
 or `recover=...` to record a saved normalized receipt without redispatch.
@@ -94,12 +98,10 @@ Report shortfalls; exhausted searches do not prove an empty market.
 
 ## Full cost
 
-After worker exit, report launcher-refreshed provider, model, combined and
-per-lead costs; label estimates and unknowns.
+Report launcher-refreshed provider, model, combined and per-lead costs after
+worker exit; label estimates/unknowns.
 
 ## References
-
-Details:
 
 - Evidence: [semantics](references/output-contract.md#semantic-checks),
   [source attribution](references/output-contract.md#accepted-lead-sources),
@@ -107,6 +109,6 @@ Details:
   [client writing](references/output-contract.md#client-writing-and-taxonomy-version-12).
 - Delivery: [workbook](references/output-contract.md#leadsxlsx-contract),
   [report](references/output-contract.md#reportmd-minimum-contents),
-  [timing](references/output-contract.md#timing) and
-  [final checklist](references/output-contract.md#final-response-checklist).
-  Use bundled workbook dependencies; do not add an npm dependency.
+  [timing](references/output-contract.md#timing),
+  [checklist](references/output-contract.md#final-response-checklist).
+  Use bundled workbook dependencies; no new npm dependency.
