@@ -17,11 +17,11 @@ Preserve offering and seller/target perspective in `request.product_service`.
 Mark signals `required`/`preferred`; put non-signal must-haves in `icp.required_attributes`.
 Compare criteria with launcher-saved `original_text` before paid research;
 never strengthen, weaken or add requirements.
-Call `tyche_start` with that `request` and any authorized `max_usd`.
+Call `tyche_start(request=..., max_usd=...)` within authorization.
 Code supplies time, ledger and verification reserve. Catalog prices override
 [stored planning rates](references/provider-pricing.md); receipts supply charges.
 Defaults: one contact/company; USD 0.50/requested lead.
-Only the user changes criteria. Never import another run or guess prices.
+Only users change criteria. Never import another run or guess prices.
 The launcher supplies credentials and runtime paths.
 
 Use [native tools](references/adapter-io.md#native-tools); no shell bookkeeping
@@ -30,14 +30,11 @@ or implementation-code reads. Resume saved work with `tyche_inspect()`.
 ## Research loop
 
 1. **Choose ready work.** Prefer affordable, unblocked `completion_candidates` before discovery.
-   Read [tools.md](references/tools.md#choose-by-evidence-gap) once before tool selection;
-   match sources to requested evidence.
+   Read [tools.md](references/tools.md#choose-by-evidence-gap) once; match tools to evidence gaps.
    Find capabilities with `tyche_inspect(query=...)`; learn each selected tool once
-   with `tool=...`. Its compact description includes inputs, constraints and pricing;
-   use `field` for omitted detail only when needed. Code checks the full saved
-   contract and price before dispatch. Reuse descriptions; refresh only after
-   evidence of schema/price/access changes. Pilot unproven operations/filters before
-   batching; preserve native limits.
+   with `tool=...`. Use `field` for omitted details. Code checks the full saved contract and price
+   before dispatch; refresh descriptions only after schema/price/access changes.
+   Pilot unproven operations/filters before batching; preserve native limits.
 2. **Check up to three companies concurrently.** Send `tyche_lookup` 1–3 independent
    `checks` across phases: target, phase, purpose, tool and native inputs.
    Do not wait to fill batches.
@@ -46,8 +43,8 @@ or implementation-code reads. Resume saved work with `tyche_inspect()`.
    company LinkedIn URLs from sources before enrichment; never invent slugs.
    Apply the [qualification policy](references/workflow-rules.md#qualification-policy).
    Required unknowns stay unresolved; evidenced mismatches reject; preferred signals
-   only rank. Review each preferred signal once; retain unverified gaps as unknown.
-   Select returned `attribute:N` or `signal:N` as `requirement_ref` in checks;
+   only rank. Review preferred signals once; retain gaps as unknown.
+   Use `attribute:N` or `signal:N` as `requirement_ref`;
    code supplies labels/importance and checks dates and coverage.
    Reuse facts for `Intent Details`.
    Follow [client writing/classification](references/output-contract.md#client-writing-and-taxonomy-version-12).
@@ -58,14 +55,14 @@ or implementation-code reads. Resume saved work with `tyche_inspect()`.
    profile and email-verdict lookups close automatically. Review other used sources
    in `sources`, with their reason and continuation/exhaustion decision. For built-in
    web tools, include the actual observed response in `web` in the same call.
-   `review_due` lists reviews due.
+   Check `review_due`.
    After two comparable attempts per company/phase without verified progress,
    revisit the matching guide row/live catalog and change strategy before
    repeating searches or claiming shortfall. Choose useful alternatives.
    Reopen evidence for gaps/contradictions;
    independent profile/email checks remain eligible.
 
-Use `tyche_inspect(ref=..., field=...)` for detail, `target=...` for company state,
+Use `tyche_inspect(ref=..., field=...)` for detail, `target=...` for state,
 or `recover=...` to record a saved normalized receipt without redispatch.
 Missing responses require reconciliation; never repeat an uncertain paid call.
 Never read the worker's live launcher log.
@@ -96,12 +93,11 @@ Return the current `review_ref` with commentary to validate/export.
 Never force completion.
 Inspect the preview. Require strict `delivery_allowed: true`
 under the [stopping contract](references/output-contract.md#stopping-check).
-Report shortfalls; exhausted searches do not prove an empty market.
+Report shortfalls; exhaustion does not prove an empty market.
 
 ## Full cost
 
-Report launcher-refreshed provider, model, combined and per-lead costs after
-worker exit; label estimates/unknowns.
+After exit, report launcher-refreshed provider, model, combined and per-lead costs; label estimates/unknowns.
 
 ## References
 
