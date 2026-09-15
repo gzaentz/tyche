@@ -168,6 +168,14 @@ after reaching the target; corrections preserve verified contacts and emails.
 The review approval is saved for that exact state. If export is interrupted,
 code can retry it once when the worker ends without repeating research or
 approving an unreviewed snapshot. Do not repeat unchanged failing calls.
+
+`capture_method` distinguishes adapter-saved provider responses from
+`agent_recorded_web` excerpts. For public web, save a short source passage with
+its qualifiers intact; keep interpretation in the company check's `claim`.
+If an earlier saved excerpt is a paraphrase or omits decisive context, reopen the
+source before relying on it for final review. A saved summary is not independent
+confirmation of its own claim.
+
 The success response includes a concise cost summary; final model usage is still
 refreshed by the launcher after exit. Use `inspect(field="costs")` for saved costs.
 

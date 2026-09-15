@@ -53,7 +53,7 @@ COMPANY = obj({"target": STRING, "decision": {"enum": ["hold_account", "qualify_
 WEB = obj({"target": STRING, "purpose": STRING, "query": STRING,
     "operation": {"enum": ["search_query", "open", "find", "click"]},
     "response": obj({"status": STRING, "operation": STRING, "error": {},
-        "results": {"type": "array", "items": {**OBJECT, "description": "One observed source: url, text excerpt, and date/date_basis when supplied. Do not paste a serialized tool transcript."}}},
+        "results": {"type": "array", "items": {**OBJECT, "description": "One observed source: url, a short source passage copied from the web result, and date/date_basis when supplied. Preserve qualifiers and context; put your interpretation in the company's claim, not this text. Do not paste a serialized tool transcript."}}},
         ("status", "results"))}, ("target", "purpose", "query", "response"))
 SOURCE = obj({"ref": REFERENCE, "state": {"enum": ["exhausted", "continuable", "blocked"]},
     "reason": STRING, "continuations": {"type": "array", "items": REFERENCE}}, ("ref", "state", "reason"))
@@ -1003,6 +1003,7 @@ class ResearchTools:
                     ref = f"{rid}:{index}"
                     matches.append(ref)
                     sources[ref] = {"url": address,
+                        "capture_method": "agent_recorded_web" if receipts[rid].get("provider") == "public_web" else "provider_response",
                         "text": compact(result.get("evidence_text") or result.get("text") or result.get("snippet") or json.dumps(runner._harvest_display(result))),
                         "date": result.get("evidence_date", result.get("date")),
                         "date_basis": result.get("evidence_date_basis", result.get("date_basis"))}
@@ -1086,7 +1087,7 @@ class ResearchTools:
                         "next": "Correct the source references using the saved receipts. inspect(target=..., field=evidence_review) shows claims and source excerpts. No final approval has occurred."}
             return {"status": "review_required", "delivery_allowed": False, "review_ref": expected,
                     "request": document["request"], "requirements": request_requirements(document["request"]),
-                    "instructions": "Review before approving: compare every account with the original must-haves, preferences, geography and product/service context. Check the original source passages for company identity, event status, date and claim strength; your earlier paraphrase is not independent evidence. General career descriptions or role-family lists do not establish current vacancies; current observations alone do not establish duration, repetition or acceleration. Keep unsupported preferred signals unknown. Signals contain verified facts/date/source. Intent Details: state each verified signal, follow it with a sentence explaining its relevance, then end with how the evidence together relates to the requested product/service (seller offering for seller perspective; target offering for target perspective). Explain the company situation; merely calling a contact a timely buyer is insufficient. Keep inferred needs conditional. Description is exactly two factual business sentences. Correct with tyche_review, request a fresh packet, then approve its review_ref. This remains LLM source review, not an automatic semantic pass.",
+                    "instructions": "Review before approving: compare every account with the original must-haves, preferences, geography and product/service context. Check the original source passages for company identity, event status, date and claim strength; your earlier paraphrase is not independent evidence. Sources marked agent_recorded_web were saved by you; reopen the source if that text is paraphrased or lacks decisive context. General career descriptions or role-family lists do not establish current vacancies; current observations alone do not establish duration, repetition or acceleration. Keep unsupported preferred signals unknown. Signals contain verified facts/date/source. Intent Details: state each verified signal, follow it with a sentence explaining its relevance, then end with how the evidence together relates to the requested product/service (seller offering for seller perspective; target offering for target perspective). Explain the company situation; merely calling a contact a timely buyer is insufficient. Keep inferred needs conditional. Description is exactly two factual business sentences. Correct with tyche_review, request a fresh packet, then approve its review_ref. This remains LLM source review, not an automatic semantic pass.",
                     "companies": companies, "sources": sources}
         if approval.get("review_ref") != expected:
             def approve(saved):

@@ -150,9 +150,22 @@ class ResearchToolTests(unittest.TestCase):
         packet = self.tools.inspect(target="example.test", field="evidence_review")
         proof = next(iter(packet["sources"].values()))
         self.assertEqual(proof["text"], "One current vacancy. No posting date is shown.")
+        self.assertEqual(proof["capture_method"], "agent_recorded_web")
         self.assertIsNone(proof["date"])
         self.assertEqual(packet["company"]["qualification_checks"][0]["evidence"][0]["text"], "Unproven persistence claim")
         self.assertEqual(json.loads(self.path.read_text())["unresolved"][0]["qualification_checks"][0]["status"], "unknown")
+
+    def test_review_identifies_adapter_saved_provider_text_without_dispatch(self):
+        self.start()
+        ref = self.lookup()["lookups"][0]["results"][0]["ref"]
+        self.tools.review(companies=[{"target": "example.test", "decision": "hold_account", "reason": "Review source",
+            "account_fit": {"ref": ref, "text": "Research interpretation"}}])
+        before = self.path.read_bytes(), budget.ledger_path(self.path).read_bytes(), len(self.provider.requests)
+        packet = self.tools.inspect(target="example.test", field="evidence_review")
+        proof = next(iter(packet["sources"].values()))
+        self.assertEqual(proof["capture_method"], "provider_response")
+        self.assertNotEqual(proof["text"], "Research interpretation")
+        self.assertEqual((self.path.read_bytes(), budget.ledger_path(self.path).read_bytes(), len(self.provider.requests)), before)
 
     def test_selected_point_lookups_close_without_closing_searches(self):
         self.start()
