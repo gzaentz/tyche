@@ -1050,6 +1050,34 @@ class ResearchTools:
         return {"provider": runner.calculate_cost_summary(self._document()),
                 "model": "Final run-only model usage closes after worker exit; the launcher refreshes the cost report."}
 
+    def review_delivery(self, document, review_ref=None):
+        """Review and approve one exact evidence snapshot; caller holds the tool lock."""
+        expected = runner.review_fingerprint(document)
+        approval = document.get("final_review", {})
+        if (review_ref is not None and review_ref != expected) or (review_ref is None and approval.get("review_ref") != expected):
+            sources, receipts = {}, {}
+            companies = [self._company_review(row, sources, receipts) for row in document.get("accepted", [])]
+            source_errors = []
+            for company in companies:
+                evidence = [company["account_fit"], company.get("signal_evidence", {})] + [
+                    e for c in company["qualification_checks"] for e in c["evidence"]]
+                source_errors.extend(company["company"]["domain"] + ": " + e["source_error"] for e in evidence if "source_error" in e)
+            if source_errors:
+                return {"status": "needs_repair", "delivery_allowed": False, "errors": source_errors,
+                        "companies": companies, "sources": sources,
+                        "next": "Correct the source references using the saved receipts. inspect(target=..., field=evidence_review) shows claims and source excerpts. No final approval has occurred."}
+            return {"status": "review_required", "delivery_allowed": False, "review_ref": expected,
+                    "request": document["request"], "requirements": request_requirements(document["request"]),
+                    "instructions": "Review before approving: compare every account with the original must-haves, preferences, geography and product/service context. Check the original source passages for company identity, event status, date and claim strength; your earlier paraphrase is not independent evidence. Sources marked agent_recorded_web were saved by you; reopen the source if that text is paraphrased or lacks decisive context. General career descriptions or role-family lists do not establish current vacancies; current observations alone do not establish duration, repetition or acceleration. Keep unsupported preferred signals unknown. Signals contain verified facts/date/source. Intent Details: state each verified signal, follow it with a sentence explaining its relevance, then end with how the evidence together relates to the requested product/service (seller offering for seller perspective; target offering for target perspective). Explain the company situation; merely calling a contact a timely buyer is insufficient. Keep inferred needs conditional. Description is exactly two factual business sentences. Correct with tyche_review, request a fresh packet, then approve its review_ref. This remains LLM source review, not an automatic semantic pass.",
+                    "companies": companies, "sources": sources}
+        if approval.get("review_ref") != expected:
+            def approve(saved):
+                if runner.review_fingerprint(saved) != expected:
+                    raise ValueError("Research changed during review; request the current review packet")
+                saved["final_review"] = {"review_ref": expected, "reviewed_at": datetime.now(timezone.utc).isoformat()}
+                return saved
+            runner.mutate(self.path, approve)
+
     def finish(self, commentary=None, review_ref=None):
         with self._review_lock:
             return self._finish(commentary, review_ref)
@@ -1077,31 +1105,8 @@ class ResearchTools:
             return {"status": "needs_repair", "delivery_allowed": False, "errors": preflight["errors"],
                     "pending_sources": pending_sources,
                     "next": "Resolve these mechanical gaps with review/inspect before final evidence review. No approval or export has occurred."}
-        expected = runner.review_fingerprint(document)
-        approval = document.get("final_review", {})
-        if (review_ref is not None and review_ref != expected) or (review_ref is None and approval.get("review_ref") != expected):
-            sources, receipts = {}, {}
-            companies = [self._company_review(row, sources, receipts) for row in document.get("accepted", [])]
-            source_errors = []
-            for company in companies:
-                evidence = [company["account_fit"], company.get("signal_evidence", {})] + [
-                    e for c in company["qualification_checks"] for e in c["evidence"]]
-                source_errors.extend(company["company"]["domain"] + ": " + e["source_error"] for e in evidence if "source_error" in e)
-            if source_errors:
-                return {"status": "needs_repair", "delivery_allowed": False, "errors": source_errors,
-                        "companies": companies, "sources": sources,
-                        "next": "Correct the source references using the saved receipts. inspect(target=..., field=evidence_review) shows claims and source excerpts. No final approval has occurred."}
-            return {"status": "review_required", "delivery_allowed": False, "review_ref": expected,
-                    "request": document["request"], "requirements": request_requirements(document["request"]),
-                    "instructions": "Review before approving: compare every account with the original must-haves, preferences, geography and product/service context. Check the original source passages for company identity, event status, date and claim strength; your earlier paraphrase is not independent evidence. Sources marked agent_recorded_web were saved by you; reopen the source if that text is paraphrased or lacks decisive context. General career descriptions or role-family lists do not establish current vacancies; current observations alone do not establish duration, repetition or acceleration. Keep unsupported preferred signals unknown. Signals contain verified facts/date/source. Intent Details: state each verified signal, follow it with a sentence explaining its relevance, then end with how the evidence together relates to the requested product/service (seller offering for seller perspective; target offering for target perspective). Explain the company situation; merely calling a contact a timely buyer is insufficient. Keep inferred needs conditional. Description is exactly two factual business sentences. Correct with tyche_review, request a fresh packet, then approve its review_ref. This remains LLM source review, not an automatic semantic pass.",
-                    "companies": companies, "sources": sources}
-        if approval.get("review_ref") != expected:
-            def approve(saved):
-                if runner.review_fingerprint(saved) != expected:
-                    raise ValueError("Research changed during review; request the current review packet")
-                saved["final_review"] = {"review_ref": expected, "reviewed_at": datetime.now(timezone.utc).isoformat()}
-                return saved
-            runner.mutate(self.path, approve)
+        if review := self.review_delivery(document, review_ref):
+            return review
         if self.deliver is not None:
             # Lab JSON delivery uses the same source review and strict gate.
             return self.deliver(self.path, runner.finalize_run(self.path))

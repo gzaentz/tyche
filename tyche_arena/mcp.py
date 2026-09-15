@@ -8,8 +8,9 @@ from pathlib import Path
 import threading
 
 from .broker import Broker
-from .output import deliver
-from research_tools import ResearchTools, TOOLS
+from .output import accepted_preflight, deliver
+from research_tools import ResearchTools, TOOLS, validate
+import budget_guard
 from tyche_tools import serve
 
 
@@ -40,6 +41,13 @@ def lab_tools():
     del tools["tyche_start"]
     tools["tyche_lookup"][1]["properties"]["checks"]["items"]["properties"]["provider"]["enum"] = ["deepline"]
     del tools["tyche_review"][1]["properties"]["web"]
+    tools["tyche_checkpoint"] = (
+        "Save completed companies while research continues. Call after each accepted company; "
+        "review the evidence packet, then approve its current review_ref. Only reviewed, fully "
+        "qualified companies and contacts are checkpointed for the lab deadline. This does not "
+        "end research or change the target; use tyche_finish to close the run.",
+        {"type": "object", "properties": {"review_ref": {"type": "string", "minLength": 1}},
+         "additionalProperties": False})
     return {name: (description, arena_schema(schema)) for name, (description, schema) in tools.items()}
 
 
@@ -72,6 +80,8 @@ class LabTools:
         icp = json.loads(json.loads(Path(run_file).read_text())["request"]["original_text"])
         self.lock = threading.Lock()
         self.delivered = False
+        self.icp = icp
+        self.write_checkpoint = lab_arena_checkpoint.write
 
         def save(path, validation):
             result = deliver(path, validation, icp, lab_arena_checkpoint.write)
@@ -79,6 +89,19 @@ class LabTools:
             return result
 
         self.research = ResearchTools(run_file, execute=self.broker.execute, deliver=save)
+
+    def checkpoint(self, review_ref=None):
+        document = self.research._document()
+        errors = (budget_guard.audit_ledger(self.research.path, document)
+                  + accepted_preflight(self.research.path, document))
+        if errors:
+            return {"status": "needs_repair", "checkpoint_saved": False, "errors": errors}
+        if review := self.research.review_delivery(document, review_ref):
+            return review
+        result = deliver(self.research.path, {"valid": True, "scope": "accepted_companies"},
+                         self.icp, self.write_checkpoint, partial=True)
+        return {**result, "status": "checkpoint_saved",
+                "next": "Reviewed companies are saved. Continue research toward the original target, then tyche_finish."}
 
     def call(self, name, arguments):
         if name not in LAB_TOOLS:
@@ -90,6 +113,9 @@ class LabTools:
         with self.lock:
             if self.delivered and (name != "tyche_inspect" or any(key in arguments for key in ("recover", "refresh", "query", "tool"))):
                 raise ValueError("Reviewed JSON is delivered; end the Codex turn now")
+            if name == "tyche_checkpoint":
+                validate(arguments, LAB_TOOLS[name][1])
+                return model_result(self.checkpoint(**arguments))
             return model_result(self.research.call(name, arguments))
 
 

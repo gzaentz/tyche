@@ -45,7 +45,7 @@ def lookup(tool, inputs, phase="account_verification", **extra):
                         "tool": tool, "inputs": inputs, **extra}]}
 
 
-def scenario():
+def scenario(finish_tool="tyche_finish"):
     company = yield "tyche_lookup", lookup("harvestapi_get_company", {"url": COMPANY_URL})
     company_ref = company["lookups"][0]["results"][0]["ref"]
     pages = yield "tyche_lookup", lookup("generic_http_request", {"url": "https://example.com/news", "method": "GET"})
@@ -72,10 +72,13 @@ def scenario():
     email_ref = email["lookups"][0]["results"][0]["ref"]
     yield "tyche_review", {"companies": [{"target": "example.com", "decision": "accept", "reason": "Verified company and current buyer",
         "primary_contact": {"email_ref": email_ref}}]}
-    packet = yield "tyche_finish", {}
+    if finish_tool is None:
+        return
+    packet = yield finish_tool, {}
     assert packet["status"] == "review_required", packet
-    final = yield "tyche_finish", {"review_ref": packet["review_ref"]}
-    assert final["delivery_allowed"], final
+    final = yield finish_tool, {"review_ref": packet["review_ref"]}
+    assert final["checkpoint_saved"], final
+    assert final["delivery_allowed"] == (finish_tool == "tyche_finish"), final
 
 
 
@@ -115,6 +118,8 @@ def lab(tmp_path, monkeypatch):
     fixture.sessions = []
     fixture.research = []
     fixture.mode = "deliver"
+    fixture.program = scenario
+    fixture.after_program = lambda tools: None
     fixture.output = tmp_path / "companies.json"
     monkeypatch.setenv("LAB_ARENA_COMPANY_LIMIT", "1")
     monkeypatch.setenv("LAB_ARENA_WORKER_SOCKET", str(tmp_path / "worker.sock"))
@@ -180,7 +185,7 @@ def lab(tmp_path, monkeypatch):
             arguments = fixture.config["mcp_servers"]["tyche"]["args"]
             tools = LabTools(Path(arguments[arguments.index("--run-file") + 1]), float(arguments[-1]))
             fixture.research.append(tools)
-            program = scenario()
+            program = fixture.program()
             command = next(program)
             while True:
                 result = tools.call(*command)
@@ -188,6 +193,11 @@ def lab(tmp_path, monkeypatch):
                     command = program.send(result)
                 except StopIteration:
                     break
+            fixture.after_program(tools)
+            if fixture.mode == "partial_timeout":
+                raise subprocess.TimeoutExpired(self.command, timeout)
+            if fixture.mode == "partial_error":
+                self.returncode = 1
             if fixture.mode == "tamper":
                 fixture.output.write_text('{"companies": []}')
             return 0
@@ -280,7 +290,7 @@ def test_advertised_mcp_contract_fits_pr198_structural_bounds():
     outgoing = io.StringIO()
     serve(SimpleNamespace(), incoming, outgoing, tools=LAB_TOOLS)
     tools = json.loads(outgoing.getvalue())["result"]["tools"]
-    assert {t["name"] for t in tools} == {"tyche_lookup", "tyche_review", "tyche_inspect", "tyche_finish"}
+    assert {t["name"] for t in tools} == {"tyche_lookup", "tyche_review", "tyche_inspect", "tyche_finish", "tyche_checkpoint"}
     request = {"model": runtime.MODEL, "input": "Research", "tools": [
         {"type": "function", "name": t["name"], "parameters": t["inputSchema"]} for t in tools]}
 
@@ -447,3 +457,126 @@ def test_final_review_has_time_for_two_brokered_model_responses():
     # PR #198's complete model socket wait can be 185s per turn. Final packet
     # review and approval must both fit after research stops on a shortfall.
     assert runtime.RUN_SECONDS - runtime.RESEARCH_SECONDS >= 2 * 185 + 30
+
+
+@pytest.mark.parametrize("mode", ["partial_timeout", "partial_error", "deliver"])
+def test_partial_checkpoint_survives_unfinished_research(lab, monkeypatch, mode):
+    from harness import run_icp
+
+    monkeypatch.setenv("LAB_ARENA_COMPANY_LIMIT", "5")
+    lab.program = lambda: scenario("tyche_checkpoint")
+    lab.mode = mode
+
+    def continue_research(tools):
+        assert not tools.delivered
+        before = json.loads(lab.output.read_text())
+        # A real tool review creates a new, unfinished candidate after delivery.
+        tools.call("tyche_review", {"companies": [{"target": "unfinished.example.com",
+            "decision": "hold_account", "reason": "Still checking the required signal"}]})
+        saved = json.loads(tools.research.path.read_text())
+        assert saved["request"]["target_count"] == 5
+        assert saved["unresolved"]
+        assert tools.call("tyche_finish", {})["delivery_allowed"] is False
+        assert json.loads(lab.output.read_text()) == before
+        # An interrupted subsequent reservation must not discard the checkpoint.
+        with budget_guard.transaction(tools.research.path.with_name("results.json.budget.json")) as ledger:
+            ledger["blocked"] = "Later call billing is uncertain; do not retry"
+
+    lab.after_program = continue_research
+    rows = run_icp(ICP)
+    assert len(rows) == 1
+    assert json.loads(lab.output.read_text()) == {"companies": rows}
+    assert json.loads(lab.research[0].research.path.read_text())["request"]["target_count"] == 5
+    assert (lab.processes[0].run_dir / "failure.json").exists() == (mode != "deliver")
+    assert len(lab.processes) == 1 and lab.session_closed
+
+
+def test_accepted_but_unreviewed_leads_are_not_checkpointed(lab, monkeypatch):
+    monkeypatch.setenv("LAB_ARENA_COMPANY_LIMIT", "5")
+    lab.program = lambda: scenario(None)
+    lab.mode = "partial_timeout"
+    with pytest.raises(subprocess.TimeoutExpired):
+        runtime.run(ICP)
+    assert not lab.output.exists()
+    assert len(json.loads(lab.research[0].research.path.read_text())["accepted"]) == 1
+
+
+def test_checkpoint_needs_current_review_and_can_be_updated(lab, monkeypatch):
+    monkeypatch.setenv("LAB_ARENA_COMPANY_LIMIT", "5")
+    lab.program = lambda: scenario(None)
+
+    def approve_incrementally(tools):
+        packet = tools.call("tyche_checkpoint", {})
+        assert packet["status"] == "review_required"
+        assert packet["companies"] and packet["sources"]
+        assert not lab.output.exists()
+        changed = PARAGRAPH + " Better coordination may support fulfillment reliability."
+        tools.call("tyche_review", {"companies": [{"target": "example.com", "decision": "accept",
+            "reason": "Clarified the conditional relevance", "intent_details": changed}]})
+        fresh = tools.call("tyche_checkpoint", {"review_ref": packet["review_ref"]})
+        assert fresh["status"] == "review_required" and fresh["review_ref"] != packet["review_ref"]
+        assert not lab.output.exists()
+        saved = tools.call("tyche_checkpoint", {"review_ref": fresh["review_ref"]})
+        assert saved["checkpoint_saved"] and not saved["delivery_allowed"]
+        assert json.loads(lab.output.read_text())["companies"][0]["intent_details"] == changed
+        tools.call("tyche_review", {"companies": [{"target": "example.com", "decision": "accept",
+            "reason": "Use the concise reviewed description", "intent_details": PARAGRAPH}]})
+        newer = tools.call("tyche_checkpoint", {})
+        assert newer["status"] == "review_required"
+        # Unapproved revisions do not overwrite a published checkpoint.
+        assert json.loads(lab.output.read_text())["companies"][0]["intent_details"] == changed
+        assert tools.call("tyche_checkpoint", {"review_ref": newer["review_ref"]})["checkpoint_saved"]
+
+    lab.after_program = approve_incrementally
+    assert runtime.run(ICP)[0]["intent_details"] == PARAGRAPH
+
+
+@pytest.mark.parametrize("corruption", ["contact", "evidence", "provenance"])
+def test_partial_checkpoint_preserves_qualification_and_contact_gates(lab, monkeypatch, corruption):
+    monkeypatch.setenv("LAB_ARENA_COMPANY_LIMIT", "5")
+    lab.program = lambda: scenario(None)
+
+    def corrupt(tools):
+        path = tools.research.path
+        saved = json.loads(path.read_text())
+        row = saved["accepted"][0]
+        if corruption == "contact":
+            row["primary_contact"].pop("email")
+        elif corruption == "evidence":
+            row["qualification_checks"][0]["status"] = "unknown"
+        else:
+            row["primary_contact"]["email"] = "someone-else@example.com"
+        path.write_text(json.dumps(saved))
+        result = tools.call("tyche_checkpoint", {})
+        assert result["status"] == "needs_repair", result
+        assert not result["checkpoint_saved"]
+        assert not lab.output.exists()
+
+    lab.after_program = corrupt
+    with pytest.raises(ValueError, match="No reviewed TYCHE checkpoint"):
+        runtime.run(ICP)
+
+
+def test_failed_partial_checkpoint_keeps_previous_host_output(lab, monkeypatch):
+    monkeypatch.setenv("LAB_ARENA_COMPANY_LIMIT", "5")
+    lab.program = lambda: scenario("tyche_checkpoint")
+
+    def failed_update(tools):
+        previous = lab.output.read_bytes()
+        local_previous = tools.research.path.with_name("companies.json").read_bytes()
+        snapshot = tools.research.path.with_name("checkpoint-results.json").read_bytes()
+        tools.call("tyche_review", {"companies": [{"target": "example.com", "decision": "accept",
+            "reason": "Clarified the relevance", "intent_details": PARAGRAPH + " Better coordination may help."}]})
+        packet = tools.call("tyche_checkpoint", {})
+        def fail(rows):
+            raise OSError("fixture output mount is unavailable")
+        tools.write_checkpoint = fail
+        with pytest.raises(OSError, match="output mount"):
+            tools.call("tyche_checkpoint", {"review_ref": packet["review_ref"]})
+        assert lab.output.read_bytes() == previous
+        assert tools.research.path.with_name("companies.json").read_bytes() == local_previous
+        assert tools.research.path.with_name("checkpoint-results.json").read_bytes() == snapshot
+        assert not tools.delivered
+
+    lab.after_program = failed_update
+    assert len(runtime.run(ICP)) == 1

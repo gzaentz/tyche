@@ -1,7 +1,7 @@
 """Optional native Codex audit. No Leadpoet execution or paid requests.
 
-The current PR #198 incompatibility is an explicit expected failure, never
-evidence of successful integration. See docs/leadpoet-codex-audit.md.
+The original PR #198 incompatibility at 2558d4bc is an explicit expected failure,
+not validation of the updated upstream protocol. See docs/leadpoet-codex-audit.md.
 """
 
 from contextlib import contextmanager

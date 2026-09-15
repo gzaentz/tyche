@@ -14,7 +14,7 @@ import time
 from . import ROOT, SKILL
 from .broker import Broker
 from .input import request_for
-from .output import companies
+from .output import checkpointed_companies
 from research_tools import ResearchTools
 
 MODEL = "openai/gpt-5.6-luna"
@@ -70,6 +70,10 @@ def instructions():
         "Keep the profile's provider record ID in the saved raw receipt. "
         "Company HQ country/state and stage must come from observed evidence. "
         "Intent Details must be one plain paragraph of at most 2000 characters. "
+        "After each accepted company, call tyche_checkpoint immediately, review its original source passages, "
+        "and approve the current review_ref before researching the next company. "
+        "This atomically saves completed companies without ending research or reducing the target. "
+        "At the lab deadline only an already saved valid checkpoint counts; drafts and final prose do not. "
         "Begin final evidence review before the research deadline. Inspect original source passages in "
         "tyche_finish's packet; use tyche_inspect with field='evidence_review' if a view is truncated. "
         "Approve only the current review_ref. Successful tyche_finish saves and checkpoints reviewed lab JSON. "
@@ -100,6 +104,7 @@ def launch(runtime, run_dir, deadline, remaining):
                      + '\nmodel_auto_compact_token_limit = 16000\ntool_output_token_limit = 4000\n')
         config.write_text(additions + config.read_text() + tool_configuration(run_dir / "results.json", deadline))
         prompt = ("Research the authoritative saved ICP with native TYCHE tools. Start with tyche_inspect. "
+                  "Checkpoint and review each completed company before continuing research. "
                   "Finish through reviewed JSON delivery within " + str(RESEARCH_SECONDS) + " seconds.")
         # No retry/relaunch: a lost model or provider response may already bill.
         with tempfile.TemporaryFile() as incoming:
@@ -149,14 +154,15 @@ def run(icp):
     broker = Broker(os.environ["LAB_ARENA_WORKER_SOCKET"], started + RESEARCH_SECONDS)
     try:
         ResearchTools(run_file, execute=broker.execute).start(request=request, max_usd=0.5 * limit)
-        launch(runtime, run_dir, started + RESEARCH_SECONDS, RUN_SECONDS - (time.monotonic() - started))
-        # Prose/exit status alone cannot deliver. Revalidate reviewed receipts
-        # against the original ICP, then require the exact saved/checkpointed JSON.
-        rows = companies(run_file, icp)
-        for path in (run_dir / "companies.json", Path(os.environ["LAB_ARENA_OUTPUT_PATH"])):
-            if path.stat().st_size > 512 * 1024 or json.loads(path.read_text()) != {"companies": rows}:
-                raise ValueError("Lab output differs from the current reviewed TYCHE records")
-        return rows
+        try:
+            launch(runtime, run_dir, started + RESEARCH_SECONDS, RUN_SECONDS - (time.monotonic() - started))
+        except Exception as exc:
+            (run_dir / "failure.json").write_text(json.dumps({"error": type(exc).__name__, "message": str(exc)[:2000]}))
+            if not (run_dir / "checkpoint-results.json").exists():
+                raise
+        # Revalidate the published snapshot, not subsequently unfinished work.
+        # Arena also retains this atomic output if its hard deadline kills us.
+        return checkpointed_companies(run_file, icp, os.environ["LAB_ARENA_OUTPUT_PATH"])
     except Exception as exc:
         (run_dir / "failure.json").write_text(json.dumps({"error": type(exc).__name__, "message": str(exc)[:2000]}))
         raise

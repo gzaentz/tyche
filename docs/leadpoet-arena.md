@@ -1,10 +1,11 @@
 # TYCHE in the Leadpoet lab
 
-**Not ready for promotion:** the native Codex audit found that PR #198 at
-`2558d4bc` rejects Luna's request/history format and tool-schema nesting.
-See [the compatibility audit](leadpoet-codex-audit.md) for reproduced failures,
-TYCHE fixes and the required upstream acceptance checks. Passing mocked delivery
-tests does not establish compatibility with the current PR #198 broker.
+**Promotion remains unverified:** PR #198's original native protocol blockers
+were addressed upstream through `8f12c82e`, but the full upstream CI run failed
+and the deployed lab journey has not been exercised. See
+[the compatibility audit](leadpoet-codex-audit.md) for the historical findings
+and upstream acceptance checks. Offline delivery tests do not establish
+compatibility with a deployed broker or guarantee sourcing quality.
 
 This bundle implements `harness.run_icp(icp) -> list[dict]` for the Codex lab
 runtime in [Leadpoet PR #198](https://github.com/leadpoet/leadpoet/pull/198).
@@ -20,8 +21,9 @@ Lab calls harness.run_icp(icp)
   → create isolated request, ledger and receipts under /tmp
   → lab_arena_codex.session → /usr/local/bin/codex exec
   → native TYCHE MCP tools → lab worker → Deepline
-  → final evidence review → strict validation → JSON checkpoint
-  → revalidate saved output → return companies to the lab
+  → review each completed company → validate → atomic JSON checkpoint
+  → continue research → final delivery or deadline
+  → revalidate the last published snapshot → return companies to the lab
 ```
 
 The adapter calls PR #198's `session(model=..., reasoning_effort=...)`, adds
@@ -30,12 +32,14 @@ one Codex process while the session remains open. PR #198 owns the Responses
 bridge and sends `openrouter.responses` through the lab worker. TYCHE never
 implements or replaces that model transport.
 
-TYCHE's four run-bound research tools are exposed through its shared MCP
+TYCHE's research tools and a lab-only `tyche_checkpoint` tool use its shared MCP
 transport. The host initializes the request, so `tyche_start` is unavailable
 to the model. The lab already isolates the process in gVisor; the adapter does
 not invoke the desktop launcher's nested sandbox relay. Shared qualification,
 email, accounting, stopping and final evidence-review gates still apply.
-Only the final delivery callback changes from a workbook to reviewed JSON.
+The lab delivers reviewed JSON and can save completed companies before the
+whole run is ready to stop. The desktop finish path still requires its strict
+whole-run preflight and workbook delivery.
 
 The default is `openai/gpt-5.6-luna` with `xhigh` reasoning, matching the local
 launcher's model family and effort. The round must include that model in its
@@ -60,6 +64,30 @@ session, kill the process group and save bounded diagnostics. The MCP process
 also watches its Codex parent because Codex gives MCP a separate process group.
 They never relaunch a potentially billed call or silently deliver unfinished records.
 
+## Partial completion at the 45-minute deadline
+
+After accepting each company, Codex calls `tyche_checkpoint`, reviews its source
+packet, and approves the current `review_ref` before researching the next company.
+The checkpoint validates the accepted companies' qualification, original sources,
+contacts, email provenance and current ledger. It atomically publishes only those
+reviewed companies through the host's existing checkpoint helper. The original
+company target and research budget remain unchanged, and research can continue.
+Checkpoint approval reuses the same evidence-review implementation as finish.
+
+TYCHE stores the published research snapshot separately. An unfinished next
+candidate, later uncertain billing, process timeout or model error does not erase
+the earlier checkpoint. On orderly process shutdown, the harness revalidates that
+snapshot's saved evidence and requires the local and host output to match it.
+A failed checkpoint write leaves the preceding saved checkpoint intact.
+
+For rounds using `atomic_checkpoint_45m_v1`, Arena's runtime keeps the last valid
+checkpoint it completely read **before** the signed deadline, including when it
+kills the sandbox. It does not recover unsaved drafts or output written after the
+deadline. Two completed, reviewed companies out of a target of five can therefore
+enter normal scoring; the remaining three are unfulfilled. Factual qualification,
+contact provenance, duplicates and the round's scoring policy still determine
+credit. TYCHE's ordinary finish path is still available to close a completed run.
+
 ## Input and output
 
 - Supports `intent_details_v1` and `contacts_v1`, with the lab's v5 company
@@ -78,8 +106,9 @@ They never relaunch a potentially billed call or silently deliver unfinished rec
   current `review_ref` runs strict validation, maps only accepted records, saves
   `companies.json` and `validation.json`, then calls `lab_arena_checkpoint.write`.
   Delivered state is closed to further research changes.
-- After Codex exits, the harness validates the records again against the
-  original ICP and requires identical saved and checkpointed JSON. It returns
+- After Codex exits or its local timeout fires, the harness validates the last
+  published snapshot against the original ICP and requires identical saved and
+  checkpointed JSON. It returns
   the company list for the lab's normal entrypoint. Final text alone is never
   delivery. Checkpoints contain only reviewed output; the adapter does not
   periodically publish unreviewed drafts.
@@ -114,9 +143,9 @@ Python package dependency is `geonamescache==3.0.2`, used for country/region
 validation. Submit the staged directory through the existing lab source-bundle
 and baseline promotion process; do not install the desktop launcher in the lab.
 
-Before enabling a round, Leadpoet PR #198 must be merged and its Codex-equipped
-image and migration `258-lab-arena-codex-cost-reconciliation.sql` deployed.
-Its native Codex protocol incompatibilities must first be resolved and verified.
+Before enabling a round, Leadpoet PR #198 needs passing required checks, then
+merge and deployment of its Codex-equipped image and cost-reconciliation
+migration. Its migration-number collision with main must be resolved upstream.
 The selected round must admit the model and install this source bundle's
 dependency. Existing rounds retain their frozen baseline. This TYCHE PR does
 not deploy, promote a baseline, change subnet infrastructure, or modify PR #198.
@@ -129,8 +158,9 @@ python3 scripts/refresh_arena_catalog.py /path/to/leadpoet
 
 ## Verification and limits
 
-Compatibility was reviewed against PR #198 commit
-`2558d4bc418046ac9146c7992032405034150601`. Its session signature, mounted paths,
+The initial protocol audit used PR #198 commit
+`2558d4bc418046ac9146c7992032405034150601`; checkpoint cutoff and scoring behavior
+were also read at `8f12c82ed47dd7553ea986133fdfee84158675ad`. Session signatures, mounted paths,
 Responses allowlist/limits, provider frames, checkpoint writer and receiver
 input/output contracts were read as source, without importing or executing Leadpoet.
 
@@ -145,11 +175,14 @@ TYCHE-only offline fixtures cover the trigger through reviewed saved output,
 MCP configuration/schema bounds, primary/bonus semantics, stale evidence,
 wrong email provenance, false text completion, changed checkpoints, quotas,
 uncertain billing, checkpoint failure and detached MCP cleanup. Adapter tests
-use fixture processes, checkpoints and provider replies. The optional native
+also cover one completed company out of five surviving timeout/error with an
+unfinished candidate and subsequent billing uncertainty; current review approval;
+replacement checkpoints; and blocked partial delivery with invalid evidence or contacts.
+These tests use fixture processes, checkpoints and provider replies. The optional native
 tests run the actual Codex CLI and code-mode companion with scripted loopback
 responses: two MCP calls, continuation and forced context compaction. A separate
-case explicitly reports the current PR #198 contract rejection as an expected
-failure. This expected failure is a release blocker, not a successful lab run.
+case records the original PR #198 contract rejection as an expected failure.
+That historical fixture does not validate the updated upstream protocol.
 
 Actual Codex-to-MCP execution inside the deployed lab image, model availability,
 live provider behavior and sourcing quality remain unverified. A lab smoke run

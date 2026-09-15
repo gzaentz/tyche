@@ -1,6 +1,20 @@
 # Codex lab compatibility audit
 
-## Decision
+## Current status
+
+The protocol findings below describe PR #198 at `2558d4bc`, not its current
+head. Upstream fixes through `8f12c82e` address the native protocol and helper
+boundary, and its native Codex CI checks passed. The full upstream CI run
+[still failed](https://github.com/leadpoet/leadpoet/actions/runs/35030279128),
+so promotion remains unverified. No deployed lab sourcing/scoring journey was run.
+
+TYCHE now supports reviewed partial checkpoints during research. The existing
+Arena cutoff receiver at `8f12c82e` accepts its last valid pre-deadline checkpoint
+even after sandbox timeout. See [partial completion](leadpoet-arena.md#partial-completion-at-the-45-minute-deadline)
+for the behavior and offline coverage. This does not resolve the remaining
+upstream CI or deployment requirements.
+
+## Original audit decision
 
 **Keep the Codex architecture, but do not merge/promote this as ready for the
 current PR #198.** TYCHE uses the actual Codex CLI, its native model instructions,

@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import budget_guard
 import linkedin_receipts
 import run_attempt
-from validate_run import _identity
+from validate_run import _identity, accepted_errors, qualification_errors
 from .constraints import check_contact
 
 
@@ -44,13 +44,27 @@ def public_url(value):
 
 def companies(run_file, icp):
     document = budget_guard.read_object(run_file)
+    rows = reviewed_companies(run_file, document, icp)
+    _, validation = run_attempt.delivery_preflight(run_file, document)
+    if not validation["delivery_allowed"]:
+        raise ValueError("; ".join(validation["errors"]))
+    return rows
+
+
+def accepted_preflight(run_file, document):
+    """Validate completed leads without declaring the unfinished run complete."""
+    completed = dict(document, rejected=[], unresolved=[])
+    return (qualification_errors(completed, run_file=run_file)
+            + accepted_errors(completed, run_file=run_file))
+
+
+def reviewed_companies(run_file, document, icp):
     if json.loads(document["request"]["original_text"]) != icp:
         raise ValueError("Arena delivery ICP differs from the saved request")
     if document.get("final_review", {}).get("review_ref") != run_attempt.review_fingerprint(document):
         raise ValueError("Approve the current final evidence review before Arena delivery")
-    _, validation = run_attempt.delivery_preflight(run_file, document)
-    if not validation["delivery_allowed"]:
-        raise ValueError("; ".join(validation["errors"]))
+    if errors := accepted_preflight(run_file, document):
+        raise ValueError("; ".join(errors))
     output = []
     kinds = {_identity(signal["kind"]): index for index, signal in enumerate(document["request"]["buying_signals"])}
     for row in document["accepted"]:
@@ -114,17 +128,40 @@ def companies(run_file, icp):
     return output
 
 
-def deliver(run_file, validation, icp, checkpoint=None):
-    rows = companies(run_file, icp)
+def deliver(run_file, validation, icp, checkpoint=None, *, partial=False):
+    document = budget_guard.read_object(run_file)
+    rows = reviewed_companies(run_file, document, icp) if partial else companies(run_file, icp)
     result = {"companies": rows}
     path = Path(run_file).with_name("companies.json")
     payload = json.dumps(result, ensure_ascii=True, allow_nan=False).encode()
     if len(payload) > 512 * 1024:
         raise ValueError("Arena output exceeds 512 KiB")
+    if checkpoint:
+        checkpoint(rows)
     temporary = path.with_suffix(".tmp")
     temporary.write_bytes(payload)
     temporary.replace(path)
     Path(run_file).with_name("validation.json").write_text(json.dumps(validation, indent=2) + "\n")
-    if checkpoint:
-        checkpoint(rows)
-    return {"delivery_allowed": True, "companies": rows, "output": str(path)}
+    # Preserve the reviewed state independently of candidates still in progress.
+    # A failed host write never advances this committed snapshot.
+    snapshot = path.with_name("checkpoint-results.json")
+    temporary = snapshot.with_suffix(".tmp")
+    temporary.write_text(json.dumps(document, ensure_ascii=True, allow_nan=False))
+    temporary.replace(snapshot)
+    return {"delivery_allowed": not partial, "checkpoint_saved": True,
+            "companies": rows, "output": str(path)}
+
+
+def checkpointed_companies(run_file, icp, output_path):
+    """Return only the last successfully published, reviewed snapshot."""
+    snapshot = Path(run_file).with_name("checkpoint-results.json")
+    if not snapshot.exists():
+        raise ValueError("No reviewed TYCHE checkpoint was delivered")
+    document = budget_guard.read_object(snapshot)
+    rows = reviewed_companies(run_file, document, icp)
+    # Subsequent reservations/research do not invalidate already delivered leads.
+    # Their saved receipts and output bytes still have to match this snapshot.
+    for path in (Path(run_file).with_name("companies.json"), Path(output_path)):
+        if path.stat().st_size > 512 * 1024 or json.loads(path.read_text()) != {"companies": rows}:
+            raise ValueError("Lab output differs from the reviewed TYCHE checkpoint")
+    return rows
