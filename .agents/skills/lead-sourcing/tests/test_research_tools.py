@@ -1134,6 +1134,14 @@ class ResearchToolTests(unittest.TestCase):
         field = schema["properties"]["category"]["enum"]["detail_field"]
         self.assertEqual(self.tools.inspect(tool="harvestapi_get_company", field=field, offset=20)["tool"], enum[20:30])
         calls = len(self.provider.requests)
+        # An explicit subtree request must expose all its constraints in one
+        # response instead of forcing another inspection for every child field.
+        whole = self.tools.inspect(tool="harvestapi_get_company", field="inputSchema")["tool"]
+        self.assertEqual(whole, full["inputSchema"])
+        fields = self.tools.inspect(tool="harvestapi_get_company", field="inputSchema.fields")["tool"]
+        self.assertEqual(fields[0]["description"], description)
+        whole["jsonSchema"]["required"].append("not_a_real_input")
+        self.assertEqual(self.tools._description("harvestapi_get_company"), full)
         restored, offset = "", 0
         while offset is not None:
             page = self.tools.inspect(tool="harvestapi_get_company", field="inputSchema.fields.0.description", offset=offset)

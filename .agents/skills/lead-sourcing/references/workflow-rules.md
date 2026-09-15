@@ -257,10 +257,10 @@ reviewed company can remain parked while fresh discovery continues; do not
 invent another action to satisfy a checklist. Missing evidence never proves
 failed fit. No implicit timeout or minimum-spend target applies.
 
-Write version `1.2` results and use the helper's calculated costs in the report.
-Generate the workbook with the [documented exporter](output-contract.md#leadsxlsx-contract)
-and bundled dependencies. Run full strict validation on the finished artifacts;
-a successful helper call alone is not permission to deliver them.
+Use `tyche_finish` to write version `1.2` results, the workbook and report through
+the [existing exporter](output-contract.md#leadsxlsx-contract). It runs full strict
+validation and saved-file checks. Inspect the preview and require explicit
+`delivery_allowed: true`; do not assemble reports, rerun export, or copy costs by hand.
 
 ## Qualification policy
 

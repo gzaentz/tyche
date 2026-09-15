@@ -506,7 +506,7 @@ class ResearchTools:
         view["output_fields"] = [{k: f[k] for k in ("name", "type") if k in f}
                                  for f in output.get("fields", [])] if isinstance(output, dict) else []
         view["detail_note"] = ("Reuse this description. Long help/enum previews are abbreviated; inspect(tool=..., field=...) "
-            "reads the saved detail with offset/limit. Execution checks the full saved contract and price; refresh only after a contract/access change.")
+            "reads saved detail. Select field=inputSchema for complete inputs in one call, or a narrower object for its complete subtree; text/lists use offset/limit. Execution checks the full saved contract and price; refresh only after a contract/access change.")
         return view
 
     def _reference_choices(self, reference, target=None):
@@ -899,9 +899,9 @@ class ResearchTools:
                 return {"tool": value[offset:offset + 1800], "total_characters": len(value),
                         "next_offset": offset + 1800 if offset + 1800 < len(value) else None}
             if isinstance(value, list):
-                return {"tool": [contract_view(v, f"{field}.{i}") for i, v in enumerate(value[offset:offset + limit], offset)],
+                return {"tool": copy.deepcopy(value[offset:offset + limit]),
                         "total": len(value), "next_offset": offset + limit if offset + limit < len(value) else None}
-            return {"tool": contract_view(value, field)}
+            return {"tool": copy.deepcopy(value)}
         if query:
             result = runner.run_lookup(self.path, {"request": {"operation": "search", "query": query}}, execute=self._execute)
             return self._lookup_view(result, offset, limit)

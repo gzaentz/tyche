@@ -97,7 +97,7 @@ Report shortfalls; exhaustion does not prove an empty market.
 
 ## Full cost
 
-After exit, report launcher-refreshed provider, model, combined and per-lead costs; label estimates/unknowns.
+Use `tyche_finish` costs; the launcher adds final model totals after exit. Never read live usage events.
 
 ## References
 

@@ -1263,6 +1263,10 @@ invocation, including sourcing retries and continuations. The repository-root
 `scripts/run_costs.py` can recalculate it after reconciliation, as described in
 `docs/codex-isolated-testing.md`. The run cost includes provider calls and
 sourcing workers only; exclude outer chat, monitoring and development costs.
+The isolated worker uses the cost summary returned by `tyche_finish`; its final
+model usage cannot exist until it exits. Do not inspect live usage-event files
+or try to complete that accounting from inside the worker. The launcher refreshes
+the saved report afterward, and the outer caller reports those final run costs.
 Report the separate components, combined
 Standard API-equivalent estimate and per-accepted-lead estimate. If any component
 is missing, show the known subtotal and mark the full total incomplete; do not
