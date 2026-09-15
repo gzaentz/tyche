@@ -495,3 +495,9 @@ can claim continuation exhaustion. The agent must separately review each
 promising unresolved company and its next action or blocker; the validator
 checks recorded consistency, not real-world search completeness. Provider
 spending caps and client workbook columns remain unchanged.
+
+---
+
+<p align="center">
+  <img src="docs/assets/tyche-characters.svg" alt="Tyche rendered with Unicode block characters, wearing an ornate crown beside a child and a fruit-filled cornucopia." width="640">
+</p>
