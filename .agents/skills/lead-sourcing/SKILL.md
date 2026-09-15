@@ -56,10 +56,13 @@ or implementation-code reads. Resume saved work with `tyche_inspect()`.
    profile and email-verdict lookups close automatically. Review other used sources
    in `sources`, with their reason and continuation/exhaustion decision. For built-in
    web tools, include observed source objects in `web.response.results`.
-   Check `review_due`.
-   After two comparable attempts per company/phase without verified progress,
-   revisit the matching guide row/live catalog and change strategy before
-   repeating searches or claiming shortfall. Choose useful alternatives.
+   Check `review_due` and `strategy_review`. Reuse saved evidence first.
+   After two reviewed, comparable attempts fail to resolve the same evidence gap,
+   reassess using the matching tools.md row/live catalog. Choose a materially
+   different tool, source or research method; correcting a known input error can
+   also be useful. New keywords/pages alone are not necessarily a new strategy.
+   The reminder is advisory, not a retry limit or proof of exhaustion. Apply this
+   across research; the LLM chooses the next method, not a fixed provider sequence.
    Reopen evidence for gaps/contradictions; independent profile/email checks remain eligible.
 
 Use `tyche_inspect(ref=..., field=...)` for detail, `target=...` for state,

@@ -816,6 +816,8 @@ class ResearchTools:
                                         + required_attribute_errors(document["request"], row, runner._company_key(row)),
                              "reason": row.get("reason_text")})
         decision = runner.evaluate_stop(document, execution_budget=ledger)
+        strategy = runner.strategy_reminder(document)
+        strategy["items"] = strategy["items"][:3]
         completed = {r["route_id"] for r in document["routes"]}
         pending = [{"ref": r["route_id"], "target": r.get("scope"), "reason": r.get("reason")}
                    for r in document["stop_audit"].get("route_frontier", []) if r["route_id"] not in completed]
@@ -824,6 +826,7 @@ class ResearchTools:
                 "budget": {"cap_usd": ledger["usd_limit"], "costs": totals, "blocked": ledger.get("blocked")},
                 "pending": pending[:12],
                 "review_due": runner.review_reminder(document), "stop": decision["decision"], "errors": decision["errors"],
+                "strategy_review": strategy,
                 "completion_candidates": self._completion_candidates(document, decision),
                 "blocked_actions": decision.get("blocked_actions", {}), "operational_block": self._operational_block()}
 
@@ -958,10 +961,12 @@ class ResearchTools:
                 pending = runner.pending_source_reviews(self._document())
                 return {"items": pending[offset:offset + limit], "total": len(pending),
                         "next_offset": offset + limit if offset + limit < len(pending) else None}
+            if field == "strategy_review":
+                return {"value": runner.strategy_reminder(self._document())}
             try:
                 return {"value": compact(self._field(self._document(), field))}
             except ValueError as exc:
-                raise ValueError(f"input.field: {exc} Derived fields: requirements, costs, pending_sources.") from exc
+                raise ValueError(f"input.field: {exc} Derived fields: requirements, costs, pending_sources, strategy_review.") from exc
         return {"request": self._document()["request"], "requirements": request_requirements(self._document()["request"]),
                 "cached_descriptions": sorted({r["tool"] for r in self._document().get("routes", [])
                     if r.get("operation") == "describe" and r.get("provider_status") == "ok" and r.get("tool")}),

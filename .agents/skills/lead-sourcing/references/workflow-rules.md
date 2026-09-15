@@ -32,13 +32,15 @@ Command paths below are relative to the skill directory, not this reference.
   access change. Never invent a Deepline tool ID. Optional hypotheses such as
   PredictLeads events, HarvestAPI LinkedIn posts, TheirStack jobs/projects, or
   DiscoLike niche discovery are choices to test, not a mandatory fanout.
-- Choose economical research routes within the budget. Suitable native lookups
-  save provider responses automatically; prefer them when this avoids manual
-  source transfer. Built-in web remains available for useful gaps; record its
-  observed source objects, not serialized tool transcripts. Paid scraping is not free.
+- Choose economical research routes within the budget by expected evidence value,
+  coverage and total effort. Receipt convenience alone should not choose the source.
+  Native lookups save provider responses; built-in web observations use the existing
+  review tool. Record observed source objects, not serialized transcripts.
+  Web research still consumes model/tool usage; paid scraping is not free.
   Pilot company-discovery routes with at most 10 returned rows and one paid call.
-  Once an account passes, buy only 1-3 relevant contacts for that missing company
-  using native company/title filters and result limits. Do not buy a broad
+  Once an account passes, reuse relevant people already identified in saved sources.
+  Choose public research or structured search to fill the actual contact gap. When
+  using paid discovery, buy only 1-3 relevant contacts with scoped filters/limits. Do not buy a broad
   people batch to fill a few known company gaps. Code prices and protects the
   remaining email-verification work before further paid discovery or backups.
   Inspect rows, evidence, duplicates, misses, provider status, and cost before
@@ -47,8 +49,8 @@ Command paths below are relative to the skill directory, not this reference.
 - Do not begin contact lookup for a company until that company passes the
   account evidence gate. Start contact lookup as each company passes; there is
   no global account-count gate. For nuanced roles, prefer title-roster
-  discovery. Otherwise use broad function plus seniority and the complete
-  user-approved title family. A CEO is not an automatic fallback.
+  discovery. For structured search, use function/seniority and the complete
+  user-approved title family as appropriate. A CEO is not an automatic fallback.
 - Apply separate gates: an account needs current signal evidence that identifies
   the same company; a contact needs a current role and company identity that
   match the accepted company/domain and the requested role family. Apply the

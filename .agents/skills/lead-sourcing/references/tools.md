@@ -59,6 +59,9 @@ pain, layoffs or other request-specific activity missing from the table.
   `tyche_inspect(tool=...)` supplies cached inputs, access and pricing.
 - Start with sources suited to the missing fact. Reuse successful receipts.
   Inspect saved raw detail when summaries omit fields; do not pay again for it.
+- Use the shared strategy-change rule in [SKILL.md](../SKILL.md#research-loop)
+  when reviewed attempts stall. These rows offer alternatives, not a mandatory
+  provider order; public research and structured lookups are both valid choices.
 - Preserve source identity, dates and claim strength. No results means unknown,
   not failed fit. Catalog metadata and generated summaries are not evidence.
 
