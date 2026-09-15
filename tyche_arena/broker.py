@@ -11,6 +11,8 @@ import time
 import budget_guard
 import deepline
 
+PROVIDER_WAIT_SECONDS = 125  # PR #198: admission 20 + provider 60 + billing 30 + API grace 15.
+
 
 class BrokerError(RuntimeError):
     pass
@@ -37,9 +39,18 @@ class Broker:
         self.provider_blocked = False
 
     @staticmethod
-    def _receive(connection, size):
+    def _set_timeout(connection, deadline):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Arena provider response exceeded its wait limit")
+        connection.settimeout(remaining)
+
+    @staticmethod
+    def _receive(connection, size, *, deadline=None):
         result = bytearray()
         while len(result) < size:
+            if deadline is not None:
+                Broker._set_timeout(connection, deadline)
             part = connection.recv(min(size - len(result), 65536))
             if not part:
                 raise BrokerError("worker_unavailable: incomplete response; do not retry")
@@ -68,13 +79,15 @@ class Broker:
             raise ValueError("Arena request exceeds frame limit")
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-                connection.settimeout(remaining)
+                wait_deadline = min(self.deadline, time.monotonic() + PROVIDER_WAIT_SECONDS)
+                self._set_timeout(connection, wait_deadline)
                 connection.connect(self.socket_path)
+                self._set_timeout(connection, wait_deadline)
                 connection.sendall(len(frame).to_bytes(4, "big") + frame)
-                size = int.from_bytes(self._receive(connection, 4), "big")
+                size = int.from_bytes(self._receive(connection, 4, deadline=wait_deadline), "big")
                 if not 2 <= size <= 4 * 1048576:
                     raise BrokerError("Invalid Arena response size")
-                response = json.loads(self._receive(connection, size))
+                response = json.loads(self._receive(connection, size, deadline=wait_deadline))
         except (OSError, ValueError) as exc:
             # Dispatch may have billed. Never replay this request.
             raise BrokerError("Arena transport failed; do not retry the call") from exc

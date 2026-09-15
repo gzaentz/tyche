@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -208,6 +209,11 @@ def test_trigger_returns_reviewed_checkpoint_with_codex_configuration(lab):
     assert "service_tier" not in lab.config
     assert lab.config["mcp_servers"]["tyche"]["required"]
     assert "PYTHONPATH" in lab.config["mcp_servers"]["tyche"]["env_vars"]
+    assert "model_catalog_json" not in lab.config  # retain native Codex model behavior
+    assert "features.image_generation=false" in lab.processes[0].command
+    assert "agents.enabled=false" in lab.processes[0].command
+    assert "features.multi_agent_v2=false" in lab.processes[0].command
+    assert lab.config["model_auto_compact_token_limit"] == 16000
     assert lab.session_closed and len(lab.processes) == 1
     assert lab.processes[0].command[0] == "/usr/local/bin/codex"
     assert not (lab.research[0].research.path.parent / "leads.xlsx").exists()
@@ -317,3 +323,127 @@ def test_provider_deadlines_quotas_and_no_model_fallback(tmp_path):
     assert all(call["actual_credits"] is None for call in budget_guard.load_ledger(tools.path)["calls"].values())
     with pytest.raises(BrokerRefusal, match="blocked_after_uncertain"):
         broker.request("deepline.execute", args)
+
+
+def test_trickled_response_uses_one_absolute_wait_limit(monkeypatch):
+    from tyche_arena import broker
+
+    clock = iter([0.0, 0.4, 0.8, 1.2])
+    monkeypatch.setattr(broker.time, "monotonic", lambda: next(clock))
+    connection = SimpleNamespace(settimeout=lambda value: None, recv=lambda size: b"x")
+    with pytest.raises(TimeoutError, match="wait limit"):
+        Broker._receive(connection, 4, deadline=1.0)
+
+
+def test_connect_time_does_not_extend_the_provider_send_deadline(monkeypatch):
+    from tyche_arena import broker
+
+    now = [0.0]
+    monkeypatch.setattr(broker.time, "monotonic", lambda: now[0])
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def settimeout(self, value):
+            self.timeout = value
+
+        def connect(self, path):
+            now[0] = 120.0
+
+        def sendall(self, frame):
+            assert self.timeout == 5.0
+            raise TimeoutError("fixture send exceeded remaining time")
+
+    monkeypatch.setattr(broker.socket, "socket", lambda *args: Connection())
+    with pytest.raises(BrokerError, match="do not retry"):
+        Broker("/tmp/fixture.sock", 1000).request("deepline.execute", {"tool": "exa_search", "payload": {}})
+
+
+def test_runtime_requires_the_pinned_lab_helper(monkeypatch):
+    monkeypatch.setattr(runtime, "ROOT", Path("/agent/source"))
+    monkeypatch.setattr(Path, "is_socket", lambda self: True)
+    monkeypatch.setattr(runtime.os, "access", lambda *args: True)
+    for name in ("LAB_ARENA_WORKER_SOCKET", "LAB_ARENA_WEB_EGRESS_SOCKET"):
+        monkeypatch.setenv(name, "/run/lab_arena/" + name + ".sock")
+    monkeypatch.setenv("LAB_ARENA_OUTPUT_PATH", "/output/companies.json")
+    helper = SimpleNamespace(__file__="/agent/lab_arena_codex.py", CODEX_VERSION=runtime.CODEX_VERSION,
+                             CODEX_BINARY="/usr/local/bin/codex", session=lambda **kwargs: None)
+    checkpoint = SimpleNamespace(__file__="/agent/lab_arena_checkpoint.py")
+    monkeypatch.setattr(runtime.importlib, "import_module", lambda name: helper if name == "lab_arena_codex" else checkpoint)
+    assert runtime.require_lab() is helper
+    helper.CODEX_VERSION = "different-version"
+    with pytest.raises(RuntimeError, match="unavailable"):
+        runtime.require_lab()
+    helper.CODEX_VERSION = runtime.CODEX_VERSION
+    helper.__file__ = "/tmp/copied-lab-helper.py"
+    with pytest.raises(RuntimeError, match="unavailable"):
+        runtime.require_lab()
+
+
+def test_mcp_exits_when_its_parent_dies_despite_separate_process_group(tmp_path):
+    # Real Python processes, no Codex/Leadpoet/network. Reproduce Codex 0.154.0's
+    # process_group(0) MCP launcher, then abruptly kill the owning process.
+    marker = tmp_path / "child.json"
+    child_code = "\n".join([
+        "import json, os, sys, threading, time",
+        "from pathlib import Path",
+        "from tyche_arena.mcp import watch_parent",
+        "parent = os.getppid()",
+        "threading.Thread(target=watch_parent, args=(parent, threading.Event()), daemon=True).start()",
+        "Path(sys.argv[1]).write_text(json.dumps({'pid': os.getpid(), 'pgid': os.getpgrp(), 'parent': parent}))",
+        "time.sleep(90)",
+    ])
+    parent_code = "\n".join([
+        "import subprocess, sys, time",
+        "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]], start_new_session=True)",
+        "time.sleep(90)",
+    ])
+    environment = {**os.environ, "PYTHONPATH": str(ROOT)}
+    parent = subprocess.Popen([sys.executable, "-c", parent_code, child_code, str(marker)],
+                              env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    child = None
+    try:
+        # Startup is not the behavior under test; allow a loaded CI/desktop
+        # host to initialize Python within the production MCP startup budget.
+        deadline = time.monotonic() + 30
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert marker.exists(), "fixture child did not initialize"
+        child = json.loads(marker.read_text())
+        assert child["parent"] == parent.pid and child["pgid"] == child["pid"]
+        parent.kill()
+        # The orphan holds both inherited pipes until watch_parent exits it.
+        stdout, stderr = parent.communicate(timeout=5)
+        assert not stderr, stderr.decode()
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+        parent.wait(timeout=5)
+        if child:
+            try:
+                os.kill(child["pid"], signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        parent.stdout.close()
+        parent.stderr.close()
+
+
+def test_checkpoint_failure_never_reports_delivery(lab, monkeypatch):
+    def failed_write(rows):
+        raise OSError("fixture output mount is unavailable")
+
+    monkeypatch.setattr(sys.modules["lab_arena_checkpoint"], "write", failed_write)
+    with pytest.raises(OSError, match="output mount"):
+        runtime.run(ICP)
+    assert not lab.output.exists()
+    assert lab.research[0].delivered is False
+
+
+def test_final_review_has_time_for_two_brokered_model_responses():
+    # PR #198's complete model socket wait can be 185s per turn. Final packet
+    # review and approval must both fit after research stops on a shortfall.
+    assert runtime.RUN_SECONDS - runtime.RESEARCH_SECONDS >= 2 * 185 + 30

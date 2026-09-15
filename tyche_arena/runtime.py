@@ -19,7 +19,8 @@ from research_tools import ResearchTools
 
 MODEL = "openai/gpt-5.6-luna"
 REASONING_EFFORT = "xhigh"
-RESEARCH_SECONDS = 2640
+CODEX_VERSION = "0.154.0"
+RESEARCH_SECONDS = 2250
 RUN_SECONDS = 2670
 MAX_LOG_BYTES = 64 * 1024
 
@@ -42,6 +43,7 @@ def require_lab():
     if (Path(runtime.__file__).resolve() != Path("/agent/lab_arena_codex.py")
             or Path(checkpoint.__file__).resolve() != Path("/agent/lab_arena_checkpoint.py")
             or not callable(getattr(runtime, "session", None))
+            or getattr(runtime, "CODEX_VERSION", None) != CODEX_VERSION
             or runtime.CODEX_BINARY != "/usr/local/bin/codex"
             or not os.access(runtime.CODEX_BINARY, os.X_OK)):
         raise RuntimeError("The host-mounted PR #198 Codex runtime is unavailable")
@@ -105,6 +107,8 @@ def launch(runtime, run_dir, deadline, remaining):
             incoming.seek(0)
             process = subprocess.Popen(
                 [runtime.CODEX_BINARY, "exec", "--skip-git-repo-check", "--ephemeral", "--color", "never",
+                 "-c", "features.image_generation=false", "-c", "agents.enabled=false",
+                 "-c", "features.multi_agent_v2=false",
                  "-C", str(run_dir), "-o", str(run_dir / "final.txt"), "-"],
                 stdin=incoming, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 env=environment, start_new_session=True,

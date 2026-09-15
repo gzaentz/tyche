@@ -46,6 +46,15 @@ def lab_tools():
 LAB_TOOLS = lab_tools()
 
 
+def watch_parent(parent_pid, stopped):
+    """Codex launches MCP in its own process group; follow its lifetime too."""
+    while not stopped.wait(0.25):
+        if parent_pid <= 1 or os.getppid() != parent_pid:
+            # An interrupted call retains its saved reservation. Never let an
+            # orphan keep spending or publish a late checkpoint after Codex dies.
+            os._exit(1)
+
+
 def model_result(result):
     encoded = json.dumps(result, ensure_ascii=True)
     if len(encoded) <= 24000:
@@ -87,17 +96,23 @@ class LabTools:
 def main():
     from .runtime import require_lab
 
+    parent_pid = os.getppid()
     require_lab()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-file", type=Path, required=True)
     parser.add_argument("--deadline", type=float, required=True)
     args = parser.parse_args()
+    stopped = threading.Event()
+    watcher = threading.Thread(target=watch_parent, args=(parent_pid, stopped), daemon=True)
+    watcher.start()
     session = LabTools(args.run_file, args.deadline)
     try:
         # Already isolated by the lab. Do not use the local Codex sandbox relay.
         serve(session, tools=LAB_TOOLS)
     finally:
         session.broker.stopped.set()
+        stopped.set()
+        watcher.join(timeout=1)
 
 
 if __name__ == "__main__":
