@@ -333,6 +333,11 @@ def save_report(run_directory, results_path=None):
     results_path = Path(results_path) if results_path is not None else directory / 'results.json'
     results = json.loads(results_path.read_text()) if results_path.exists() else {}
     output = report(results, sorted((directory / 'model-usage').glob('*.json')), directory)
+    ledger_path = results_path.with_name(results_path.name + '.budget.json')
+    if ledger_path.exists():
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '.agents/skills/lead-sourcing/scripts'))
+        import budget_guard
+        output['provider_accounting'] = budget_guard.accounting_summary(budget_guard.load_ledger(results_path))
     path = directory / 'run-costs.json'
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(output, indent=2) + '\n', encoding='utf-8')
@@ -379,8 +384,18 @@ def write_research_report(directory, results, costs, commentary):
         f"Workbook checked: {validation.get('completed_at', 'unavailable')}.",
         f"Time to leads: {elapsed(clock.get('leads_ready_at'))}. Time to checked workbook: {elapsed(validation.get('completed_at'))}.",
         '', '## Research commentary', '', commentary.strip(), '', '## Run-only costs', '']
-    for label, key in [('Provider USD (confirmed / maximum)', 'provider_usd'),
-                       ('Worker models, Standard API equivalent USD', 'worker_standard_api_equivalent_usd'),
+    accounting = costs.get('provider_accounting')
+    if accounting:
+        for provider, totals in accounting['providers'].items():
+            if provider == 'deepline' or totals['maximum_usd'] or totals['unresolved_calls']:
+                lines.append(f"- {provider}: ${totals['billed_usd']:.4f} billed; "
+                    f"${totals['unresolved_reserved_usd']:.4f} unresolved reservations; "
+                    f"${totals['maximum_usd']:.4f} total budget coverage.")
+        lines.append('- Reservations are not charges. Billing discrepancies: ' + str(len(accounting['billing_issues'])) +
+                     '; details are in run-costs.json.')
+    else:
+        lines.append('- Provider USD (confirmed / maximum, including reservations): ' + json.dumps(costs.get('provider_usd')) + '.')
+    for label, key in [('Worker models, Standard API equivalent USD', 'worker_standard_api_equivalent_usd'),
                        ('Combined Standard API equivalent USD', 'combined_standard_equivalent_usd'),
                        ('Cost per accepted lead, Standard API equivalent USD', 'cost_per_accepted_lead_standard_equivalent_usd')]:
         value = costs.get(key)

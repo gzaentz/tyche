@@ -435,6 +435,33 @@ def audit_ledger(run_file, document, *, state=None, allow_unbound=False):
     return errors
 
 
+def accounting_summary(state):
+    """Report observed bills separately from unresolved call reservations."""
+    providers = {}
+    issues = []
+    for provider in PROVIDERS:
+        billed = reserved = Decimal(0)
+        unresolved = 0
+        for rid, call in state["calls"].items():
+            if call["provider"] != provider:
+                continue
+            rate = amount(state["usd_per_credit"][provider], "USD rate")
+            proof = call.get("billing_evidence", {})
+            credits = call["actual_credits"] if call["actual_credits"] is not None else proof.get("credits")
+            observed = (amount(call["actual_usd"], "billed USD") if call["actual_usd"] is not None else
+                        amount(credits, "billed credits") * rate if credits is not None else Decimal(0))
+            billed += observed
+            if call["actual_credits"] is None:
+                reserved += max(Decimal(0), amount(call["maximum_credits"], "call reservation") * rate - observed)
+                unresolved += 1
+            if call.get("billing_issue"):
+                issues.append({"route_id": rid, "request_id": proof.get("request_id"), "issue": call["billing_issue"]})
+        providers[provider] = {"billed_usd": float(billed), "unresolved_reserved_usd": float(reserved),
+                               "maximum_usd": float(billed + reserved), "unresolved_calls": unresolved}
+    return {"providers": providers, "billing_issues": issues,
+            "note": "Billed amounts are provider observations as of reconciliation. Unresolved reservations are budget coverage, not charges. Missing billing is never zero; research receipts and original caps are retained."}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("results", help="existing results.json, before the first paid call")

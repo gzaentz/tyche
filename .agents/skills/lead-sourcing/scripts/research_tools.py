@@ -177,7 +177,6 @@ class ResearchTools:
         self.deliver = deliver
         self.readonly = readonly
         self.environment = dict(os.environ if environment is None else environment)
-        self._billing_checked = False
         self._review_packet_ref = None
         self._catalog_lock = threading.RLock()
         self._review_lock = threading.RLock()
@@ -1068,12 +1067,13 @@ class ResearchTools:
         return review
 
     def _cost_summary(self):
+        accounting = budget.accounting_summary(budget.load_ledger(self.path))
         path = self.path.parent / "run-costs.json"
         if path.exists():
             report = budget.read_object(path)
-            return {k: report.get(k) for k in ("status", "scope", "basis", "provider_usd",
-                "worker_standard_api_equivalent_usd", "combined_standard_equivalent_usd", "missing", "limitations")}
-        return {"provider": runner.calculate_cost_summary(self._document()),
+            return {"provider_accounting": accounting, **{k: report.get(k) for k in ("status", "scope", "basis", "provider_usd",
+                "worker_standard_api_equivalent_usd", "combined_standard_equivalent_usd", "missing", "limitations")}}
+        return {"provider": runner.calculate_cost_summary(self._document()), "provider_accounting": accounting,
                 "model": "Final run-only model usage closes after worker exit; the launcher refreshes the cost report."}
 
     def review_delivery(self, document, review_ref=None):
@@ -1118,9 +1118,7 @@ class ResearchTools:
             return self.inspect()
         if self.execute is None:
             from billing_reconciliation import reconcile
-            fresh = not self._billing_checked
-            self._billing_checked = True
-            reconcile(self.path, refresh=fresh)
+            reconcile(self.path, refresh=review_ref is not None)
         blocker = self._operational_block()
         if blocker:
             return self._blocked_result(blocker)

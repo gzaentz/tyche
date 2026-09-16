@@ -136,10 +136,18 @@ the same observation is safe; replacing it with different content is rejected.
 
 `recover` never redispatches: it finishes recording a saved normalized receipt.
 An outcome marked `recorded: true` is already saved; repeated recovery cannot
-settle unknown billing. At finish, one bounded read-only billing lookup can match
-posted charges by request ID and operation. Unmatched, ambiguous or pending
-charges keep their reservations. A later resume permits a fresh bounded read.
-Original research receipts are preserved.
+settle unknown billing. At finish, code matches billing by saved request ID,
+provider and catalog-backed operation aliases. It accepts posted charges and
+explicit free outcomes; missing billing is never zero. A returned result billed
+as a miss/zero units is recorded as observed billing with an issue, while its
+reservation remains. `inspect(field="costs")` and the saved report separate
+billed USD from unresolved reserved USD. Grouped/ambiguous charges remain
+reserved rather than being assigned twice.
+
+Billing reads use a 30-second timeout and at most three attempts per saved call
+set, including across restarts. A failed read gets one immediate retry; pending
+billing can be rechecked after 60 seconds or at final approval within that same
+limit. No paid research is repeated, and original receipts/caps are preserved.
 If only a pending or raw response survived, retain the reservation and reconcile
 it locally through diagnostics. Never retry an uncertain paid call. Explicit
 `sources` reviews retain the existing continuation/exhaustion rules; saving a
