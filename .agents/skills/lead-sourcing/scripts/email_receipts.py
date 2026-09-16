@@ -215,7 +215,10 @@ def email_work(action, request):
     payload = request.get("payload", request)
     addon = any(str(value).casefold() in {"true", "1"} for key, value in payload.items()
                 if re.sub(r"[^a-z]", "", key.casefold()) in {"findemail", "enrichemail", "includeemail"})
-    return bool(validator_for_tool(tool) or addon or action.get("phase") == "email_validation"
+    # A selected, reviewed profile explicitly identifies email work even when
+    # the provider calls its operation a domain/person search. The caller still
+    # verifies that receipt and role before dispatch or reserving spending.
+    return bool(action.get("contact_ref") or validator_for_tool(tool) or addon or action.get("phase") == "email_validation"
                 or "email" in tool.casefold() and not words & {"balance", "credits"})
 
 

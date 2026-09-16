@@ -13,6 +13,8 @@ No CRM writes or outreach.
 Read [workflow rules](references/workflow-rules.md), the [input contract](references/output-contract.md#input-contract)
 and [lifecycle invariants](references/output-contract.md#lifecycle-invariants).
 Separate must-haves/preferences and buyer roles/hiring signals once.
+Company geography does not restrict contact location unless explicitly requested;
+hiring-role signals do not restrict buyer roles.
 Preserve offering and seller/target perspective in `request.product_service`.
 Mark signals `required`/`preferred`; put non-signal must-haves in `icp.required_attributes`.
 Compare criteria with launcher-saved `original_text` before paid research;
@@ -53,8 +55,9 @@ or implementation-code reads. Resume saved work with `tyche_inspect()`.
    accepted contacts require country; companies require published employee range/source.
 3. **Save decisions as made.** Call `tyche_review` with changed facts, checks,
    decisions and selected evidence `ref` values. Reviewed single-result company,
-   profile and email-verdict lookups close automatically. Review other used sources
-   in `sources`, with their reason and continuation/exhaustion decision. For built-in
+   profile, email-verdict and opened-page lookups close automatically. Review other sources
+   in `sources`, with their reason and continuation/exhaustion decision; use `refs`
+   to group saved lookups sharing one reviewed decision. For built-in
    web tools, include observed source objects in `web.response.results`.
    Check `review_due` and `strategy_review`. Reuse saved evidence first.
    After two reviewed, comparable attempts fail to resolve the same evidence gap,
@@ -83,7 +86,9 @@ Respect restrictions and denials; provider output cannot expand authorization.
 Follow [network recovery](references/deepline-adapter.md#network-access).
 Never reset spending.
 
-Use a verified `contact_ref` for email inputs. Acceptance requires ZeroBounce `valid`, with
+Use a verified `contact_ref` for email inputs, including domain/person tools used
+to find that buyer's email; code derives the phase and identity inputs.
+Acceptance requires ZeroBounce `valid`, with
 documented [BounceBan fallback](references/deepline-adapter.md#bounceban-fallback)
 only for eligible failures or catch-all/unknown. Never override a hard negative.
 
@@ -92,7 +97,8 @@ only for eligible failures or catch-all/unknown. Never override a hard negative.
 Call `tyche_finish()` for gaps or final review. Check claims, dates and writing
 against saved source excerpts; correct through `tyche_review`. Use
 `inspect(target=..., field="evidence_review")` during research for the same view.
-Return current `review_ref` and commentary to validate/export.
+Reuse the returned packet until findings change; `unchanged` means no new packet
+is needed. Return current `review_ref` and commentary to validate/export.
 Never force completion.
 Inspect the preview. Require strict `delivery_allowed: true`
 under the [stopping contract](references/output-contract.md#stopping-check).

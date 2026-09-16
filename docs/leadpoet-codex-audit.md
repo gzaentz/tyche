@@ -18,7 +18,7 @@ TYCHE now supports reviewed partial checkpoints during research. The existing
 Arena cutoff receiver at `8f12c82e` accepts its last valid pre-deadline checkpoint
 even after sandbox timeout. See [partial completion](leadpoet-arena.md#partial-completion-at-the-45-minute-deadline)
 for the behavior and offline coverage. The latest TYCHE checks passed 24 adapter
-tests and 79 shared research tests, with one optional workbook-runtime test
+tests and 84 shared research tests, with one optional workbook-runtime test
 skipped. The deployed TYCHE trigger, accepted partial output and scoring still
 need a bounded live integration check.
 

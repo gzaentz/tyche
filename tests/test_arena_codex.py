@@ -510,6 +510,14 @@ def test_checkpoint_needs_current_review_and_can_be_updated(lab, monkeypatch):
         assert packet["status"] == "review_required"
         assert packet["companies"] and packet["sources"]
         assert not lab.output.exists()
+        def unexpected_rebuild(*args):
+            raise AssertionError("Do not rebuild an unchanged review packet")
+        with monkeypatch.context() as unchanged:
+            unchanged.setattr(tools.research, "_company_review", unexpected_rebuild)
+            repeated = tools.call("tyche_checkpoint", {})
+        assert repeated["unchanged"] and repeated["review_ref"] == packet["review_ref"]
+        assert not repeated["delivery_allowed"] and not repeated.get("checkpoint_saved")
+        assert "companies" not in repeated and not lab.output.exists()
         changed = PARAGRAPH + " Better coordination may support fulfillment reliability."
         tools.call("tyche_review", {"companies": [{"target": "example.com", "decision": "accept",
             "reason": "Clarified the conditional relevance", "intent_details": changed}]})
