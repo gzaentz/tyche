@@ -41,6 +41,8 @@ class FixtureProvider:
         if request["operation"] != "execute":
             key = "email" if tool in {"zerobounce_validate", "bounceban_verify_single"} else "url" if tool.startswith("harvestapi") else "website" if tool == "aviato_get_company_funding_rounds" else "query"
             fields = ["first_name", "last_name", "domain"] if tool in {"fixture_email_finder", "hunter_email_finder"} else [key]
+            if tool in {"hunter_domain_search", "findymail_find_from_domain", "search_contact"}:
+                fields = ["domain"]
             return {"provider": "deepline", "operation": request["operation"], "status": "ok", "results": [{
                 "toolId": tool, "callable": True, "connected": True,
                 "inputSchema": {"fields": [{"name": field, "required": True, "type": "string"} for field in fields],
@@ -261,6 +263,94 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(contact["requested_role"], "Chief Executive Officer")
         self.assertEqual(contact["role_group"], "primary")
         self.assertEqual(json.loads(self.path.read_text())["request"]["requested_roles"], self.request["requested_roles"])
+
+    def test_selected_contact_identifies_email_work_without_provider_name_heuristics(self):
+        self.start()
+        ref = self.selected_contact()
+        self.provider.raw = {"status": "ok", "data": {"email": "ada@example.test"}}
+        for tool in ("hunter_domain_search", "findymail_find_from_domain", "search_contact"):
+            spec = check(tool=tool, contact_ref=ref, inputs={})
+            spec.pop("phase")
+            self.lookup(spec)
+            sent = self.provider.requests[-1]
+            self.assertEqual(sent["payload"], {"domain": "example.test"})
+            route = json.loads(self.path.read_text())["routes"][-1]
+            self.assertEqual(route["phase"], "contact_discovery")
+        before = budget.ledger_path(self.path).read_bytes()
+        with self.assertRaisesRegex(ValueError, "profile|contact_ref|identity"):
+            self.lookup(check(tool="search_contact", contact_ref="not-a-profile:0", inputs={}))
+        self.assertEqual(before, budget.ledger_path(self.path).read_bytes())
+        profiles = [r for r in self.provider.requests if r.get("operation") == "execute" and r.get("tool") == "harvestapi_get_profile"]
+        self.assertEqual(len(profiles), 1)
+
+    def test_saved_employer_selects_current_role_without_refetching_profile(self):
+        self.start()
+        self.selected_contact()
+        person = self.provider.raw["element"]
+        person["linkedinUrl"] = "https://www.linkedin.com/in/another-buyer/"
+        person["currentPosition"].append({"companyName": "OtherCo", "title": "Advisor",
+            "companyLinkedinUrl": "https://www.linkedin.com/company/otherco/"})
+        result = self.lookup(check(phase="contact_verification", tool="harvestapi_get_profile",
+            inputs={"url": person["linkedinUrl"]}))["lookups"][0]
+        ref = result["results"][0]["ref"]
+        calls = len(self.provider.requests)
+        # Replaying an older request with no employer context must work too.
+        raw, source, receipt = self.tools._resolve(ref)
+        request = dict(receipt["attempt"]["request"])
+        request.pop("target_company_linkedin_url", None)
+        old, _ = deepline.normalize_response(request, receipt["provider_response"])
+        self.assertEqual(old["results"][0]["position_review"], "ambiguous")
+        self.assertEqual(raw["contact_title"], "Head of Payments")
+        self.tools.review(companies=[{"target": "example.test", "decision": "hold_contact", "reason": "Employer matched",
+            "primary_contact": {"ref": ref, "requested_role": "Head of Payments", "role_match": "exact"}}])
+        saved = json.loads(self.path.read_text())["unresolved"][0]["primary_contact"]
+        self.assertEqual((saved["company"], saved["current_title"]), ("ExamplePay", "Head of Payments"))
+        self.assertEqual(len(self.provider.requests), calls)
+
+    def test_native_verified_buyer_clears_stall_but_later_email_gap_is_distinct(self):
+        self.start()
+        self.selected_contact()
+        document = json.loads(self.path.read_text())
+        person = document["unresolved"][0].pop("primary_contact")
+        before = runner.progress_snapshot(document)
+        document["routes"] = [dict(route_id=str(i), scope="example.test", phase="contact_discovery",
+            tool="fixture-search", provider_status="ok", approach="people search", progress_before=before) for i in range(2)]
+        document["stop_audit"]["route_frontier"] = [dict(route_id=str(i), state="exhausted", reason="Read results") for i in range(2)]
+        self.assertEqual(runner.strategy_reminder(document)["count"], 1)
+        document["unresolved"][0]["primary_contact"] = person
+        self.assertEqual(runner.strategy_reminder(document)["count"], 0)
+        self.assertTrue(any(":buyer:" in f for f in runner.progress_snapshot(document)))
+        for route in document["routes"]:
+            route["progress_before"] = runner.progress_snapshot(document)
+        reminder = runner.strategy_reminder(document)
+        self.assertEqual(reminder["items"][0]["remaining_work"], "verified buyer contact details")
+
+    def test_source_group_saves_explicit_decisions_without_closing_unreviewed_work(self):
+        self.start()
+        results = [self.lookup(check(tool="fixture-search", inputs={"query": str(i)}, approach=f"independent source {i}"))["lookups"][0] for i in range(3)]
+        refs = [r["route"] for r in results[:2]]
+        self.tools.call("tyche_review", {"sources": [{"refs": refs, "state": "exhausted", "reason": "Read both; no further page"}]})
+        pending = self.tools.inspect(field="pending_sources")["items"]
+        self.assertEqual([r["ref"] for r in pending], [results[2]["route"]])
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            self.tools.review(sources=[{"ref": refs[0], "refs": refs, "state": "exhausted", "reason": "Invalid selection"}])
+        self.assertEqual(before, self.path.read_bytes())
+        with self.assertRaisesRegex(ValueError, r"input.sources\[0\].refs\[1\].*Saved choices"):
+            self.tools.call("tyche_review", {"sources": [{"refs": [results[2]["route"], "missing-lookup"],
+                "state": "exhausted", "reason": "Unknown receipt must not partially close the group"}]})
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_selected_open_page_closes_once_but_search_results_stay_open(self):
+        self.start()
+        for operation in ("open", "search_query"):
+            result = self.tools.review(companies=[{"target": "example.test", "decision": "hold_account", "reason": "Reviewed fit only",
+                "account_fit": {"ref": "web:0:0"}}], web=[{"target": "example.test", "purpose": "Read source",
+                "query": operation, "operation": operation, "response": {"status": "ok", "results": [
+                    {"url": "https://example.test/about", "text": "Provides payments infrastructure"}]}}])
+            rid = result["web_references"]["web:0"]
+            pending = self.tools.inspect(field="pending_sources")["items"]
+            self.assertEqual(rid in [r["ref"] for r in pending], operation == "search_query")
 
     def test_email_reference_removes_clinical_credentials_without_editing_profile(self):
         self.start()
@@ -1516,6 +1606,12 @@ class ResearchToolTests(unittest.TestCase):
         self.assertEqual(packet["request"], saved["request"])
         self.assertEqual(packet["request"]["original_text"], original.read_text())
         self.assertFalse((self.path.parent / "leads.xlsx").exists())
+        with patch.object(self.tools, "_company_review", side_effect=AssertionError("Do not rebuild an unchanged packet")):
+            repeated = self.tools.finish()
+        self.assertEqual(repeated["review_ref"], packet["review_ref"])
+        self.assertTrue(repeated["unchanged"])
+        self.assertFalse(repeated["delivery_allowed"])
+        self.assertNotIn("companies", repeated)
         revised_signal = {"criterion": "recent integration", "importance": "required", "status": "pass",
             "claim": "The integration announcement is supported", "signal": row["signal_evidence"]["signal"],
             "evidence": [{"ref": "web:0:0"}]}

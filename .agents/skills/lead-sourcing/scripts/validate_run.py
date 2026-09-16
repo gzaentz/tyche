@@ -325,7 +325,9 @@ def progress_snapshot(document: dict) -> list[str]:
                     facts.add(f"{key}:evidence:{_identity(check.get('criterion'))}")
             contact = row.get("primary_contact", row.get("candidate", {}))
             if (isinstance(contact, dict) and contact.get("full_name")
-                    and contact.get("current_title") and contact.get("evidence")):
+                    and contact.get("current_title")
+                    and (contact.get("evidence") or (contact.get("profile_ref")
+                         and contact.get("source") and contact.get("location_evidence")))):
                 facts.add(f"{key}:buyer:{_identity(contact['full_name'])}")
     return sorted(facts)
 

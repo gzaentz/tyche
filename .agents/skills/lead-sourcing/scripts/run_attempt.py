@@ -159,12 +159,15 @@ def strategy_reminder(document):
                 and route.get("provider_status") in {"ok", "no_results"}):
             groups.setdefault(key, []).append(route)
     items = []
+    progress = progress_snapshot(document)
     for (scope, phase), routes in groups.items():
         pair = routes[-2:]
         if (len(pair) != 2 or any(r["route_id"] not in reviewed for r in pair)
                 or not stalled_approaches(document, pair[-1])):
             continue
         items.append({"target": scope, "phase": phase,
+                      "remaining_work": "verified buyer contact details" if phase == "contact_discovery"
+                          and any(f.startswith(scope + ":buyer:") for f in progress) else phase,
                       "sources": [r["route_id"] for r in pair],
                       "tools": list(dict.fromkeys(r.get("tool") or r.get("provider") for r in pair))})
     result = {"count": len(items), "items": items}

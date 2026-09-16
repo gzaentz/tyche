@@ -43,6 +43,9 @@ it. A retry refreshes failed free catalog reads while preserving the clock.
 `contact_verification`, and `email_validation`. `provider` defaults to Deepline.
 For recognized email finders and validators, omit `phase`; code derives it from
 the selected operation without changing providers or spending eligibility.
+For any provider tool used to find a reviewed buyer's email, supply `contact_ref`;
+this also identifies email work for domain/person searches. Code verifies the
+saved identity and supplies compatible native identity inputs before spending.
 For ScrapingDog, pass `provider: "scrapingdog"` and its wrapper input in `inputs`.
 `approach` may name a stable strategy. Unknown pricing still needs a verified
 whole-call `max_cost_credits`; ScrapingDog also needs its plan conversion at start.
@@ -79,6 +82,13 @@ Progress's `review_due` and finalization's `pending_sources` come from the same
 open saved lookups, including discovery. Use `tyche_inspect(field="pending_sources")`
 with `offset`/`limit` to page them. Review the existing receipts; do not repeat a
 lookup just to record a decision. Closed aliases do not create review reminders.
+Use `sources: [{"refs": [...], "state": "exhausted", "reason": "..."}]` when
+several saved lookups share one actual review decision. Unselected sources stay
+open. A selected single-result opened page closes with its evidence review;
+search results and pagination still require an explicit decision.
+Reuse a returned final review packet until findings change. Repeated finish
+calls return `unchanged: true` with the same `review_ref`, without duplicating
+the packet or approving it. A resumed tool session can return the full packet.
 
 Evidence refs expand into saved source/URL/date/text. Usually use `{"ref":"..."}`
 and put the qualification judgment in its `claim`, without copying source fields
@@ -134,7 +144,7 @@ If only a pending or raw response survived, retain the reservation and reconcile
 it locally through diagnostics. Never retry an uncertain paid call. Explicit
 `sources` reviews retain the existing continuation/exhaustion rules; saving a
 company does not exhaust search results or pagination. Selecting and saving a
-successful single-result company getter, profile getter or email verdict closes
+successful single-result company getter, profile getter, email verdict or opened page closes
 that individual lookup automatically. Pending jobs and multi-result lookups
 retain explicit review. A `valid` email on a catch-all
 domain stays valid; fallback eligibility is checked before spending.
