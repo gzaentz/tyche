@@ -1,8 +1,9 @@
 # TYCHE in the Leadpoet lab
 
-**Promotion remains unverified:** PR #198's original native protocol blockers
-were addressed upstream through `8f12c82e`, but the full upstream CI run failed
-and the deployed lab journey has not been exercised. See
+**Promotion remains unverified:** PR #198 at `2db3958` passes its native protocol
+checks, full test suite and gateway/Arena image builds in
+[upstream CI](https://github.com/leadpoet/leadpoet/actions/runs/35040315045).
+The deployed lab journey has not been exercised. See
 [the compatibility audit](leadpoet-codex-audit.md) for the historical findings
 and upstream acceptance checks. Offline delivery tests do not establish
 compatibility with a deployed broker or guarantee sourcing quality.
@@ -145,7 +146,8 @@ and baseline promotion process; do not install the desktop launcher in the lab.
 
 Before enabling a round, Leadpoet PR #198 needs passing required checks, then
 merge and deployment of its Codex-equipped image and cost-reconciliation
-migration. Its migration-number collision with main must be resolved upstream.
+migration `263-lab-arena-codex-cost-reconciliation.sql`. The migration-number
+collision is resolved in PR #198; its SQL is unchanged.
 The selected round must admit the model and install this source bundle's
 dependency. Existing rounds retain their frozen baseline. This TYCHE PR does
 not deploy, promote a baseline, change subnet infrastructure, or modify PR #198.
@@ -160,7 +162,9 @@ python3 scripts/refresh_arena_catalog.py /path/to/leadpoet
 
 The initial protocol audit used PR #198 commit
 `2558d4bc418046ac9146c7992032405034150601`; checkpoint cutoff and scoring behavior
-were also read at `8f12c82ed47dd7553ea986133fdfee84158675ad`. Session signatures, mounted paths,
+were also read at `8f12c82ed47dd7553ea986133fdfee84158675ad`. The CI repair diff
+through `2db39588bdf6f6cad8d9ccbfef2026eeeef6a546` preserves that runtime contract.
+Session signatures, mounted paths,
 Responses allowlist/limits, provider frames, checkpoint writer and receiver
 input/output contracts were read as source, without importing or executing Leadpoet.
 

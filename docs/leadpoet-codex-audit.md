@@ -4,21 +4,29 @@
 
 The protocol findings below describe PR #198 at `2558d4bc`, not its current
 head. Upstream fixes through `8f12c82e` address the native protocol and helper
-boundary, and its native Codex CI checks passed. The full upstream CI run
-[still failed](https://github.com/leadpoet/leadpoet/actions/runs/35030279128),
-so promotion remains unverified. No deployed lab sourcing/scoring journey was run.
+boundary, and its native Codex CI checks passed. CI repairs through `2db3958`
+preserve the runtime contract, resolve the migration collision using number 263,
+and add a build of the actual Arena Codex image.
+[Upstream CI at `2db3958`](https://github.com/leadpoet/leadpoet/actions/runs/35040315045)
+passed: 6,920 full-suite tests, 283 subtests, the separate 63-test native Codex
+group, the signer check, and both gateway and Arena image builds. The full suite
+skipped 15 tests; the native group skipped its real gVisor probe, which needs the
+Linux sandbox environment. No deployed lab sourcing/scoring journey was run,
+so promotion remains unverified.
 
 TYCHE now supports reviewed partial checkpoints during research. The existing
 Arena cutoff receiver at `8f12c82e` accepts its last valid pre-deadline checkpoint
 even after sandbox timeout. See [partial completion](leadpoet-arena.md#partial-completion-at-the-45-minute-deadline)
-for the behavior and offline coverage. This does not resolve the remaining
-upstream CI or deployment requirements.
+for the behavior and offline coverage. The latest TYCHE checks passed 24 adapter
+tests and 79 shared research tests, with one optional workbook-runtime test
+skipped. The deployed TYCHE trigger, accepted partial output and scoring still
+need a bounded live integration check.
 
 ## Original audit decision
 
-**Keep the Codex architecture, but do not merge/promote this as ready for the
-current PR #198.** TYCHE uses the actual Codex CLI, its native model instructions,
-code-mode engine and MCP tools. The remaining blocker is Leadpoet's admitted
+**Keep the Codex architecture, but do not merge/promote the audited `2558d4bc`
+revision as ready.** TYCHE uses the actual Codex CLI, its native model instructions,
+code-mode engine and MCP tools. The blocker at that revision was Leadpoet's admitted
 model protocol. Replacing Codex with PydanticAI, adding a second model client,
 or changing Luna's metadata to impersonate another model would not meet the
 agreed goal.
@@ -57,7 +65,7 @@ This is an abbreviated diagnostic, not a valid request example. The captured
 native tool tree reaches depth 16, measured with the operation parameters at
 depth zero. The enclosing worker frame adds another level.
 
-| Native behavior observed | Current PR #198 contract | Result |
+| Native behavior observed | Audited PR #198 contract at `2558d4bc` | Result |
 | --- | --- | --- |
 | `reasoning.context: "all_turns"` | Only `effort` and `summary` | Rejected |
 | `input[].type: "additional_tools"` | Six admitted message/call/reasoning item kinds | Rejected |
@@ -78,8 +86,9 @@ Sources:
 - [PR #198 worker document limits](https://github.com/leadpoet/leadpoet/blob/2558d4bc418046ac9146c7992032405034150601/lab_arena/contracts.py): independently validates the enclosing frame.
 - [PR #198 bridge](https://github.com/leadpoet/leadpoet/blob/2558d4bc418046ac9146c7992032405034150601/lab_arena/lab_arena_codex.py): forwards the native body after removing stateless transport/telemetry fields; it does not adapt these protocols.
 
-PR #198's native test uses `openai/gpt-4o-mini`, which takes a different metadata
-path in Codex. Its shell-call test does not establish compatibility for Luna's
+At the original audit revision, PR #198's native test uses `openai/gpt-4o-mini`,
+which takes a different metadata path in Codex. Its shell-call test does not
+establish compatibility for Luna's
 code-mode/MCP loop. An experimental direct-tool model profile was also rejected
 on MCP namespaces; that workaround is not included in TYCHE.
 
@@ -132,7 +141,16 @@ local cleanup; requests already dispatched remain subject to host accounting.
   local workbook generation, arbitrary observed web evidence and Fast service
   tier are outside this lab adapter. It is not identical to a desktop session.
 
-## Required work in PR #198 before readiness
+## Original upstream requirements and remaining verification
+
+Requirement 1 and the configurable output-token limit in 4 are implemented
+upstream and covered by native Codex CI. The helper defaults to 16,384 output
+tokens and admits up to 32,768 while preserving separate Chat/judge limits.
+For requirement 3, upstream CI runs native Luna/high with two scripted MCP calls
+and forced compaction. The complete TYCHE Luna/xhigh bundle in the deployed lab
+still needs verification, along with live OpenRouter behavior and sourcing
+quality in 2, 4 and 5. The original requirements are retained below to explain
+the audit and its acceptance criteria.
 
 1. Define and validate the native Luna protocol end to end: Responses Lite,
    namespaced tool schemas/calls, typed text tool outputs and bounded nesting.
@@ -159,10 +177,10 @@ TYCHE compacts at 16,000 reported input tokens and caps tool output. These are
 useful bounds, but token count is not the same as PR #198's 128-item limit or
 32,000-character field limit. Host admission must remain the final authority.
 
-## Reproducing the offline checks
+## Reproducing the original offline checks
 
-Results: 15 adapter tests passed; two native Codex tests passed (ordinary
-continuation and forced compaction); one native contract case was an explicit
+At the original audit revision: 15 adapter tests passed; two native Codex tests
+passed (ordinary continuation and forced compaction); one native contract case was an explicit
 expected failure. The staged bundle contained 36 exact source matches and
 passed isolated import/local-refusal checks. Previously passed shared research
 checks remain applicable: 75 passed, one optional workbook-runtime test skipped;
@@ -179,8 +197,8 @@ fixture host session and a fixture MCP implementation behind the real shared
 tool schemas. It replaces the lab-only startup guard, so it can run locally.
 Only its scripted `tyche_inspect` implementation executes; it cannot source leads.
 
-The rejecting case reports an explicit expected failure for PR #198. The
-permissive scripted cases prove native Codex/code-mode/MCP continuation and
+The rejecting case reports an explicit expected failure for the original
+PR #198 contract. The permissive scripted cases prove native Codex/code-mode/MCP continuation and
 compaction, not that PR #198 currently accepts them. JSON request diagnostics
 are saved under pytest's temporary test directory. No live credentials are
 inherited by the native process.
